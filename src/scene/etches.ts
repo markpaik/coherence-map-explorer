@@ -20,7 +20,11 @@ const COURSE_FONT_URL = "/fonts/space-grotesk-600-course.typeface.json";
 const FACE_COLOR = 0x34315e;
 const SIDE_COLOR = 0x16142e;
 const GRADE_SIZE = 26;
-const COURSE_SIZE = 15; // longer words, smaller type
+// Sized so the longest same-rank neighbors (GEOMETRY / ADVANCED) clear each
+// other over their narrow arcs: at 11 units their half-widths sum to ~60 vs
+// ~74 units of center separation. 15 was measurably too wide (labels collided
+// from oblique angles).
+const COURSE_SIZE = 11;
 const DEPTH = 5;
 
 // Course display text (Appendix A traditional pathway).

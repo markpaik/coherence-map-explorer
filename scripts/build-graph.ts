@@ -1000,10 +1000,12 @@ export function buildGraph(): BuildResult {
       const [lo, hi] = subColInterval(hsBand, i);
       const cx = round2((lo + hi) / 2);
       // Two ranks: long course names over narrow sub-bands collide when they
-      // share one ground line, so odd-indexed labels step back and down.
+      // share one ground line, so odd-indexed labels step decisively back and
+      // down (-56/-14 with the smaller course type clears every pairing from
+      // oblique camera angles, not just head-on).
       const rank = i % 2;
-      const zOff = rank * -40;
-      const yOff = rank * -16;
+      const zOff = rank * -56;
+      const yOff = rank * -14;
       courseMarkers.push({
         id: c,
         label: COURSE_LABELS[c],
