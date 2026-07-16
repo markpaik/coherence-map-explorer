@@ -1,0 +1,511 @@
+{
+ "source": "CCSS Appendix A, Traditional Pathway (Algebra I, Geometry, Algebra II) \u2014 Common Core State Standards for Mathematics, Appendix A: Designing High School Mathematics Courses Based on the Common Core State Standards (2011)",
+ "notes": "Mapping built directly from CCSS Appendix A's Traditional Pathway overview table (pp. 9-14) and the detailed course-by-course standard listings for Algebra I (pp. 15-27), Geometry (pp. 28-39), and Algebra II (pp. 40-48), cross-checked page-by-page against both the Oregon Department of Education's hosted copy of Appendix A and the original document structure. Confidence is HIGH for course placement (this is a direct transcription of Appendix A's own tables, not an inference), with the following caveats. (1) Appendix A explicitly states the pathways are MODELS, not mandates \u2014 states and districts are encouraged to adapt them, and an alternative Integrated Pathway (Math I/II/III) reorganizes the same content differently. This traditional-pathway placement is one defensible reading, not the only one. (2) Standards marked (+) are 'additional mathematics that students should learn in order to take advanced courses' and are 'not necessarily expected to be addressed on high stakes assessments' per Appendix A's own legend; where Appendix A places a (+) standard inside Algebra II or Geometry's own course tables (e.g. N-CN.8, N-CN.9, A-APR.5, A-APR.7, G-C.4, S-CP.8, S-CP.9, G-SRT.9/10/11), it is mapped to that course but should be read as optional/enrichment within it. Where Appendix A instead places a (+) standard only in its separate 'Fourth Courses' column (beyond Algebra II/Geometry), it is listed in 'unmapped' rather than force-fit into A1/G/A2. (3) Modeling standards (\u2605) are distributed throughout the standards that use them in context (Appendix A: 'Modeling is best interpreted not as a collection of isolated topics but in relation to other standards'); they are mapped to whichever course(s) their host standard belongs to, not treated as a separate category. (4) Several standards are explicitly revisited across two courses in Appendix A itself (e.g. A-CED.1-4, A-SSE.1/1a/1b/2, A-APR.1, A-REI.11, F-IF.4/5/6/7b/7e/8/9, F-BF.1b/3/4/4a taught at a basic level in Algebra I and a more complex level in Algebra II) \u2014 these carry both course tags. (5) One genuine judgment call: Appendix A's Algebra I detail lists F-IF.8 with explicit sub-parts 8a and 8b, while its Algebra II detail restates only the bare F-IF.8 stem (no a/b breakout) even though the overview summary table's Algebra II column lists bare '8' (implying the whole standard). We mapped the F-IF.8 stem to both Algebra I and Algebra II, but mapped 8a/8b narrowly to Algebra I only, since that is where the sub-parts are explicitly spelled out in the source document; a reasonable alternate reading would put 8a/8b in both courses as well. (6) S-MD (Using Probability to Make Decisions) standards are entirely absent from this map because the coherence map's HS dataset does not include any S-MD codes among its 163 nodes; per Appendix A, S-MD is almost entirely (+) / Fourth-Course content in the Traditional Pathway, so its absence from the dataset is consistent with Appendix A's own design. (7) Second source used for cross-check: the Pennsylvania Department of Education's hosted copy of the same Appendix A document (structurally identical to Oregon's, both being verbatim re-postings of the national CCSS Initiative PDF), plus the CCSS writing team's own commentary (Bill McCallum, lead writer, 'Arranging the high school standards into courses,' Tools for the Common Core blog) confirming Appendix A is one of several possible course arrangements and that some states/districts deviate from it (e.g. moving probability into Geometry differently, or shifting exponential-function standards between Algebra I and Algebra II) \u2014 no disagreements were found on the core standard-to-course assignments transcribed here; the commentary source discusses alternate scope-and-sequence proposals rather than disputing Appendix A's own tables.",
+ "courses": {
+  "A1": "Algebra I",
+  "G": "Geometry",
+  "A2": "Algebra II"
+ },
+ "map": {
+  "A-APR.A.1": [
+   "A1",
+   "A2"
+  ],
+  "A-APR.B.2": [
+   "A2"
+  ],
+  "A-APR.B.3": [
+   "A2"
+  ],
+  "A-APR.C.4": [
+   "A2"
+  ],
+  "A-APR.C.5": [
+   "A2"
+  ],
+  "A-APR.D.6": [
+   "A2"
+  ],
+  "A-APR.D.7": [
+   "A2"
+  ],
+  "A-CED.A.1": [
+   "A1",
+   "A2"
+  ],
+  "A-CED.A.2": [
+   "A1",
+   "A2"
+  ],
+  "A-CED.A.3": [
+   "A1",
+   "A2"
+  ],
+  "A-CED.A.4": [
+   "A1",
+   "A2"
+  ],
+  "A-REI.A.1": [
+   "A1"
+  ],
+  "A-REI.A.2": [
+   "A2"
+  ],
+  "A-REI.B.3": [
+   "A1"
+  ],
+  "A-REI.B.4": [
+   "A1"
+  ],
+  "A-REI.B.4.a": [
+   "A1"
+  ],
+  "A-REI.B.4.b": [
+   "A1"
+  ],
+  "A-REI.C.5": [
+   "A1"
+  ],
+  "A-REI.C.6": [
+   "A1"
+  ],
+  "A-REI.C.7": [
+   "A1"
+  ],
+  "A-REI.D.10": [
+   "A1"
+  ],
+  "A-REI.D.11": [
+   "A1",
+   "A2"
+  ],
+  "A-REI.D.12": [
+   "A1"
+  ],
+  "A-SSE.A.1": [
+   "A1",
+   "A2"
+  ],
+  "A-SSE.A.1.a": [
+   "A1",
+   "A2"
+  ],
+  "A-SSE.A.1.b": [
+   "A1",
+   "A2"
+  ],
+  "A-SSE.A.2": [
+   "A1",
+   "A2"
+  ],
+  "A-SSE.B.3": [
+   "A1"
+  ],
+  "A-SSE.B.3.a": [
+   "A1"
+  ],
+  "A-SSE.B.3.b": [
+   "A1"
+  ],
+  "A-SSE.B.3.c": [
+   "A1"
+  ],
+  "A-SSE.B.4": [
+   "A2"
+  ],
+  "F-BF.A.1": [
+   "A1",
+   "A2"
+  ],
+  "F-BF.A.1.a": [
+   "A1"
+  ],
+  "F-BF.A.1.b": [
+   "A1",
+   "A2"
+  ],
+  "F-BF.A.2": [
+   "A1"
+  ],
+  "F-BF.B.3": [
+   "A1",
+   "A2"
+  ],
+  "F-BF.B.4": [
+   "A1",
+   "A2"
+  ],
+  "F-BF.B.4.a": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.A.1": [
+   "A1"
+  ],
+  "F-IF.A.2": [
+   "A1"
+  ],
+  "F-IF.A.3": [
+   "A1"
+  ],
+  "F-IF.B.4": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.B.5": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.B.6": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.C.7": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.C.7.a": [
+   "A1"
+  ],
+  "F-IF.C.7.b": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.C.7.c": [
+   "A2"
+  ],
+  "F-IF.C.7.e": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.C.8": [
+   "A1",
+   "A2"
+  ],
+  "F-IF.C.8.a": [
+   "A1"
+  ],
+  "F-IF.C.8.b": [
+   "A1"
+  ],
+  "F-IF.C.9": [
+   "A1",
+   "A2"
+  ],
+  "F-LE.A.1": [
+   "A1"
+  ],
+  "F-LE.A.1.a": [
+   "A1"
+  ],
+  "F-LE.A.1.b": [
+   "A1"
+  ],
+  "F-LE.A.1.c": [
+   "A1"
+  ],
+  "F-LE.A.2": [
+   "A1"
+  ],
+  "F-LE.A.3": [
+   "A1"
+  ],
+  "F-LE.A.4": [
+   "A2"
+  ],
+  "F-LE.B.5": [
+   "A1"
+  ],
+  "F-TF.A.1": [
+   "A2"
+  ],
+  "F-TF.A.2": [
+   "A2"
+  ],
+  "F-TF.B.5": [
+   "A2"
+  ],
+  "F-TF.C.8": [
+   "A2"
+  ],
+  "G-C.A.1": [
+   "G"
+  ],
+  "G-C.A.2": [
+   "G"
+  ],
+  "G-C.A.3": [
+   "G"
+  ],
+  "G-C.A.4": [
+   "G"
+  ],
+  "G-C.B.5": [
+   "G"
+  ],
+  "G-CO.A.1": [
+   "G"
+  ],
+  "G-CO.A.2": [
+   "G"
+  ],
+  "G-CO.A.3": [
+   "G"
+  ],
+  "G-CO.A.4": [
+   "G"
+  ],
+  "G-CO.A.5": [
+   "G"
+  ],
+  "G-CO.B.6": [
+   "G"
+  ],
+  "G-CO.B.7": [
+   "G"
+  ],
+  "G-CO.B.8": [
+   "G"
+  ],
+  "G-CO.C.10": [
+   "G"
+  ],
+  "G-CO.C.11": [
+   "G"
+  ],
+  "G-CO.C.9": [
+   "G"
+  ],
+  "G-CO.D.12": [
+   "G"
+  ],
+  "G-CO.D.13": [
+   "G"
+  ],
+  "G-GMD.A.1": [
+   "G"
+  ],
+  "G-GMD.A.3": [
+   "G"
+  ],
+  "G-GMD.B.4": [
+   "G"
+  ],
+  "G-GPE.A.1": [
+   "G"
+  ],
+  "G-GPE.A.2": [
+   "G"
+  ],
+  "G-GPE.B.4": [
+   "G"
+  ],
+  "G-GPE.B.5": [
+   "G"
+  ],
+  "G-GPE.B.6": [
+   "G"
+  ],
+  "G-GPE.B.7": [
+   "G"
+  ],
+  "G-MG.A.1": [
+   "G"
+  ],
+  "G-MG.A.2": [
+   "G"
+  ],
+  "G-MG.A.3": [
+   "G"
+  ],
+  "G-SRT.A.1": [
+   "G"
+  ],
+  "G-SRT.A.1.a": [
+   "G"
+  ],
+  "G-SRT.A.1.b": [
+   "G"
+  ],
+  "G-SRT.A.2": [
+   "G"
+  ],
+  "G-SRT.A.3": [
+   "G"
+  ],
+  "G-SRT.B.4": [
+   "G"
+  ],
+  "G-SRT.B.5": [
+   "G"
+  ],
+  "G-SRT.C.6": [
+   "G"
+  ],
+  "G-SRT.C.7": [
+   "G"
+  ],
+  "G-SRT.C.8": [
+   "G"
+  ],
+  "G-SRT.D.10": [
+   "G"
+  ],
+  "G-SRT.D.11": [
+   "G"
+  ],
+  "G-SRT.D.9": [
+   "G"
+  ],
+  "N-CN.A.1": [
+   "A2"
+  ],
+  "N-CN.A.2": [
+   "A2"
+  ],
+  "N-CN.C.7": [
+   "A2"
+  ],
+  "N-CN.C.8": [
+   "A2"
+  ],
+  "N-CN.C.9": [
+   "A2"
+  ],
+  "N-Q.A.1": [
+   "A1"
+  ],
+  "N-Q.A.2": [
+   "A1"
+  ],
+  "N-Q.A.3": [
+   "A1"
+  ],
+  "N-RN.A.1": [
+   "A1"
+  ],
+  "N-RN.A.2": [
+   "A1"
+  ],
+  "N-RN.B.3": [
+   "A1"
+  ],
+  "S-CP.A.1": [
+   "G"
+  ],
+  "S-CP.A.2": [
+   "G"
+  ],
+  "S-CP.A.3": [
+   "G"
+  ],
+  "S-CP.A.4": [
+   "G"
+  ],
+  "S-CP.A.5": [
+   "G"
+  ],
+  "S-CP.B.6": [
+   "G"
+  ],
+  "S-CP.B.7": [
+   "G"
+  ],
+  "S-CP.B.8": [
+   "G"
+  ],
+  "S-CP.B.9": [
+   "G"
+  ],
+  "S-IC.A.1": [
+   "A2"
+  ],
+  "S-IC.A.2": [
+   "A2"
+  ],
+  "S-IC.B.3": [
+   "A2"
+  ],
+  "S-IC.B.4": [
+   "A2"
+  ],
+  "S-IC.B.5": [
+   "A2"
+  ],
+  "S-IC.B.6": [
+   "A2"
+  ],
+  "S-ID.A.1": [
+   "A1"
+  ],
+  "S-ID.A.2": [
+   "A1"
+  ],
+  "S-ID.A.3": [
+   "A1"
+  ],
+  "S-ID.A.4": [
+   "A2"
+  ],
+  "S-ID.B.5": [
+   "A1"
+  ],
+  "S-ID.B.6": [
+   "A1"
+  ],
+  "S-ID.B.6.a": [
+   "A1"
+  ],
+  "S-ID.B.6.b": [
+   "A1"
+  ],
+  "S-ID.B.6.c": [
+   "A1"
+  ],
+  "S-ID.C.7": [
+   "A1"
+  ],
+  "S-ID.C.8": [
+   "A1"
+  ],
+  "S-ID.C.9": [
+   "A1"
+  ]
+ },
+ "unmapped": [
+  "F-BF.B.4.b",
+  "F-BF.B.4.c",
+  "F-BF.B.4.d",
+  "F-BF.B.5",
+  "F-IF.C.7.d",
+  "F-TF.A.3",
+  "F-TF.A.4",
+  "F-TF.B.6",
+  "F-TF.B.7",
+  "F-TF.C.9",
+  "G-GMD.A.2",
+  "G-GPE.A.3",
+  "N-CN.A.3",
+  "N-CN.B.4",
+  "N-CN.B.5",
+  "N-CN.B.6"
+ ],
+ "unmappedReasons": {
+  "F-BF.B.4.b": "(+) Fourth Course only",
+  "F-BF.B.4.c": "(+) Fourth Course only",
+  "F-BF.B.4.d": "(+) Fourth Course only",
+  "F-BF.B.5": "(+) Fourth Course only",
+  "F-IF.C.7.d": "(+) Fourth Course only (rational functions)",
+  "F-TF.A.3": "(+) Fourth Course only",
+  "F-TF.A.4": "(+) Fourth Course only",
+  "F-TF.B.6": "(+) Fourth Course only",
+  "F-TF.B.7": "(+) Fourth Course only",
+  "F-TF.C.9": "(+) optional Algebra II extension, not core",
+  "G-GMD.A.2": "(+) Fourth Course only",
+  "G-GPE.A.3": "(+) Fourth Course only",
+  "N-CN.A.3": "(+) Fourth Course only",
+  "N-CN.B.4": "(+) Fourth Course only",
+  "N-CN.B.5": "(+) Fourth Course only",
+  "N-CN.B.6": "(+) Fourth Course only"
+ }
+}

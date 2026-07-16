@@ -14,8 +14,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import opentype from "opentype.js";
 
 const SRC = new URL("../public/fonts/space-grotesk-latin-600-normal.woff", import.meta.url);
-const OUT = new URL("../public/fonts/space-grotesk-600.typeface.json", import.meta.url);
-const CHARS = "K12345678HS";
+
+// Two subsets: the grade digits/K, and the letters the HS course arc labels
+// need (ALGEBRA I / GEOMETRY / ALGEBRA II / ADVANCED + space).
+const TARGETS = [
+  { out: "../public/fonts/space-grotesk-600.typeface.json", chars: "K12345678HS" },
+  { out: "../public/fonts/space-grotesk-600-course.typeface.json", chars: "ABCDEGILMNORTVY " },
+];
 
 const font = opentype.parse(readFileSync(SRC).buffer);
 

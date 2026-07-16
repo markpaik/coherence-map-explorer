@@ -114,13 +114,59 @@ describe("node geometry", () => {
   it("every node has a valid strand", () => {
     for (const n of core.nodes) expect(strands.has(n.strand)).toBe(true);
   });
-  it("every node has finite positions inside its band x-interval", () => {
+  it("pose A (constellation): finite positions inside each grade band's x-interval", () => {
     for (const n of core.nodes) {
       for (const v of n.pos) expect(Number.isFinite(v)).toBe(true);
       const b = bandById[n.grade];
       expect(n.pos[0]).toBeGreaterThanOrEqual(b.x0 - 0.01);
       expect(n.pos[0]).toBeLessThanOrEqual(b.x1 + 0.01);
     }
+  });
+  it("pose B (ascent): every prerequisite edge points upward (depth invariant)", () => {
+    const nodeById = new Map(
+      core.nodes.map((n) => [n.id, n as OutNode & { pos2: number[]; depth: number }]),
+    );
+    for (const n of core.nodes as (OutNode & { pos2?: number[]; depth?: number })[]) {
+      expect(n.pos2 && n.pos2.length === 3).toBe(true);
+      for (const v of n.pos2!) expect(Number.isFinite(v)).toBe(true);
+      expect(Number.isInteger(n.depth)).toBe(true);
+      // x is shared between poses: the timeline survives the unravel.
+      expect(n.pos2![0]).toBeCloseTo(n.pos[0], 1);
+    }
+    let maxDepth = 0;
+    for (const e of core.edges) {
+      if (e.k !== 0) continue;
+      const s = nodeById.get(e.s)!;
+      const t = nodeById.get(e.t)!;
+      expect(t.depth).toBeGreaterThan(s.depth);
+      expect(t.pos2[1]).toBeGreaterThan(s.pos2[1]);
+      maxDepth = Math.max(maxDepth, t.depth);
+    }
+    expect(maxDepth).toBe(30); // the deepest prerequisite chain in the CCSS
+  });
+  it("assigns every HS standard to Appendix A courses (69/52/26/16 primary, 23 dual)", () => {
+    const hs = core.nodes.filter((n) => n.grade === "HS") as (OutNode & {
+      courses?: string[];
+    })[];
+    expect(hs.length).toBe(163);
+    const primary: Record<string, number> = {};
+    let dual = 0;
+    for (const n of hs) {
+      expect(n.courses && n.courses.length > 0).toBe(true);
+      primary[n.courses![0]] = (primary[n.courses![0]] ?? 0) + 1;
+      if (n.courses!.length > 1) dual++;
+    }
+    expect(primary).toEqual({ A1: 69, G: 52, A2: 26, ADV: 16 });
+    expect(dual).toBe(23);
+    // K-8 nodes never carry courses.
+    expect(core.nodes.some((n) => n.grade !== "HS" && (n as { courses?: string[] }).courses)).toBe(false);
+  });
+  it("emits spiral markers: K-8 grade etches + 4 course arcs", () => {
+    const withMarkers = core.grades.filter((g) => (g as { marker?: number[] }).marker);
+    expect(withMarkers.map((g) => g.id)).toEqual(["K", "1", "2", "3", "4", "5", "6", "7", "8"]);
+    const courses = (core as unknown as { courses: { id: string; marker: number[] }[] }).courses;
+    expect(courses.map((c) => c.id)).toEqual(["A1", "G", "A2", "ADV"]);
+    for (const c of courses) for (const v of c.marker) expect(Number.isFinite(v)).toBe(true);
   });
 });
 

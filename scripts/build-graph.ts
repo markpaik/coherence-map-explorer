@@ -138,17 +138,23 @@ interface OutNode {
   wap: boolean;
   modeling: boolean;
   deg: number;
-  pos: [number, number, number];
+  pos: [number, number, number]; // pose A: the constellation
+  pos2: [number, number, number]; // pose B: the Ascent (y = dependency depth)
+  /** Longest prerequisite chain beneath this standard (0 = foundation). */
+  depth: number;
   /** Sub-standard ids (e.g. 4.NF.B.3 -> its .a-.d), code-derived; omitted when none. */
   children?: string[];
   /** Parent standard id for a sub-standard; omitted at top level. */
   parent?: string;
+  /** HS only: Appendix A traditional-pathway membership, e.g. ["A1","A2"]. */
+  courses?: string[];
 }
 interface OutEdge {
   s: string;
   t: string;
   k: 0 | 1;
-  c: [number, number, number];
+  c: [number, number, number]; // bezier control, constellation pose
+  c2: [number, number, number]; // bezier control, ascent pose
 }
 interface GraphCore {
   meta: {
@@ -158,7 +164,21 @@ interface GraphCore {
     source: string;
     license: string;
   };
-  grades: { id: Grade; label: string; x0: number; x1: number }[];
+  grades: {
+    id: Grade;
+    label: string;
+    x0: number;
+    x1: number;
+    marker?: [number, number, number]; // constellation pose etch
+    marker2?: [number, number, number]; // ascent pose etch
+  }[];
+  /** HS course arc labels (Appendix A traditional pathway), markers per pose. */
+  courses: {
+    id: string;
+    label: string;
+    marker: [number, number, number];
+    marker2: [number, number, number];
+  }[];
   strands: Record<Strand, { label: string }>;
   nodes: OutNode[];
   edges: OutEdge[];
@@ -238,6 +258,35 @@ function fixUrl(url: string): string {
 
 function isDeadImage(url: string): boolean {
   return linkFixes.deadImagePatterns.some((p) => url.includes(p));
+}
+
+// HS traditional-pathway course map (scripts/hs-course-map.json, derived from
+// CCSS Appendix A's Traditional Pathway tables — see its source/notes fields).
+// The dump's own course-framework fields are vestigial (all zeros), so this
+// vendored mapping is the authority. Standards in both A1 and A2 are placed at
+// their FIRST course and carry the full membership in `courses` (the panel
+// says "revisited in Algebra II"). The 16 (+) fourth-course standards form an
+// "ADV" shelf at the spiral's rim.
+interface HsCourseMap {
+  map: Record<string, string[]>;
+  unmapped: string[];
+  courses: Record<string, string>;
+}
+const hsCourses: HsCourseMap = JSON.parse(
+  readFileSync(resolve(HERE, "hs-course-map.json"), "utf-8"),
+);
+const COURSE_ORDER = ["A1", "G", "A2", "ADV"] as const;
+const COURSE_LABELS: Record<string, string> = {
+  A1: "Algebra I",
+  G: "Geometry",
+  A2: "Algebra II",
+  ADV: "Advanced",
+};
+function hsCoursesOf(code: string): string[] {
+  if (hsCourses.unmapped.includes(code)) return ["ADV"];
+  const m = hsCourses.map[code];
+  if (m?.length) return m;
+  throw new Error(`[build-graph] HS code ${code} missing from hs-course-map.json`);
 }
 
 /**
@@ -456,7 +505,6 @@ interface Params {
   bandWidth: number;
   bandGapRatio: number;
   hsWidthMultiplier: number;
-  hsSubColumns: string[];
   bandMargin: number;
   radius: number;
   isolatedRadius: number;
@@ -476,6 +524,7 @@ interface Params {
   alphaMin: number;
   velocityDecay: number;
   ctrl: { push: number; jitter: number; nearAxisEpsilon: number };
+  ascent: { yStep: number; yBase: number; zScale: number };
 }
 
 interface SimNode {
@@ -595,15 +644,26 @@ export function buildGraph(): BuildResult {
     b.center += shift;
   }
 
-  function hsSubColumn(ord: string): number {
-    const idx = params.hsSubColumns.indexOf(ord[0]);
-    assert(idx >= 0, `HS domain ordinal ${ord} has no sub-column mapping`);
-    return idx;
+  // HS sub-bands are the Traditional Pathway course sequence (A1, G, A2, ADV),
+  // with widths proportional to how many standards live primarily in each —
+  // the outer arc of the spiral literally becomes Algebra I -> Geometry ->
+  // Algebra II -> advanced rim.
+  const coursePrimaryCount = new Map<string, number>(COURSE_ORDER.map((c) => [c, 0]));
+  for (const courses of Object.values(hsCourses.map)) {
+    coursePrimaryCount.set(courses[0], (coursePrimaryCount.get(courses[0]) ?? 0) + 1);
+  }
+  coursePrimaryCount.set("ADV", hsCourses.unmapped.length);
+  const courseTotal = [...coursePrimaryCount.values()].reduce((a, b) => a + b, 0);
+  const courseBounds: number[] = [0];
+  for (const c of COURSE_ORDER) {
+    courseBounds.push(courseBounds[courseBounds.length - 1] + (coursePrimaryCount.get(c) ?? 0) / courseTotal);
+  }
+  function hsSubColumn(code: string): number {
+    return COURSE_ORDER.indexOf(hsCoursesOf(code)[0] as (typeof COURSE_ORDER)[number]);
   }
   function subColInterval(band: Band, subCol: number): [number, number] {
-    const n = params.hsSubColumns.length;
-    const w = (band.x1 - band.x0) / n;
-    return [band.x0 + subCol * w, band.x0 + (subCol + 1) * w];
+    const w = band.x1 - band.x0;
+    return [band.x0 + courseBounds[subCol] * w, band.x0 + courseBounds[subCol + 1] * w];
   }
 
   // --- Build node metadata --------------------------------------------------
@@ -627,7 +687,7 @@ export function buildGraph(): BuildResult {
     const d = domains[c.ccmathdomain_id];
     const grade = d.grade as Grade;
     const strand = strandOf(d.ordinal)!;
-    const subCol = grade === "HS" ? hsSubColumn(d.ordinal) : -1;
+    const subCol = grade === "HS" ? hsSubColumn(codeById.get(s.id)!) : -1;
     const clusterCode =
       grade === "HS"
         ? `${d.ordinal}.${c.ordinal}`
@@ -865,21 +925,103 @@ export function buildGraph(): BuildResult {
     ]);
   }
 
-  // Overrides (applied last)
+  // Overrides (applied last, in pre-macro-form space)
   for (const [code, xyz] of Object.entries(overrides)) {
     const id = [...codeById.entries()].find(([, c]) => c === code)?.[0];
     if (id) pos.set(id, xyz);
   }
 
-  // --- 8. Edge control points ----------------------------------------------
-  function controlPoint(s: string, t: string, srcStrand: Strand): [number, number, number] {
+  // --- 7b. Pose B: the Ascent ------------------------------------------------
+  // Two poses ship per node. Pose A (`pos`) is the band-relaxed constellation
+  // — the explorable galaxy. Pose B (`pos2`) is the Ascent, the canonical
+  // layered drawing of the partial order itself: x keeps the grade/course
+  // timeline, z keeps the relaxed cross-section, and y becomes the standard's
+  // longest-prerequisite-chain depth — a graph invariant, so every standard
+  // rests physically above everything it builds on and every prerequisite
+  // edge points upward. Stories and the Gaps simulator unravel the
+  // constellation into this pose; a view toggle offers it to everyone.
+  const depthById = new Map<string, number>();
+  {
+    // Longest-path layering over the prereq DAG (Kahn order, then relax).
+    const indegD = new Map<string, number>();
+    for (const id of validIds) {
+      indegD.set(id, 0);
+      depthById.set(id, 0);
+    }
+    for (const e of prereq) indegD.set(e.t, indegD.get(e.t)! + 1);
+    const succD = new Map<string, string[]>();
+    for (const e of prereq) {
+      if (!succD.has(e.s)) succD.set(e.s, []);
+      succD.get(e.s)!.push(e.t);
+    }
+    const queue = [...validIds].filter((id) => indegD.get(id) === 0).sort(numAsc);
+    while (queue.length) {
+      const u = queue.shift()!;
+      for (const v of succD.get(u) ?? []) {
+        depthById.set(v, Math.max(depthById.get(v)!, depthById.get(u)! + 1));
+        indegD.set(v, indegD.get(v)! - 1);
+        if (indegD.get(v) === 0) queue.push(v);
+      }
+    }
+  }
+  const A = params.ascent;
+  const pos2 = new Map<string, [number, number, number]>();
+  for (const [id, p] of pos) {
+    pos2.set(id, [p[0], A.yBase + depthById.get(id)! * A.yStep, p[2] * A.zScale]);
+  }
+
+  // Markers, both poses: constellation etches stand below the bands (as
+  // before); ascent etches stand along the ground line of the massif.
+  const gradeMarkers = new Map<Grade, { a: [number, number, number]; b: [number, number, number] }>();
+  for (const [g, b] of bands) {
+    if (g === "HS") continue; // labeled by courses instead
+    gradeMarkers.set(g, {
+      a: [round2(b.center), -240, 0],
+      b: [round2(b.center), A.yBase - 34, 0],
+    });
+  }
+  const courseMarkers: {
+    id: string;
+    label: string;
+    marker: [number, number, number];
+    marker2: [number, number, number];
+  }[] = [];
+  {
+    const hsBand = bands.get("HS")!;
+    COURSE_ORDER.forEach((c, i) => {
+      const [lo, hi] = subColInterval(hsBand, i);
+      const cx = round2((lo + hi) / 2);
+      courseMarkers.push({
+        id: c,
+        label: COURSE_LABELS[c],
+        marker: [cx, -240, 0],
+        marker2: [cx, A.yBase - 34, 0],
+      });
+    });
+  }
+
+  // --- 8. Edge control points, both poses -------------------------------------
+  // Pose A (constellation): bow radially outward from the grade axis, exactly
+  // the field the original art gate approved. Pose B (ascent): bow gently
+  // upward and forward so arcs read as load paths climbing the structure.
+  // One seeded jitter value per edge is shared by both poses so the morph
+  // between them never changes an arc's character, only its frame.
+  function controlPoints(
+    s: string,
+    t: string,
+    srcStrand: Strand,
+  ): { c: [number, number, number]; c2: [number, number, number] } {
+    const jitterU = rng() * 2 - 1; // one draw per edge — POSES MUST SHARE IT
+    // Pose A
     const a = pos.get(s)!;
     const b = pos.get(t)!;
-    const mx = (a[0] + b[0]) / 2;
-    const my = (a[1] + b[1]) / 2;
-    const mz = (a[2] + b[2]) / 2;
-    const chord = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-    const push = params.ctrl.push * chord;
+    {
+      var mx = (a[0] + b[0]) / 2;
+      var my = (a[1] + b[1]) / 2;
+      var mz = (a[2] + b[2]) / 2;
+    }
+    const chordA = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    const pushA = params.ctrl.push * chordA;
     const rr = Math.hypot(my, mz);
     let dy: number, dz: number;
     if (rr < params.ctrl.nearAxisEpsilon) {
@@ -891,15 +1033,30 @@ export function buildGraph(): BuildResult {
       dy = my / rr;
       dz = mz / rr;
     }
-    // Perpendicular (in YZ plane) for jitter.
     const py = -dz;
     const pz = dy;
-    const jit = push * params.ctrl.jitter * (rng() * 2 - 1);
-    return [
+    const jitA = pushA * params.ctrl.jitter * jitterU;
+    const c: [number, number, number] = [
       round2(mx),
-      round2(my + dy * push + py * jit),
-      round2(mz + dz * push + pz * jit),
+      round2(my + dy * pushA + py * jitA),
+      round2(mz + dz * pushA + pz * jitA),
     ];
+    // Pose B: same midpoint recipe in ascent space, bowing upward (+y) with
+    // lateral (z) jitter — arcs vault over the layers they skip.
+    const a2 = pos2.get(s)!;
+    const b2 = pos2.get(t)!;
+    const m2x = (a2[0] + b2[0]) / 2;
+    const m2y = (a2[1] + b2[1]) / 2;
+    const m2z = (a2[2] + b2[2]) / 2;
+    const chordB = Math.hypot(a2[0] - b2[0], a2[1] - b2[1], a2[2] - b2[2]);
+    const pushB = params.ctrl.push * chordB;
+    const jitB = pushB * params.ctrl.jitter * jitterU;
+    const c2: [number, number, number] = [
+      round2(m2x),
+      round2(m2y + pushB),
+      round2(m2z + jitB),
+    ];
+    return { c, c2 };
   }
 
   // Display degree: an edgeless parent (deg 0) sizes to the count of distinct
@@ -943,20 +1100,27 @@ export function buildGraph(): BuildResult {
       modeling: m.modeling,
       deg: displayDeg.get(id)!,
       pos: [round2(p[0]), round2(p[1]), round2(p[2])],
+      pos2: (() => {
+        const q = pos2.get(id)!;
+        for (const v of q) assert(Number.isFinite(v), `non-finite ascent position on ${id}`);
+        return [round2(q[0]), round2(q[1]), round2(q[2])] as [number, number, number];
+      })(),
+      depth: depthById.get(id)!,
     };
     const kids = childrenOf.get(id);
     if (kids?.length) out.children = kids;
     const par = parentOf.get(id);
     if (par) out.parent = par;
+    if (m.grade === "HS") out.courses = hsCoursesOf(m.code);
     return out;
   });
 
   const outEdges: OutEdge[] = [];
   for (const e of [...prereq].sort((a, b) => numAsc(a.s, b.s) || numAsc(a.t, b.t))) {
-    outEdges.push({ s: e.s, t: e.t, k: 0, c: controlPoint(e.s, e.t, meta.get(e.s)!.strand) });
+    outEdges.push({ s: e.s, t: e.t, k: 0, ...controlPoints(e.s, e.t, meta.get(e.s)!.strand) });
   }
   for (const e of [...related].sort((a, b) => numAsc(a.s, b.s) || numAsc(a.t, b.t))) {
-    outEdges.push({ s: e.s, t: e.t, k: 1, c: controlPoint(e.s, e.t, meta.get(e.s)!.strand) });
+    outEdges.push({ s: e.s, t: e.t, k: 1, ...controlPoints(e.s, e.t, meta.get(e.s)!.strand) });
   }
 
   const core: GraphCore = {
@@ -969,8 +1133,20 @@ export function buildGraph(): BuildResult {
     },
     grades: GRADE_ORDER.map((g) => {
       const b = bands.get(g)!;
-      return { id: g, label: GRADE_LABELS[g], x0: round2(b.x0), x1: round2(b.x1) };
+      const out: GraphCore["grades"][number] = {
+        id: g,
+        label: GRADE_LABELS[g],
+        x0: round2(b.x0),
+        x1: round2(b.x1),
+      };
+      const m = gradeMarkers.get(g);
+      if (m) {
+        out.marker = m.a;
+        out.marker2 = m.b;
+      }
+      return out;
     }),
+    courses: courseMarkers,
     strands: {
       number: { label: STRAND_LABELS.number },
       algebra: { label: STRAND_LABELS.algebra },

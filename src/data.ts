@@ -16,6 +16,8 @@ export interface GraphGrade {
   label: string;
   x0: number;
   x1: number;
+  /** Etch position along the spiral (K-8 only; HS is labeled by courses). */
+  marker?: [number, number, number];
 }
 
 export interface GraphNode {
@@ -37,6 +39,12 @@ export interface GraphNode {
   parent?: string;
 }
 
+export interface GraphCourse {
+  id: string; // "A1" | "G" | "A2" | "ADV"
+  label: string; // "Algebra I" …
+  marker: [number, number, number]; // etch position along the spiral
+}
+
 export interface GraphEdge {
   s: string; // source node id
   t: string; // target node id
@@ -47,6 +55,7 @@ export interface GraphEdge {
 export interface GraphCore {
   meta: GraphMeta;
   grades: GraphGrade[];
+  courses: GraphCourse[];
   strands: Record<StrandId, { label: string }>;
   nodes: GraphNode[];
   edges: GraphEdge[];

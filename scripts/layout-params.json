@@ -3,13 +3,6 @@
   "bandWidth": 60,
   "bandGapRatio": 0.35,
   "hsWidthMultiplier": 4.0,
-  "hsSubColumns": [
-    "N",
-    "A",
-    "F",
-    "G",
-    "S"
-  ],
   "bandMargin": 3,
   "radius": 55,
   "isolatedRadius": 85,
@@ -37,5 +30,11 @@
     "push": 0.12,
     "jitter": 0.15,
     "nearAxisEpsilon": 5
+  },
+  "ascent": {
+    "comment": "Pose B: x = grade/course timeline (band-relaxed, as pose A x), y = longest-prerequisite-chain depth * yStep (graph invariant: every prereq edge points upward), z = relaxed cross-section z * zScale.",
+    "yStep": 13,
+    "yBase": -90,
+    "zScale": 0.8
   }
 }
