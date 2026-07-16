@@ -85,6 +85,9 @@ export function createPanel(
   let docsById: Map<string, SearchDoc> | null = null;
   let openToken = 0;
   let open = false;
+  // The element focus should return to when the panel closes (or the search
+  // input, as a fallback). Captured only when opening from a closed panel.
+  let lastTrigger: HTMLElement | null = null;
 
   // --- DOM skeleton (built once) -----------------------------------------
   const panel = document.createElement("aside");
@@ -93,6 +96,13 @@ export function createPanel(
   panel.setAttribute("aria-label", "Standard detail");
   panel.tabIndex = -1;
   panel.hidden = true;
+
+  // Drag handle — visible only as a bottom sheet (≤720px); pointer target for
+  // the snap-point gesture. Decorative to AT (the sheet is a labeled region).
+  const handle = document.createElement("div");
+  handle.className = "panel-handle";
+  handle.setAttribute("aria-hidden", "true");
+  handle.innerHTML = '<span class="panel-handle-bar"></span>';
 
   const closeBtn = document.createElement("button");
   closeBtn.className = "panel-close";
@@ -113,6 +123,9 @@ export function createPanel(
   dot.className = "strand-dot";
   const codeEl = document.createElement("h2");
   codeEl.className = "panel-code";
+  codeEl.id = "panel-code-heading";
+  codeEl.tabIndex = -1; // focus lands here when the panel opens
+  panel.setAttribute("aria-labelledby", "panel-code-heading");
   codeRow.append(dot, codeEl);
   const crumb = document.createElement("p");
   crumb.className = "panel-crumb";
@@ -144,8 +157,55 @@ export function createPanel(
   aiSlot.hidden = true;
 
   body.append(header, badges, desc, connections, traceBtn, tasks, progressions, aiSlot);
-  panel.append(closeBtn, body);
+  panel.append(handle, closeBtn, body);
   container.appendChild(panel);
+
+  // --- bottom-sheet snap gesture (≤720px) --------------------------------
+  // Dependency-free: pointer events set a CSS var the mobile transform reads.
+  // Snaps: 90% (full) at y=0, 40% (peek), and a swipe-down-past-peek to close.
+  const isSheet = (): boolean => window.matchMedia("(max-width: 720px)").matches;
+  const vh = (): number => window.innerHeight;
+  const sheetHeight = (): number => 0.9 * vh(); // matches CSS height: 90dvh
+  const peekY = (): number => sheetHeight() - 0.4 * vh(); // top of the 40% peek
+
+  let sheetY = 0; // current snap offset (px from the 90% position)
+  function setSheetY(y: number, animate: boolean): void {
+    sheetY = y;
+    panel.classList.toggle("panel-dragging", !animate);
+    panel.style.setProperty("--sheet-y", `${y}px`);
+  }
+
+  let dragging = false;
+  let dragStartPointerY = 0;
+  let dragStartSheetY = 0;
+  function onHandleDown(e: PointerEvent): void {
+    if (!isSheet()) return;
+    dragging = true;
+    dragStartPointerY = e.clientY;
+    dragStartSheetY = sheetY;
+    handle.setPointerCapture(e.pointerId);
+  }
+  function onHandleMove(e: PointerEvent): void {
+    if (!dragging) return;
+    const y = Math.max(0, dragStartSheetY + (e.clientY - dragStartPointerY));
+    setSheetY(y, false);
+  }
+  function onHandleUp(e: PointerEvent): void {
+    if (!dragging) return;
+    dragging = false;
+    handle.releasePointerCapture(e.pointerId);
+    // Swipe down past the peek → close. Otherwise snap to the nearer of the two.
+    if (sheetY > peekY() + 0.12 * vh()) {
+      requests.close();
+      return;
+    }
+    const target = sheetY > peekY() / 2 ? peekY() : 0;
+    setSheetY(target, true);
+  }
+  handle.addEventListener("pointerdown", onHandleDown);
+  handle.addEventListener("pointermove", onHandleMove);
+  handle.addEventListener("pointerup", onHandleUp);
+  handle.addEventListener("pointercancel", onHandleUp);
 
   // --- glossary popover (shared chip) ------------------------------------
   const popover = document.createElement("div");
@@ -206,7 +266,8 @@ export function createPanel(
     code.textContent = n.code;
     const title = document.createElement("span");
     title.className = "conn-title";
-    title.textContent = shortTitle(docsById?.get(n.id)?.text);
+    // Generous word budget — CSS clamps to 3 lines; this is just a safety cap.
+    title.textContent = shortTitle(docsById?.get(n.id)?.text, 26);
     btn.append(chip, code, title);
     btn.addEventListener("click", () => requests.focusCode(n.code));
     return btn;
@@ -381,6 +442,13 @@ export function createPanel(
 
     show(focusIndex, conn) {
       const token = ++openToken;
+      const wasOpen = open;
+      // Capture the return-focus target only on a fresh open (not when a
+      // connection button re-focuses within an already-open panel).
+      if (!wasOpen) {
+        const active = document.activeElement;
+        lastTrigger = active instanceof HTMLElement && active !== document.body ? active : null;
+      }
       open = true;
       const n = graph.nodes[focusIndex];
 
@@ -397,16 +465,39 @@ export function createPanel(
 
       panel.hidden = false;
       panel.classList.add("panel-open");
+      setSheetY(0, true); // slide up to fully expanded (mobile sheet)
       body.scrollTop = 0;
+
+      // Move focus to the heading so keyboard/AT land inside the panel. Defer a
+      // frame so it isn't hidden. preventScroll keeps the sheet from jumping.
+      // The guided tour owns focus (its card is a focus-trapped dialog), so the
+      // panel must not steal it while touring.
+      if (!wasOpen && !document.body.classList.contains("touring")) {
+        requestAnimationFrame(() => {
+          if (open) codeEl.focus({ preventScroll: true });
+        });
+      }
 
       void fillAsync(focusIndex, conn, token);
     },
 
     hide() {
       openToken++;
+      const wasOpen = open;
       open = false;
-      panel.classList.remove("panel-open");
+      panel.classList.remove("panel-open", "panel-dragging");
       hidePopover();
+
+      // Return focus to the opening trigger (still in the DOM) or the search box.
+      // Skip while touring — the tour manages focus inside its own dialog.
+      if (wasOpen && !document.body.classList.contains("touring")) {
+        const search = document.getElementById("search-input");
+        const target =
+          lastTrigger && document.contains(lastTrigger) ? lastTrigger : search;
+        if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+      }
+      lastTrigger = null;
+
       // Wait out the slide-off before removing from the layout.
       const onEnd = (): void => {
         if (!open) panel.hidden = true;

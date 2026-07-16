@@ -6,6 +6,10 @@
 // endpoint is hidden); the shaders ghost those instances (0.06 alpha, shrunk)
 // and picking skips them. Filter state is deliberately NOT in the URL — the
 // hash is reserved for the focused standard.
+//
+// The chips are aria-pressed toggle buttons. The tour drives a couple of
+// filter states programmatically (setStrandsOnly / reset), which keep the chip
+// UI in sync so the on-screen state always matches the scene.
 
 import type { GraphCore, StrandId } from "../data";
 import type { NodesHandle } from "../scene/nodes";
@@ -32,6 +36,10 @@ function hexColor(v: number): string {
 }
 
 export interface FiltersHandle {
+  /** Show only the given strand (used by the tour). Syncs the chips. */
+  setStrandsOnly(strand: StrandId): void;
+  /** Restore every filter to its default (all shown). Syncs the chips. */
+  reset(): void;
   dispose(): void;
 }
 
@@ -83,7 +91,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   rail.setAttribute("role", "group");
   rail.setAttribute("aria-label", "Filters");
 
-  // Small-screen disclosure toggle.
+  // Small-screen disclosure toggle (a "Filters" pill that opens the sheet).
   const disclosure = document.createElement("button");
   disclosure.type = "button";
   disclosure.className = "filters-toggle";
@@ -97,7 +105,17 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   const groups = document.createElement("div");
   groups.className = "filters-groups";
 
-  function makeChip(label: string, pressed: boolean, onToggle: (on: boolean) => void): HTMLButtonElement {
+  // Track chips so programmatic state changes (tour) update the UI.
+  const strandChips = new Map<StrandId, HTMLButtonElement>();
+  const gradeChips = new Map<string, HTMLButtonElement>();
+  let majorChip!: HTMLButtonElement;
+  let wapChip!: HTMLButtonElement;
+
+  function makeChip(
+    label: string,
+    pressed: boolean,
+    onToggle: (on: boolean) => void,
+  ): HTMLButtonElement {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "filter-chip";
@@ -117,9 +135,9 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   gradeGroup.className = "filter-group";
   gradeGroup.setAttribute("aria-label", "Grades");
   for (const g of GRADES) {
-    gradeGroup.appendChild(
-      makeChip(g, true, (on) => (on ? gradeActive.add(g) : gradeActive.delete(g))),
-    );
+    const chip = makeChip(g, true, (on) => (on ? gradeActive.add(g) : gradeActive.delete(g)));
+    gradeChips.set(g, chip);
+    gradeGroup.appendChild(chip);
   }
 
   // Strand chips (colored dot + name).
@@ -133,15 +151,16 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     chip.classList.add("strand-chip");
     chip.style.setProperty("--dot", hexColor(STRAND_COLORS[s]));
     chip.insertAdjacentHTML("afterbegin", '<span class="chip-dot"></span>');
+    strandChips.set(s, chip);
     strandGroup.appendChild(chip);
   }
 
   // Toggles.
   const toggleGroup = document.createElement("div");
   toggleGroup.className = "filter-group";
-  const majorChip = makeChip("Major work", false, (on) => (majorOnly = on));
+  majorChip = makeChip("Major work", false, (on) => (majorOnly = on));
   majorChip.classList.add("filter-toggle");
-  const wapChip = makeChip("Widely applicable prerequisites", false, (on) => (wapSpotlight = on));
+  wapChip = makeChip("Widely applicable prerequisites", false, (on) => (wapSpotlight = on));
   wapChip.classList.add("filter-toggle");
   toggleGroup.append(majorChip, wapChip);
 
@@ -149,7 +168,34 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   rail.append(disclosure, groups);
   document.body.appendChild(rail);
 
+  // Reflect a strand's aria-pressed to match the active set.
+  function syncChips(): void {
+    for (const [s, chip] of strandChips) chip.setAttribute("aria-pressed", String(strandActive.has(s)));
+    for (const [g, chip] of gradeChips) chip.setAttribute("aria-pressed", String(gradeActive.has(g)));
+    majorChip.setAttribute("aria-pressed", String(majorOnly));
+    wapChip.setAttribute("aria-pressed", String(wapSpotlight));
+  }
+
   return {
+    setStrandsOnly(strand) {
+      strandActive.clear();
+      strandActive.add(strand);
+      for (const g of GRADES) gradeActive.add(g);
+      majorOnly = false;
+      wapSpotlight = false;
+      syncChips();
+      recompute();
+    },
+    reset() {
+      gradeActive.clear();
+      for (const g of GRADES) gradeActive.add(g);
+      strandActive.clear();
+      for (const s of STRAND_ORDER) strandActive.add(s);
+      majorOnly = false;
+      wapSpotlight = false;
+      syncChips();
+      recompute();
+    },
     dispose() {
       rail.remove();
     },

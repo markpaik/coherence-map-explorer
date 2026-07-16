@@ -17,6 +17,15 @@
     url("/fonts/space-grotesk-latin-600-normal.woff2") format("woff2"),
     url("/fonts/space-grotesk-latin-600-normal.woff") format("woff");
 }
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    url("/fonts/space-grotesk-latin-700-normal.woff2") format("woff2"),
+    url("/fonts/space-grotesk-latin-700-normal.woff") format("woff");
+}
 
 :root {
   color-scheme: dark;
@@ -32,6 +41,19 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* -- focus visibility ------------------------------------------------------ */
+/* Keyboard-only rings (2px --ink @60%, 2px offset) — legible on the glass
+   surfaces and the dark scene alike. Programmatic focus (e.g. the panel
+   heading) does not trigger :focus-visible, so it stays ring-free. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid rgb(236 234 246 / 0.6);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 html,
@@ -76,34 +98,37 @@ body {
   position: fixed;
   top: clamp(16px, 3vh, 32px);
   left: clamp(16px, 3vw, 36px);
-  max-width: min(520px, 60vw);
+  max-width: min(660px, 70vw);
   z-index: 10;
   pointer-events: none;
   user-select: none;
 }
 .brand {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-family: var(--display);
-  font-weight: 400;
-  font-size: 12px;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   font-variant: small-caps;
   color: var(--ink-2);
 }
 .headline {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   font-family: var(--display);
-  font-weight: 600;
-  font-size: clamp(22px, 3.2vw, 34px);
-  line-height: 1.18;
+  font-weight: 700;
+  font-size: clamp(28px, 4.2vw, 48px);
+  line-height: 1.12;
+  letter-spacing: -0.015em;
   color: var(--ink);
   text-wrap: balance;
+  text-shadow: 0 0 40px rgb(139 92 246 / 0.25); /* faint violet halo lifts it off the sky */
 }
 .statline {
   margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.02em;
+  font-family: var(--display);
+  font-size: 14px;
+  letter-spacing: 0.04em;
   color: var(--ink-2);
 }
 
@@ -171,6 +196,28 @@ body {
   color: var(--ink-2);
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* -- navigation hints, bottom-right ---------------------------------------- */
+
+.nav-hints {
+  position: fixed;
+  right: clamp(16px, 2.5vw, 28px);
+  bottom: clamp(14px, 2.5vh, 24px);
+  margin: 0;
+  z-index: 10;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 600ms ease;
+}
+.nav-hints span {
+  color: var(--ink-2);
+}
+.nav-hints.nav-hints-dim {
+  opacity: 0.45;
 }
 
 /* -- hover tooltip (glass chip) ------------------------------------------ */
@@ -311,8 +358,18 @@ body {
   font-size: 12px;
   color: var(--ink-2);
   overflow: hidden;
+}
+/* Search results stay single-line (fast scanning in a dropdown)… */
+.res-title {
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* …but connection tiles wrap up to 3 lines so titles are actually readable. */
+.conn-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-height: 1.4;
 }
 
 /* -- detail panel ---------------------------------------------------------- */
@@ -322,7 +379,7 @@ body {
   top: 0;
   right: 0;
   height: 100%;
-  width: 400px;
+  width: 480px; /* widened from 400px so connection titles read comfortably */
   max-width: 100vw;
   z-index: 18;
   display: flex;
@@ -469,7 +526,7 @@ body {
 }
 .conn-btn {
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* chip + code stay top-aligned beside wrapped titles */
   gap: 9px;
   width: 100%;
   text-align: left;
@@ -732,4 +789,417 @@ body {
   color: #ff8a8a;
   background: var(--bg);
   z-index: 40;
+}
+
+/* ========================================================================== */
+/* Phase 4 — polish: bottom sheet, tour, fallback, focus, reduced motion.      */
+/* Appended as one block to stay clear of concurrent edits above.              */
+/* ========================================================================== */
+
+/* -- detail panel: mobile bottom sheet ------------------------------------- */
+/* Desktop keeps the right-side translateX panel. The drag handle only shows as
+   a sheet. Snap points (90% / 40% / closed) are driven by --sheet-y in JS. */
+.panel-handle {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 90vh;
+    height: 90dvh;
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+  }
+  .panel.panel-open {
+    transform: translateY(var(--sheet-y, 0px));
+  }
+  .panel.panel-dragging {
+    transition: none; /* follow the finger 1:1 while dragging */
+  }
+  .panel-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    min-height: 24px;
+    padding: 14px 0 8px; /* total tap zone ≥ 44px */
+    cursor: grab;
+    touch-action: none; /* we own the vertical gesture */
+  }
+  .panel-handle-bar {
+    width: 42px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--ink-3);
+  }
+  .panel-close {
+    width: 44px;
+    height: 44px;
+    top: 10px;
+    right: 12px;
+  }
+  .panel-body {
+    padding-top: 6px;
+  }
+
+  /* Filters: a compact "Filters" pill (closed) that opens a glass sheet. */
+  .filters-rail {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 0;
+    border: none;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    max-width: calc(100vw - 24px);
+  }
+  .filters-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 18px;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: var(--surface);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .filters-rail.filters-open {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    max-height: 62vh;
+    overflow-y: auto;
+  }
+  .filters-rail.filters-open .filters-groups {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-top: 4px;
+  }
+  .filter-group {
+    gap: 8px;
+  }
+  /* Touch targets ≥ 44px for every chip. */
+  .filter-chip {
+    min-height: 44px;
+    padding: 6px 14px;
+    font-size: 13px;
+  }
+}
+
+/* -- guided tour ----------------------------------------------------------- */
+
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55; /* above all chrome, below the card — blocks scene + UI input */
+  background: transparent;
+}
+.tour-backdrop[hidden] {
+  display: none;
+}
+
+.tour-card {
+  position: fixed;
+  left: 50%;
+  bottom: clamp(20px, 5vh, 48px);
+  transform: translateX(-50%);
+  z-index: 60;
+  width: min(480px, calc(100vw - 32px));
+  padding: 20px 22px 16px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 14px 46px rgb(0 0 0 / 0.5);
+  animation: tour-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.tour-card[hidden] {
+  display: none;
+}
+@keyframes tour-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.tour-title {
+  margin: 0 0 8px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.tour-caption {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.tour-dots {
+  display: flex;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+.tour-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  opacity: 0.5;
+  transition: opacity 150ms ease, background 150ms ease;
+}
+.tour-dot.active {
+  background: var(--ink);
+  opacity: 1;
+}
+.tour-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tour-controls button {
+  min-height: 44px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.tour-btn-back {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.tour-btn-back:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.tour-btn-skip {
+  margin-left: auto; /* pushes Skip + Next to the right, Back stays left */
+  background: none;
+  border: none;
+  color: var(--ink-3);
+}
+.tour-btn-skip:hover {
+  color: var(--ink-2);
+}
+.tour-btn-next {
+  background: linear-gradient(180deg, #b6a6ec, #8b5cf6);
+  border: none;
+  color: #0b0b18;
+  font-weight: 600;
+}
+.tour-btn-next:hover {
+  filter: brightness(1.08);
+}
+
+/* While touring, block scene + chrome interaction (the backdrop already does;
+   this also disarms camera-controls' pointer capture on the canvas). */
+body.touring #scene {
+  pointer-events: none;
+}
+
+/* -- search pulse (tour "Find your standard" stop) ------------------------- */
+
+.search-rail.search-pulse .search-bar {
+  animation: search-pulse 1.2s ease-out 2;
+}
+@keyframes search-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(139 92 246 / 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgb(139 92 246 / 0);
+  }
+}
+
+/* -- no-WebGL fallback list ------------------------------------------------ */
+
+body.nowebgl {
+  overflow-y: auto;
+  height: auto;
+  min-height: 100%;
+}
+body.nowebgl .title-block {
+  position: static;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 48px) 20px 0;
+  pointer-events: auto;
+}
+body.nowebgl .nav-hints {
+  display: none;
+}
+.fallback {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 20px 20px 96px;
+}
+.fallback-banner {
+  margin: 0 0 20px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.fallback-search input {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  margin-bottom: 22px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.fallback-search input::placeholder {
+  color: var(--ink-3);
+}
+.fallback-group {
+  margin-bottom: 26px;
+}
+.fallback-group[hidden] {
+  display: none;
+}
+.fallback-grade {
+  margin: 0 0 10px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.fallback-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  min-height: 44px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+.fallback-row[hidden] {
+  display: none;
+}
+.fallback-row:hover {
+  background: rgb(255 255 255 / 0.07);
+  border-color: var(--ink-3);
+}
+.fallback-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+.fallback-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot, var(--ink-3));
+}
+.fallback-code {
+  flex: none;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.fallback-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -- OG screenshot mode (?og=1): hide all UI chrome ------------------------ */
+
+body.og .title-block,
+body.og .search-rail,
+body.og .filters-rail,
+body.og .nav-hints,
+body.og .tour-card,
+body.og .tour-backdrop,
+body.og #veil {
+  display: none !important;
+}
+
+/* -- reduced motion: cap DOM transitions (OS media + runtime .rm class) ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .search-rail,
+  .search-results,
+  .tour-dot {
+    transition-duration: 50ms;
+  }
+  .tour-card {
+    animation-duration: 1ms;
+  }
+  .search-rail.search-pulse .search-bar {
+    animation: none;
+  }
+}
+:root.rm .panel,
+:root.rm .search-rail,
+:root.rm .search-results,
+:root.rm .tour-dot {
+  transition-duration: 50ms !important;
+}
+:root.rm .tour-card {
+  animation-duration: 1ms !important;
+}
+:root.rm .search-rail.search-pulse .search-bar {
+  animation: none !important;
 }

@@ -3,10 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050510" />
     <meta
       name="description"
-      content="A 3D WebGL explorer of the Common Core math coherence map — 480 standards linked by prerequisite and related connections, arranged by grade and strand."
+      content="Explore every Common Core math standard and every connection between them as a 3D constellation"
     />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Canonical + social. The orchestrator swaps the placeholder host post-deploy. -->
+    <link rel="canonical" href="https://coherence-map-explorer.example/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Coherence Map Explorer" />
+    <meta
+      property="og:description"
+      content="Explore every Common Core math standard and every connection between them as a 3D constellation"
+    />
+    <meta property="og:image" content="https://coherence-map-explorer.example/og.png" />
+    <meta property="og:url" content="https://coherence-map-explorer.example/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Coherence Map Explorer" />
+    <meta
+      name="twitter:description"
+      content="Explore every Common Core math standard and every connection between them as a 3D constellation"
+    />
+    <meta name="twitter:image" content="https://coherence-map-explorer.example/og.png" />
     <link
       rel="preload"
       href="/fonts/space-grotesk-latin-600-normal.woff2"
@@ -28,7 +47,7 @@
     <!-- Title block, top-left -->
     <header class="title-block">
       <p class="brand">Coherence Map Explorer</p>
-      <h1 class="headline">Every idea in school mathematics, and how they hold together.</h1>
+      <h1 class="headline">Every Common Core math standard&mdash;and how they hold together.</h1>
       <p class="statline">480 standards &middot; 899 connections &middot; K&ndash;High School</p>
     </header>
 
@@ -54,6 +73,12 @@
     <!-- Polite live region: narrates focus changes (the canvas is aria-hidden;
          the detail panel + this region are the accessible mirror). -->
     <div id="aria-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- Navigation directions, bottom-right (dims after first camera use) -->
+    <p id="nav-hints" class="nav-hints" aria-hidden="true">
+      drag <span>orbit</span> &middot; scroll <span>zoom</span> &middot; right-drag
+      <span>pan</span>
+    </p>
 
     <!-- Boot veil: scene fades in from black over 900ms on first render -->
     <div id="veil"></div>

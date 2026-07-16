@@ -48,6 +48,8 @@ export interface NodesHandle {
   isVisible(index: number): boolean;
   /** Advance the shimmer clock (seconds). */
   setTime(t: number): void;
+  /** Toggle the idle brightness shimmer (off under reduced motion). */
+  setShimmerEnabled(on: boolean): void;
   /** Grow the proxy pick radius for touch pointers (idempotent). */
   setTouchPicking(on: boolean): void;
   /** Bounding sphere of the whole node cloud (for camera framing). */
@@ -84,11 +86,15 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   const uniforms = {
     uTime: { value: 0 },
     uDimColor: { value: new THREE.Color(DIM_TARGET) },
+    // 1 = idle shimmer on; 0 forces the multiplier to exactly 1.0 (no glow) so
+    // reduced-motion is truly still, not just frozen at a random shimmer phase.
+    uShimmer: { value: 1 },
   };
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uniforms.uTime;
     shader.uniforms.uDimColor = uniforms.uDimColor;
+    shader.uniforms.uShimmer = uniforms.uShimmer;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -99,6 +105,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         attribute float aPhase;
         attribute float aVisible;
         uniform float uTime;
+        uniform float uShimmer;
         varying float vColorMul;
         varying float vDim;
         `,
@@ -118,8 +125,10 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
           float mul = mix(mulTab[i0], mulTab[i1], f);
           float scl = mix(sclTab[i0], sclTab[i1], f);
           float dim = mix(dimTab[i0], dimTab[i1], f);
-          // Idle shimmer: ×1.05–1.15, ~6s period, per-instance phase.
-          float shimmer = 1.10 + 0.05 * sin(uTime * ${((Math.PI * 2) / 6).toFixed(6)} + aPhase);
+          // Idle shimmer: ×1.06–1.22, ~6s period, per-instance phase.
+          // Peaks graze the bloom threshold so the constellation breathes.
+          // uShimmer=0 (reduced motion) collapses it to exactly 1.0 → no glow.
+          float shimmer = mix(1.0, 1.14 + 0.08 * sin(uTime * ${((Math.PI * 2) / 6).toFixed(6)} + aPhase), uShimmer);
           vColorMul = mul * shimmer;
           // Filtered-out instances shrink to a faint background speck (ghost) and
           // read as dimmed — opaque, so the depth pass and edge occlusion hold.
@@ -220,6 +229,9 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     boundsBox: box,
     setTime(t) {
       uniforms.uTime.value = t;
+    },
+    setShimmerEnabled(on) {
+      uniforms.uShimmer.value = on ? 1 : 0;
     },
     setTouchPicking(on) {
       if (on === touchMode) return;

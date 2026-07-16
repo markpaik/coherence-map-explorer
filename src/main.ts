@@ -1,6 +1,22 @@
 // Composition root — wires data, scene modules, state machine, and the render
 // loop. All real logic lives in src/scene/*, src/state/*, src/ui/*,
 // src/interaction/*.
+//
+// TAB ORDER (document flow; the canvas is aria-hidden and never a tab stop):
+//   1. Search input (#search-input) — combobox; ArrowUp/Down move the listbox
+//      via aria-activedescendant, Enter focuses the standard.
+//   2. "Show me around" (#tour-btn) — starts the guided tour.
+//   3. Filters rail — the "Filters" pill (≤720px) then the grade / strand /
+//      toggle chips (aria-pressed buttons), left→right.
+//   4. Detail panel (when open) — focus is MOVED to the code heading on open;
+//      from there Tab runs Close → connection buttons → Trace → task links →
+//      the collapsible details. Esc closes it and returns focus to the trigger
+//      (or the search input). The panel is a labeled region, not a modal.
+//   5. Tour card (when running) — a focus-TRAPPED dialog: Back / Skip / Next
+//      cycle; ArrowLeft/Right navigate, Esc skips. The backdrop blocks the
+//      scene and the rest of the chrome while it runs.
+// :focus-visible rings (2px --ink @60%, 2px offset) mark every stop; nothing
+// interactive is keyboard-unreachable.
 
 import "./style.css";
 import * as THREE from "three";
@@ -11,15 +27,27 @@ import { createEdges } from "./scene/edges";
 import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
+import { createNebula } from "./scene/nebula";
 import { createEtches } from "./scene/etches";
 import { createMachine, type Machine } from "./state/machine";
 import { createTooltip } from "./ui/tooltip";
 import { createPanel } from "./ui/panel";
 import { createSearch } from "./ui/search";
 import { createFilters } from "./ui/filters";
+import { createTour } from "./ui/tour";
+import { createFallback } from "./ui/fallback";
 import { createPicking } from "./interaction/picking";
 
 const MAX_PIXEL_RATIO = 2;
+
+// Probe: is a WebGL2 context obtainable at all? (Cheap throwaway canvas.)
+function supportsWebGL2(): boolean {
+  try {
+    return !!document.createElement("canvas").getContext("webgl2");
+  } catch {
+    return false;
+  }
+}
 
 function bootError(message: string): void {
   const el = document.createElement("div");
@@ -34,8 +62,18 @@ function start(graph: GraphCore): void {
   if (!sceneHost || !veilEl) throw new Error("UI shell missing (#scene / #veil)");
   const veil: HTMLElement = veilEl; // non-null binding for closures below
 
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const debug = new URLSearchParams(location.search).has("debug");
+  let reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const params = new URLSearchParams(location.search);
+  const debug = params.has("debug");
+  const og = params.has("og"); // ?og=1: hide UI chrome for a clean OG screenshot
+  if (og) document.body.classList.add("og");
+
+  // -- no-WebGL fallback --------------------------------------------------
+  // ?nowebgl=1 forces it; otherwise fall back only if WebGL2 is truly absent.
+  if (params.has("nowebgl") || !supportsWebGL2()) {
+    createFallback(graph, params.has("nowebgl") ? "forced via ?nowebgl=1" : "WebGL2 unavailable");
+    return;
+  }
 
   // -- renderer -----------------------------------------------------------
   const canvas = document.createElement("canvas");
@@ -49,15 +87,17 @@ function start(graph: GraphCore): void {
       antialias: false, // bloom's mipmap chain softens edges; MSAA not worth it
       powerPreference: "high-performance",
       alpha: false,
-      preserveDrawingBuffer: debug, // ?debug=1 only: lets tooling read the canvas
+      preserveDrawingBuffer: debug || og, // ?debug/?og: let tooling read the canvas
     });
   } catch {
-    bootError(
-      "Coherence Map Explorer needs a WebGL-capable browser. (A no-WebGL fallback ships in a later phase.)",
-    );
+    // Context creation failed at the last moment — degrade to the DOM list.
+    createFallback(graph, "WebGL context creation failed");
     return;
   }
   renderer.setClearColor(BG, 1);
+
+  // Half-resolution bloom on touch devices / small viewports (fill-rate win).
+  const lowPowerBloom = navigator.maxTouchPoints > 0 || window.innerWidth < 800;
 
   // -- scene graph ----------------------------------------------------------
   const scene = new THREE.Scene();
@@ -67,7 +107,8 @@ function start(graph: GraphCore): void {
   const nodes = createNodes(graph.nodes);
   const edges = createEdges(graph.edges, nodesById);
   const stars = createStarfield(reducedMotion);
-  scene.add(nodes.mesh, nodes.proxy, edges.mesh, stars.points);
+  const nebula = createNebula();
+  scene.add(nodes.mesh, nodes.proxy, edges.mesh, stars.points, nebula.group);
 
   const rig = createCameraRig(canvas, nodes.boundsSphere, nodes.boundsBox, {
     reducedMotion,
@@ -76,7 +117,9 @@ function start(graph: GraphCore): void {
   const etches = createEtches(graph.grades, rig.controls.azimuthAngle);
   scene.add(etches.group);
 
-  const bloom = createBloom(renderer, scene, rig.camera);
+  const bloom = createBloom(renderer, scene, rig.camera, {
+    resolutionScale: lowPowerBloom ? 0.5 : 1.0,
+  });
 
   // -- render-on-demand loop (declared before UI so callbacks can request) --
   let needsRender = true;
@@ -117,10 +160,33 @@ function start(graph: GraphCore): void {
   const picking = createPicking(canvas, rig.camera, nodes, machine);
   const search = createSearch({ graph, machine });
   const filters = createFilters({ graph, nodes, edges, requestRender });
-  void search;
-  void filters;
+  const tour = createTour({
+    machine,
+    rig,
+    filters,
+    search,
+    reducedMotion: () => reducedMotion,
+  });
+  void tour;
 
-  if (reducedMotion) edges.setFlowEnabled(false);
+  // -- reduced motion (single control point; also the __cme debug hook) -----
+  // Fans a single boolean out to every animated subsystem: idle drift, node
+  // shimmer, star twinkle, edge flow comets, and the machine's cascade/camera
+  // cuts. advance() reads `reducedMotion` too and stops pumping scene time, so
+  // render-on-demand truly idles (rendererInfo frame counter goes flat).
+  function setReducedMotion(on: boolean): void {
+    reducedMotion = on;
+    machine.setReducedMotion(on);
+    edges.setFlowEnabled(!on);
+    nodes.setShimmerEnabled(!on);
+    stars.setTwinkleEnabled(!on);
+    rig.setDriftEnabled(!on);
+    // Mirror to a root class so DOM transitions (panel/dropdown/tour) also honor
+    // the runtime toggle, not just the OS-level prefers-reduced-motion media.
+    document.documentElement.classList.toggle("rm", on);
+    requestRender();
+  }
+  setReducedMotion(reducedMotion); // sync all subsystems to the initial value
 
   // -- deep-link routing (#/s/<CODE>) -------------------------------------
   // The machine writes the hash (replaceState — no hashchange), so hashchange
@@ -224,6 +290,16 @@ function start(graph: GraphCore): void {
   // Etches sync asynchronously (font parse in a worker); repaint when ready.
   void etches.ready.then(requestRender);
 
+  // Navigation hints (bottom-right) dim once the user starts driving the camera.
+  const navHints = document.getElementById("nav-hints");
+  if (navHints) {
+    const dimHints = (): void => {
+      navHints.classList.add("nav-hints-dim");
+      rig.controls.removeEventListener("controlstart", dimHints);
+    };
+    rig.controls.addEventListener("controlstart", dimHints);
+  }
+
   // -- context loss ---------------------------------------------------------
   // Chosen recovery: full reload. Rebuilding the composer + instanced buffers
   // by hand is possible but reload is dependable and this app boots in <1s.
@@ -259,7 +335,12 @@ function start(graph: GraphCore): void {
       focusCode(code: string): boolean {
         return machine.focusByCode(code, { instant: true });
       },
+      // Flip reduced motion at runtime (drift/shimmer/twinkle/flow + cascade cuts).
+      setReducedMotion(on: boolean): void {
+        setReducedMotion(on);
+      },
       machine,
+      tour,
       // Scene handles for automated filter/visibility assertions.
       nodes,
       edges,

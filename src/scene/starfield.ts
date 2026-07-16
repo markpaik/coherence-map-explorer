@@ -11,10 +11,13 @@
 
 import * as THREE from "three";
 
-const STAR_COUNT = 1000;
+const STAR_COUNT = 1200;
 const RADIUS = 900;
-const COLOR_A = new THREE.Color(0x20204a);
-const COLOR_B = new THREE.Color(0x3a3870);
+const COLOR_A = new THREE.Color(0x262552);
+const COLOR_B = new THREE.Color(0x4a4788);
+// A sparse population of standouts — near-white lavender, larger, still calm.
+const BRIGHT_FRACTION = 0.055;
+const COLOR_BRIGHT = new THREE.Color(0x9a94d8);
 
 const VERT = /* glsl */ `
   attribute float aSize;   // CSS px, 0.5–1.2
@@ -91,10 +94,12 @@ export function createStarfield(reducedMotion: boolean): StarfieldHandle {
     positions[i * 3] = RADIUS * s * Math.cos(theta);
     positions[i * 3 + 1] = RADIUS * u;
     positions[i * 3 + 2] = RADIUS * s * Math.sin(theta);
-    sizes[i] = 0.5 + rand() * 0.7;
+    const bright = rand() < BRIGHT_FRACTION;
+    sizes[i] = bright ? 1.4 + rand() * 0.8 : 0.5 + rand() * 0.9;
     phases[i] = rand() * Math.PI * 2;
     speeds[i] = 0.15 + rand() * 0.35; // rad/s — slow
-    c.copy(COLOR_A).lerp(COLOR_B, rand());
+    if (bright) c.copy(COLOR_BRIGHT).lerp(COLOR_B, rand() * 0.4);
+    else c.copy(COLOR_A).lerp(COLOR_B, rand());
     colors[i * 3] = c.r;
     colors[i * 3 + 1] = c.g;
     colors[i * 3 + 2] = c.b;

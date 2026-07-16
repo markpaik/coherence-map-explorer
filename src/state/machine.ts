@@ -32,7 +32,17 @@ const GRADE_STEP_MS = 80; // per grade layer of the cascade
 const DESCENDANT_DELAY_MS = 200; // descendants ignite this much after focus
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 
-export type MachineState = "idle" | "hover" | "focus" | "searching";
+export type MachineState = "idle" | "hover" | "focus" | "searching" | "touring";
+
+// The right-side panel is 400px wide (see style.css); shift a focus target left
+// of center by half that (in CSS px, converted to world units by the rig) so it
+// lands in the visible region beside the panel. Below 720px the panel is a
+// bottom sheet — no horizontal offset needed.
+const PANEL_WIDTH_PX = 400;
+const PANEL_BREAKPOINT_PX = 720;
+function focusPanelOffsetPx(): number {
+  return window.innerWidth > PANEL_BREAKPOINT_PX ? PANEL_WIDTH_PX / 2 : 0;
+}
 
 export interface FocusOpts {
   /** Skip the cascade + camera flight (deep links: instant reveal, camera cut). */
@@ -80,6 +90,10 @@ export interface Machine {
   clearFocus(): void;
   /** Mark the search UI open/closed (suspends drift, reflects in `state`). */
   setSearching(on: boolean): void;
+  /** Enter/leave the guided tour (suspends drift, reports state "touring"). */
+  setTouring(on: boolean): void;
+  /** Flip reduced-motion at runtime (debug hook; affects cascade + camera cuts). */
+  setReducedMotion(on: boolean): void;
   /** Single choke point for all emphasis writes. */
   applyEmphasis(patch: EmphasisPatch): void;
   /** Ease attributes toward targets. Returns true while animating. */
@@ -89,8 +103,8 @@ export interface Machine {
 }
 
 export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
-  const { nodes, edges, tooltip, canvas, rig, panel, announce, reducedMotion, requestRender } =
-    deps;
+  const { nodes, edges, tooltip, canvas, rig, panel, announce, requestRender } = deps;
+  let reducedMotion = deps.reducedMotion; // mutable: __cme.setReducedMotion flips it
   const nodeCount = graph.nodes.length;
   const edgeCount = graph.edges.length;
 
@@ -140,6 +154,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
   let animating = false;
   let searching = false;
+  let touring = false;
   let hovered: number | null = null;
   let focusIndex: number | null = null;
 
@@ -408,9 +423,9 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       }
     }
 
-    // Camera: frame focus + its DIRECT neighbors.
+    // Camera: frame focus + its DIRECT neighbors, shifted left of the panel.
     const neighborhood = [nodeIndex, ...data.buildsOn, ...data.leadsTo, ...data.related];
-    void rig.focusOn(sphereOf(neighborhood), !cut);
+    void rig.focusOn(sphereOf(neighborhood), !cut, focusPanelOffsetPx());
 
     // Panel + narration + deep link.
     const connections: Connections = {
@@ -442,7 +457,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     // Ancestors are already lit (CHAIN) from focus; pull the camera back to
     // frame the whole ancestor closure so the lineage to K is on screen.
     const sphere = sphereOf([focusIndex, ...lastAncestors]);
-    void rig.focusOn(sphere, !reducedMotion);
+    void rig.focusOn(sphere, !reducedMotion, focusPanelOffsetPx());
     requestRender();
   }
 
@@ -458,12 +473,15 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     canvas.style.cursor = "";
     applyEmphasis({ baseNode: EMPHASIS.REST, baseEdge: EMPHASIS.REST });
     panel.hide();
+    // The panel is gone — slide the framed content back to center.
+    rig.clearFocalOffset(!reducedMotion);
     updateHash(null);
     requestRender();
   }
 
   return {
     get state() {
+      if (touring) return "touring";
       if (hovered !== null) return "hover";
       if (searching) return "searching";
       if (focusIndex !== null) return "focus";
@@ -504,6 +522,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
     setSearching(on) {
       searching = on;
+    },
+
+    setTouring(on) {
+      touring = on;
+    },
+
+    setReducedMotion(on) {
+      reducedMotion = on;
     },
 
     applyEmphasis,

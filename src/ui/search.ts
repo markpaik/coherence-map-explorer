@@ -35,15 +35,17 @@ function shortTitle(text: string, words = 8): string {
 }
 
 export interface SearchHandle {
+  /** Briefly ring the search rail (the tour's "Find your standard" stop). */
+  pulse(): void;
   dispose(): void;
 }
 
 export function createSearch(deps: SearchDeps): SearchHandle {
   const { graph, machine } = deps;
   const rail = document.getElementById("search-rail");
-  const input = document.getElementById("search-input") as HTMLInputElement | null;
-  const tourBtn = document.getElementById("tour-btn") as HTMLButtonElement | null;
-  if (!rail || !input) throw new Error("Search rail missing (#search-rail / #search-input)");
+  const inputEl = document.getElementById("search-input") as HTMLInputElement | null;
+  if (!rail || !inputEl) throw new Error("Search rail missing (#search-rail / #search-input)");
+  const input: HTMLInputElement = inputEl; // non-null binding for closures below
 
   const docsById = new Map<string, SearchDoc>();
   let index: Indexed | null = null;
@@ -60,23 +62,25 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   input.setAttribute("role", "combobox");
   input.setAttribute("aria-autocomplete", "list");
   input.setAttribute("aria-expanded", "false");
+  input.setAttribute("aria-controls", "search-results");
 
-  // Tour button stays inert until Phase 4 — friendly no-op.
-  if (tourBtn) {
-    tourBtn.removeAttribute("tabindex");
-    tourBtn.title = "Guided tour — coming soon";
-    tourBtn.addEventListener("click", () => {
-      tourBtn.classList.add("soon");
-      window.setTimeout(() => tourBtn.classList.remove("soon"), 900);
-    });
-  }
-
-  // Results dropdown.
+  // Results dropdown (the listbox the combobox controls).
   const dropdown = document.createElement("ul");
   dropdown.className = "search-results";
+  dropdown.id = "search-results";
   dropdown.setAttribute("role", "listbox");
+  dropdown.setAttribute("aria-label", "Search results");
   dropdown.hidden = true;
   rail.appendChild(dropdown);
+
+  // aria-activedescendant tracks the highlighted option without moving DOM focus.
+  function syncActiveDescendant(): void {
+    if (active >= 0 && !dropdown.hidden) {
+      input.setAttribute("aria-activedescendant", `search-result-${active}`);
+    } else {
+      input.removeAttribute("aria-activedescendant");
+    }
+  }
 
   async function ensureIndex(): Promise<void> {
     if (index || indexing) return;
@@ -107,6 +111,7 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     dropdown.hidden = true;
     active = -1;
     input?.setAttribute("aria-expanded", "false");
+    syncActiveDescendant();
     machine.setSearching(false);
   }
 
@@ -148,6 +153,7 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     });
     dropdown.hidden = false;
     input?.setAttribute("aria-expanded", "true");
+    syncActiveDescendant();
     machine.setSearching(true);
   }
 
@@ -242,6 +248,13 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   document.addEventListener("keydown", onGlobalKey);
 
   return {
+    pulse() {
+      rail.classList.remove("search-pulse");
+      // reflow so re-adding the class restarts the animation
+      void rail.offsetWidth;
+      rail.classList.add("search-pulse");
+      window.setTimeout(() => rail.classList.remove("search-pulse"), 2400);
+    },
     dispose() {
       input.removeEventListener("focus", onFocus);
       input.removeEventListener("input", onInput);

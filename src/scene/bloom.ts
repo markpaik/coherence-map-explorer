@@ -12,17 +12,30 @@ export interface BloomRig {
   dispose(): void;
 }
 
-export function createBloom(renderer: WebGLRenderer, scene: Scene, camera: Camera): BloomRig {
+export interface BloomOptions {
+  /** Bloom render-target scale. 0.5 halves the buffers (mobile perf). */
+  resolutionScale?: number;
+}
+
+export function createBloom(
+  renderer: WebGLRenderer,
+  scene: Scene,
+  camera: Camera,
+  opts: BloomOptions = {},
+): BloomRig {
   const composer = new EffectComposer(renderer, {
     frameBufferType: HalfFloatType,
   });
 
   const bloom = new BloomEffect({
-    luminanceThreshold: 1.0,
-    luminanceSmoothing: 0.2,
-    intensity: 0.9,
+    // 0.9 (vs the original 1.0): shimmer peaks and the brightest strand tones
+    // breathe a gentle halo at idle — "galaxy", not "black room".
+    luminanceThreshold: 0.9,
+    luminanceSmoothing: 0.25,
+    intensity: 0.95,
     radius: 0.7,
     mipmapBlur: true,
+    resolutionScale: opts.resolutionScale ?? 1.0,
   });
 
   composer.addPass(new RenderPass(scene, camera));
