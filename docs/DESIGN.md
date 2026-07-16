@@ -5,6 +5,33 @@ itself left to right: Kindergarten counting at one end, high-school modeling at
 the other. Everything below is normative for implementation; deviations get
 discussed first.
 
+## The two poses and the unravel
+
+The map has two truths and refuses to average them. **Pose A, the
+Constellation**, is the explorable artwork: the band-relaxed galaxy of strand
+rivers, orbitable from any angle (generative-art lineage: one seeded
+algorithm, restrained palette, flow over grid — Hobbs/Cherniak/Watkinson).
+**Pose B, the Ascent**, is the canonical layered drawing of the partial order
+itself: x keeps the K–HS timeline, and height is the standard's longest
+prerequisite chain (a graph invariant, 0 at the foundations to 30 at the
+summit), so every standard rests physically above everything it builds on and
+every prerequisite edge points upward.
+
+The transition between them — **the unravel** — is a signature moment, not a
+camera cut: entering the Ascent, nodes settle foundations-first (35ms stagger
+per depth layer, 650ms per-node smoothstep, ~1.7s total) so the viewer watches
+mathematics assemble into a load-bearing structure; returning, the summit
+releases first and the structure gathers back into the galaxy. Stories and the
+Gaps simulator auto-unravel; a Constellation/Ascent toggle (bottom-right)
+offers both poses to everyone. Reduced motion cuts instantly.
+
+The high-school arc in both poses is organized by CCSS Appendix A's
+traditional pathway: Algebra I, Geometry, Algebra II sub-bands (23 standards
+formally revisited in Algebra II carry both memberships) with the 16 (+)
+fourth-course standards as an Advanced shelf. Etches: K–8 numerals plus
+ALGEBRA I · GEOMETRY · ALGEBRA II · ADVANCED, standing at pose-appropriate
+markers.
+
 ## Surfaces and ink
 
 | Token | Value | Use |

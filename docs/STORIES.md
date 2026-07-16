@@ -113,13 +113,14 @@ Side-by-side scenario toggling, same student, two different lost years.
 3. Card: the percentages look similar; the years of compounding and the
    spine they sit on do not. An early gap is not "the same gap, earlier."
    It is a different, larger thing.
-4. Honesty card (the structure is not the whole story): in the real
-   pandemic data, middle schoolers' recovery stalled worst — 8th graders
-   needed roughly nine extra months of math instruction while 3rd and 4th
-   graders returned to pre-pandemic growth (Lewis & Kuhfeld 2023, NWEA).
-   Structure says early gaps reach further; recovery also depends on how
-   much runway and intervention a student has left. Both things are true,
-   and both are reasons this work is hard.
+4. Honesty card (the structure is not the whole story): NWEA's own
+   analysis of recovery, a technical report rather than peer-reviewed
+   research, finds middle schoolers' recovery stalled worst, with 8th
+   graders needing months more instruction while 3rd and 4th graders
+   returned to pre-pandemic growth (Lewis & Kuhfeld 2023, NWEA technical
+   report). Structure says early gaps reach further; recovery also
+   depends on how much runway and intervention a student has left. Both
+   things can be true, and both are reasons this work is hard.
 
 ### 3. Swiss cheese (after Sal Khan)
 One student, three silent holes: 3.OA.A.2 (division as sharing), 4.NF.B.4
@@ -146,8 +147,12 @@ One student, three silent holes: 3.OA.A.2 (division as sharing), 4.NF.B.4
    grade-level content manufactures the next year's gap. [cite TNTP
    grade-level success stat]
 3. The alternative: grade-5 band bright WITH targeted husk-filling
-   (story 3's move) shown alongside. Card: students who got grade-level
-   work grew more, especially those who started behind. [cite]
+   (story 3's move) shown alongside. Card: in TNTP's observational data,
+   students who got more grade-level work grew more, and those who
+   started behind gained about seven months relative to peers. Stated as
+   an association from a descriptive study, not a proven cause; the
+   peer-reviewed opportunity-to-learn literature (Schmidt et al. 2015)
+   supports the mechanism internationally.
 
 ### 5. It starts with counting
 Reverse time-lapse, the empathy piece for early educators.
