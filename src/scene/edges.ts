@@ -61,9 +61,13 @@ const VERT = /* glsl */ `
     vec3 p = bezier(t);
     // Analytic tangent of the quadratic bezier (well-defined at both ends).
     vec3 tangent = 2.0 * (1.0 - t) * (aCtrl - aStart) + 2.0 * t * (aEnd - aCtrl);
+    // Coincident endpoints (control == start == end) give a zero tangent;
+    // normalize() would emit NaN and blow up the whole instanced draw.
+    float tlen = length(tangent);
+    vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
 
     vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-    vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + normalize(tangent), 1.0);
+    vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + tdir, 1.0);
 
     // Screen-space direction (device px), then its normal.
     vec2 dir = (clipT.xy / clipT.w - clip.xy / clip.w) * uViewport;

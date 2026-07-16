@@ -27,7 +27,11 @@ export interface TooltipHandle {
 export function createTooltip(container: HTMLElement): TooltipHandle {
   const el = document.createElement("div");
   el.className = "tooltip";
-  el.setAttribute("role", "status");
+  // Purely visual: NOT a live region. The pointer sweeping the constellation
+  // would otherwise fire an announcement per node crossed. Keyboard/AT users
+  // get standards through the search listbox and the detail panel (which does
+  // announce via #aria-live); this chip is a mouse-hover affordance only.
+  el.setAttribute("aria-hidden", "true");
   el.hidden = true;
 
   const codeEl = document.createElement("span");

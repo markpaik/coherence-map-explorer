@@ -99,7 +99,12 @@ export function createSearch(deps: SearchDeps): SearchHandle {
       });
       ms.addAll(docs);
       index = ms as unknown as Indexed;
-      if (input && input.value.trim()) runSearch(input.value);
+      // Only auto-run if the input is STILL focused with a live query — the
+      // index can resolve after the user has already blurred away, and
+      // re-running would silently reopen the dropdown over the idle scene.
+      if (input && input.value.trim() && document.activeElement === input) {
+        runSearch(input.value);
+      }
     } catch (err) {
       console.warn("[cme] search index failed to build", err);
     } finally {
@@ -119,7 +124,13 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     dropdown.replaceChildren();
     if (!results.length) {
       dropdown.hidden = true;
+      active = -1;
       input?.setAttribute("aria-expanded", "false");
+      syncActiveDescendant(); // clear the now-dangling active option
+      // The rail is still docked and the input still focused, but with no
+      // results there is nothing to "search" over — release the drift lock so
+      // the idle camera keeps breathing while the user edits their query.
+      machine.setSearching(false);
       return;
     }
     results.forEach((d, i) => {

@@ -33,7 +33,7 @@
   --surface: rgb(16 16 36 / 0.88);
   --ink: #eceaf6;
   --ink-2: #9c98b8;
-  --ink-3: #5d5a78;
+  --ink-3: #7e7a9c; /* was #5d5a78 — lifted to clear WCAG AA 4.5:1 on glass */
   --line: #2a2848;
   --display: "Space Grotesk", system-ui, sans-serif;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -171,6 +171,12 @@ body {
   font: inherit;
   font-size: 14px;
   color: var(--ink);
+}
+/* Keyboard focus (e.g. via "/") must be visible — the input's own outline is
+   suppressed, so ring the whole glass pill instead. */
+.search-bar:focus-within {
+  outline: 2px solid rgba(236, 234, 246, 0.6);
+  outline-offset: 2px;
 }
 .search-bar input::placeholder {
   color: var(--ink-3);
@@ -671,10 +677,17 @@ body {
   font-size: 13px;
   margin: 10px 0 4px;
 }
+/* Every panel image fits the column and keeps aspect. .math-host was
+   previously omitted from this rule, so wide progression-note images
+   overflowed the fixed-width panel. Intrinsic width/height attrs (set from the
+   loaded image) are what actually reserve space and prevent layout shift. */
 .example-body img,
-.panel-desc img {
+.panel-desc img,
+.math-host img {
   max-width: 100%;
   height: auto;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
 }
 .example-body table {
   border-collapse: collapse;
@@ -1239,6 +1252,44 @@ body.og #veil {
   .search-rail.search-pulse .search-bar {
     animation: none;
   }
+  /* The boot veil and nav-hint fades were animating even under reduced
+     motion — collapse them to a near-instant cut. */
+  #veil {
+    transition-duration: 1ms;
+  }
+  .nav-hints {
+    transition-duration: 1ms;
+  }
+}
+
+/* context-loss notice (rare: GPU reset / driver crash) */
+.context-lost {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.context-lost-reload {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink-3);
+  border-radius: 999px;
+  padding: 4px 14px;
+  cursor: pointer;
 }
 :root.rm .panel,
 :root.rm .search-rail,

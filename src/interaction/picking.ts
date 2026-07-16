@@ -63,27 +63,33 @@ export function createPicking(
     pointerDirty = true;
   }
 
-  // Click-vs-drag discrimination.
-  let downX = 0;
-  let downY = 0;
-  let downPrimary = false;
+  // Click-vs-drag discrimination, keyed by pointerId so a second touch (pinch,
+  // two-finger orbit) can't overwrite the first pointer's down-position and
+  // spuriously fire focus() when a finger lifts mid-gesture.
+  const downs = new Map<number, { x: number; y: number; primary: boolean }>();
   function onPointerDown(e: PointerEvent): void {
-    downX = e.clientX;
-    downY = e.clientY;
-    downPrimary = e.button === 0;
+    downs.set(e.pointerId, { x: e.clientX, y: e.clientY, primary: e.button === 0 });
   }
   function onPointerUp(e: PointerEvent): void {
-    if (!downPrimary || e.button !== 0) return;
-    const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
+    const down = downs.get(e.pointerId);
+    downs.delete(e.pointerId);
+    if (!down || !down.primary || e.button !== 0) return;
+    // A click only counts when it was the sole active pointer (no pinch/orbit).
+    if (downs.size > 0) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
     if (moved > CLICK_MOVE_TOLERANCE) return; // a camera drag, not a click
     const id = pickAt(e.clientX, e.clientY);
     if (id != null) machine.focus(id);
+  }
+  function onPointerCancel(e: PointerEvent): void {
+    downs.delete(e.pointerId);
   }
 
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerCancel);
 
   return {
     update() {

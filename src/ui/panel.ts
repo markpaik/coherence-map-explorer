@@ -53,6 +53,31 @@ function shortTitle(text: string | undefined, words = 7): string {
 
 // --- KaTeX (dynamic, once) -------------------------------------------------
 let katexPromise: Promise<(el: HTMLElement) => void> | null = null;
+// The source text carries bare AMS environments (\begin{align}…\end{align})
+// with no $…$ delimiters, so KaTeX's auto-render skips them and the raw LaTeX
+// shows through. Wrap any un-delimited display environment in $$…$$ (KaTeX
+// supports align/align*/gather/… in display mode) so auto-render picks it up.
+// Runs on text nodes only, so it never rewrites inside tags/attributes, and it
+// skips an environment already sitting next to a $ delimiter.
+const DISPLAY_ENV =
+  /\\begin\{(align\*?|alignat\*?|gather\*?|equation\*?|multline\*?|split|cases)\}[\s\S]*?\\end\{\1\}/g;
+function wrapBareEnvironments(root: HTMLElement): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = n as Text;
+    if (t.data.includes("\\begin{")) texts.push(t);
+  }
+  for (const t of texts) {
+    const wrapped = t.data.replace(DISPLAY_ENV, (m, _env, offset: number, s: string) => {
+      // Already delimited (…$$\begin… or preceding $): leave it for auto-render.
+      if (s[offset - 1] === "$") return m;
+      return `$$${m}$$`;
+    });
+    if (wrapped !== t.data) t.data = wrapped;
+  }
+}
+
 function loadKatex(): Promise<(el: HTMLElement) => void> {
   if (!katexPromise) {
     katexPromise = (async () => {
@@ -60,7 +85,8 @@ function loadKatex(): Promise<(el: HTMLElement) => void> {
         import("katex/contrib/auto-render"),
         import("katex/dist/katex.min.css"),
       ]);
-      return (el: HTMLElement): void =>
+      return (el: HTMLElement): void => {
+        wrapBareEnvironments(el);
         renderMathInElement(el, {
           delimiters: [
             { left: "$$", right: "$$", display: true },
@@ -71,6 +97,7 @@ function loadKatex(): Promise<(el: HTMLElement) => void> {
           throwOnError: false,
           ignoredClasses: ["term"], // glossary chips are prose, not math
         });
+      };
     })();
   }
   return katexPromise;
@@ -219,9 +246,23 @@ export function createPanel(
   // --- glossary popover (shared chip) ------------------------------------
   const popover = document.createElement("div");
   popover.className = "glossary-pop";
+  popover.id = "glossary-pop";
   popover.setAttribute("role", "tooltip");
   popover.hidden = true;
   container.appendChild(popover);
+
+  // Make the pipeline's <span class="term"> glossary chips reachable by
+  // keyboard and announced by assistive tech (the sanitizer only emits class +
+  // data-def, so we upgrade them to focusable, described buttons after render).
+  function upgradeGlossaryTerms(): void {
+    for (const el of body.querySelectorAll<HTMLElement>(".term:not([tabindex])")) {
+      el.tabIndex = 0;
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-describedby", "glossary-pop");
+      const def = el.getAttribute("data-def");
+      if (def) el.setAttribute("aria-label", `${el.textContent}: ${def}`);
+    }
+  }
 
   function showPopover(term: HTMLElement): void {
     const def = term.getAttribute("data-def");
@@ -256,6 +297,19 @@ export function createPanel(
       e.preventDefault();
       if (popover.hidden) showPopover(e.target);
       else hidePopover();
+    }
+  });
+  // Keyboard activation for the focusable term chips (span[role=button] does
+  // not synthesize click on Enter/Space); Escape dismisses the popover.
+  body.addEventListener("keydown", (e) => {
+    if (isTerm(e.target)) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        popover.hidden ? showPopover(e.target) : hidePopover();
+      } else if (e.key === "Escape" && !popover.hidden) {
+        e.stopPropagation();
+        hidePopover();
+      }
     }
   });
   body.addEventListener("scroll", hidePopover, { passive: true });
@@ -300,12 +354,17 @@ export function createPanel(
       for (const idx of list) group.appendChild(connectionButton(idx));
       connections.appendChild(group);
     }
-    if (!conn.buildsOn.length && !conn.leadsTo.length && !conn.related.length) {
+    const hasAny = conn.buildsOn.length || conn.leadsTo.length || conn.related.length;
+    if (!hasAny) {
       const none = document.createElement("p");
       none.className = "conn-empty";
       none.textContent = "No mapped connections.";
       connections.appendChild(none);
     }
+    // Trace only means something with a prerequisite chain to walk back.
+    const traceable = conn.buildsOn.length > 0;
+    traceBtn.disabled = !traceable;
+    traceBtn.hidden = !hasAny;
   }
 
   function renderBadges(n: GraphNode): void {
@@ -462,6 +521,7 @@ export function createPanel(
     }
     renderTasks(detail?.tasks, detail?.example, detail?.exampleAttr, detail?.exampleUrl);
     renderProgressions(detail?.progressions);
+    upgradeGlossaryTerms();
 
     // Math: render across the freshly-populated content.
     try {

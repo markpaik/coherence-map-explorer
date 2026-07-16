@@ -292,7 +292,9 @@ function start(graph: GraphCore): void {
   }
 
   // -- sizing ------------------------------------------------------------
-  function resize(): void {
+  // The actual resize is expensive (reallocates every postprocessing buffer),
+  // so coalesce a burst of resize events into one apply on the next frame.
+  function applyResize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
@@ -303,14 +305,39 @@ function start(graph: GraphCore): void {
     stars.setPixelRatio(dpr);
     requestRender();
   }
+  let resizePending = false;
+  function resize(): void {
+    if (resizePending) return;
+    resizePending = true;
+    requestAnimationFrame(() => {
+      resizePending = false;
+      applyResize();
+    });
+  }
   window.addEventListener("resize", resize);
   // Chrome freezes occluded tabs: resize events fired while hidden are lost,
   // leaving the canvas at a stale size when the tab thaws. Re-measure on
   // every return to visibility.
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) resize();
+    if (!document.hidden) applyResize();
   });
-  resize();
+  // Moving the window to a monitor with a different devicePixelRatio changes
+  // devicePixelRatio WITHOUT firing a window 'resize' — watch it explicitly so
+  // the renderer never renders at a stale pixel ratio. matchMedia re-arms each
+  // time because the query string bakes in the current dpr.
+  function watchPixelRatio(): void {
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    mq.addEventListener(
+      "change",
+      () => {
+        applyResize();
+        watchPixelRatio();
+      },
+      { once: true },
+    );
+  }
+  watchPixelRatio();
+  applyResize();
 
   // Etches sync asynchronously (font parse in a worker); repaint when ready.
   void etches.ready.then(requestRender);
@@ -326,9 +353,26 @@ function start(graph: GraphCore): void {
   }
 
   // -- context loss ---------------------------------------------------------
-  // Chosen recovery: full reload. Rebuilding the composer + instanced buffers
-  // by hand is possible but reload is dependable and this app boots in <1s.
-  canvas.addEventListener("webglcontextlost", (e) => e.preventDefault());
+  // Chosen recovery: full reload once the browser restores the context.
+  // Rebuilding the composer + instanced buffers by hand is possible but reload
+  // is dependable and this app boots in <1s. Some losses (GPU reset, driver
+  // crash) never fire 'restored', which would strand the user on a frozen
+  // canvas — so on loss we surface a non-blocking DOM notice with a manual
+  // Reload, and remove it if the context does come back on its own.
+  let contextNotice: HTMLElement | null = null;
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    if (contextNotice) return;
+    const notice = document.createElement("div");
+    notice.className = "context-lost";
+    notice.setAttribute("role", "alert");
+    notice.innerHTML =
+      "The 3D view lost its graphics context. " +
+      '<button type="button" class="context-lost-reload">Reload</button>';
+    notice.querySelector("button")?.addEventListener("click", () => location.reload());
+    document.body.appendChild(notice);
+    contextNotice = notice;
+  });
   canvas.addEventListener("webglcontextrestored", () => location.reload());
 
   document.addEventListener("visibilitychange", () => {
