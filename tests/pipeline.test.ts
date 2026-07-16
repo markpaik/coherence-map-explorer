@@ -126,6 +126,17 @@ describe("HTML sanitization", () => {
       expect(/<script/i.test(JSON.stringify(shard))).toBe(false);
     }
   });
+  it("remediates link rot: no expired Dropbox previews, dead pages rewritten", () => {
+    const everything = Object.values(detailShards)
+      .map((s) => JSON.stringify(s))
+      .join("");
+    // Expired signed preview images are stripped entirely.
+    expect(everything).not.toContain("previews.dropbox.com/p/thumb");
+    expect(everything).not.toContain("previews.dropboxusercontent.com/p/thumb");
+    // A known-dead page rewrites to its Wayback snapshot (audited 2026-07-16).
+    expect(everything).not.toContain('"http://mste.illinois.edu/malcz');
+    expect(everything).toContain("web.archive.org");
+  });
   it("converts a known glossary anchor to span.term with data-def", () => {
     // id 11 desc contains <a id="The numbers 0, 1, 2, 3, …."> → span.term
     const entry = detailShards["1"]["11"] as { desc: string };

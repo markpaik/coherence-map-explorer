@@ -205,6 +205,33 @@ function absolutize(url: string): string {
   return url;
 }
 
+// Link-rot remediation (scripts/link-fixes.json): dead pages rewrite to
+// Wayback snapshots; permanently-expired signed image URLs are stripped.
+// Counters feed the pipeline report.
+interface LinkFixes {
+  rewrites: Record<string, string>;
+  deadImagePatterns: string[];
+}
+const linkFixes: LinkFixes = JSON.parse(
+  readFileSync(resolve(HERE, "link-fixes.json"), "utf-8"),
+);
+let rewrittenLinks = 0;
+let strippedImages = 0;
+
+function fixUrl(url: string): string {
+  const abs = absolutize(url);
+  const fixed = linkFixes.rewrites[abs];
+  if (fixed) {
+    rewrittenLinks++;
+    return fixed;
+  }
+  return abs;
+}
+
+function isDeadImage(url: string): boolean {
+  return linkFixes.deadImagePatterns.some((p) => url.includes(p));
+}
+
 const sanitizeOpts: sanitizeHtml.IOptions = {
   allowedTags: [
     "p",
@@ -244,7 +271,7 @@ const sanitizeOpts: sanitizeHtml.IOptions = {
     h1: "h3",
     h2: "h3",
     a: (_tag: string, attribs): sanitizeHtml.Tag => {
-      const href = absolutize(attribs.href || "");
+      const href = fixUrl(attribs.href || "");
       const isExternal = /^https?:\/\//i.test(href);
       // Glossary anchor: has an id (the definition text) and no external link.
       if (!isExternal && attribs.id) {
@@ -266,8 +293,13 @@ const sanitizeOpts: sanitizeHtml.IOptions = {
       return { tagName: "span", attribs: {} };
     },
     img: (_tag: string, attribs): sanitizeHtml.Tag => {
+      const src = fixUrl(attribs.src || "");
+      if (isDeadImage(src)) {
+        strippedImages++;
+        return { tagName: "span", attribs: {} }; // renders nothing
+      }
       const out: Record<string, string> = {
-        src: absolutize(attribs.src || ""),
+        src,
         loading: "lazy",
         decoding: "async",
       };
@@ -835,14 +867,14 @@ export function buildGraph(): BuildResult {
     if (s.example_problem_attribution && s.example_problem_attribution.trim())
       entry.exampleAttr = s.example_problem_attribution.trim();
     if (s.example_problem_url && s.example_problem_url.trim())
-      entry.exampleUrl = absolutize(s.example_problem_url.trim());
+      entry.exampleUrl = fixUrl(s.example_problem_url.trim());
     if (progressions) entry.progressions = progressions;
     if (c.name) entry.clusterName = c.name;
     const tasks: { group: string; name: string; url: string }[] = [];
     for (const grp of s.links || []) {
       for (const l of grp.links || []) {
         if (!l.url) continue;
-        tasks.push({ group: grp.name, name: l.name, url: absolutize(l.url) });
+        tasks.push({ group: grp.name, name: l.name, url: fixUrl(l.url) });
       }
     }
     if (tasks.length) entry.tasks = tasks;
@@ -925,6 +957,7 @@ function writeAll(result: BuildResult): void {
   console.log(`related edges:  ${r.relatedEdges}`);
   console.log(`isolated nodes: ${r.isolated}`);
   console.log(`dropped clusters (orphan): ${r.droppedClusters}`);
+  console.log(`link fixes: ${rewrittenLinks} rewritten (Wayback/live), ${strippedImages} dead images stripped`);
   console.log("\n-- file sizes (raw / gzip) --");
   console.log(`graph-core.json   ${kb(coreBytes)} / ${kb(coreGzip)}${coreGzip > 120 * 1024 ? "  ⚠ OVER 120kB gzip budget" : ""}`);
   console.log(`search.json       ${kb(Buffer.byteLength(searchJson))} / ${kb(gzipSync(searchJson).length)}`);

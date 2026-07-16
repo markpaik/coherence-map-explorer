@@ -1,0 +1,21 @@
+{
+  "comment": "Link-rot remediation applied by build-graph.ts. Keys are URLs exactly as they appear post-absolutize (entity-decoded). Audited 2026-07-16: 1,805 unique external URLs, 1,787 healthy; the 11 dead pages below rewrite to Wayback Machine snapshots (or a live equivalent), and images matching deadImagePatterns (permanently expired signed Dropbox previews) are stripped. Bot-blocked-but-live pages (fbi.gov, encyclopedia-titanica.org) are deliberately left alone.",
+  "rewrites": {
+    "http://trackandfield.about.com/od/sprintsandrelays/qt/olym100medals.htm": "http://web.archive.org/web/20160320052407/http://trackandfield.about.com/od/sprintsandrelays/qt/olym100medals.htm",
+    "http://www.nationalatlas.gov/atlasftp.html?openChapters=chptrans#chptrans": "http://web.archive.org/web/20141001073533/http://www.nationalatlas.gov/atlasftp.html",
+    "http://www.census.gov/2010census/data/": "https://web.archive.org/web/2015/http://www.census.gov/2010census/data/",
+    "http://www.census.gov/popest/archives/1990s/popclockest.txt": "http://web.archive.org/web/20111126200426/http://www.census.gov:80/popest/archives/1990s/popclockest.txt",
+    "http://aa.usno.navy.mil/data/docs/RS_OneYear.php": "http://web.archive.org/web/20151231112157/http://aa.usno.navy.mil:80/data/docs/RS_OneYear.php",
+    "http://athletics.mountunion.edu/sports/fball/2012-13/roster": "http://web.archive.org/web/20160107155336/http://athletics.mountunion.edu/sports/fball/2012-13/roster",
+    "http://www.umterps.com/sports/w-baskbl/mtt/md-w-baskbl-mtt.html": "http://web.archive.org/web/20130528155048/http://www.umterps.com/sports/w-baskbl/mtt/md-w-baskbl-mtt.html",
+    "http://www.umterps.com/sports/w-fieldh/mtt/md-w-fieldh-mtt.html": "http://web.archive.org/web/20130528152909/http://www.umterps.com/sports/w-fieldh/mtt/md-w-fieldh-mtt.html",
+    "http://www.rolltide.com/sports/m-footbl/mtt/alab-m-footbl-mtt.html": "http://web.archive.org/web/20160627115407/http://www.rolltide.com:80/sports/m-footbl/mtt/alab-m-footbl-mtt.html",
+    "http://www.globaledresources.com/resources/curious-subtraction.html": "http://web.archive.org/web/20191230065529/http://www.globaledresources.com:80/resources/curious-subtraction.html",
+    "http://mste.illinois.edu/malcz/DATA/BIOLOGY/Animals.html": "http://web.archive.org/web/20220303090217/https://mste.illinois.edu/malcz/DATA/BIOLOGY/Animals.html",
+    "https://www.illustrativemathematics.org/content-standards/tasks/1069/pdf": "https://tasks.illustrativemathematics.org/content-standards/tasks/1069"
+  },
+  "deadImagePatterns": [
+    "previews.dropbox.com/p/thumb/",
+    ".previews.dropboxusercontent.com/p/thumb/"
+  ]
+}
