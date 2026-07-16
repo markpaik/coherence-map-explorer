@@ -42,6 +42,7 @@ const VERT = /* glsl */ `
   in float aKind;
   in float aEmphasis;
   in float aVisible;
+  in float aDamage;
 
   uniform vec2 uViewport;   // drawing-buffer size in device px
   uniform float uPxRatio;   // device px per CSS px (capped at 2)
@@ -51,6 +52,7 @@ const VERT = /* glsl */ `
   out float vKind;
   out float vEmphasis;
   out float vVisible;
+  out float vDamage;
 
   vec3 bezier(float s) {
     float u = 1.0 - s;
@@ -93,6 +95,7 @@ const VERT = /* glsl */ `
     vEmphasis = e;
     // Filtered-out edges (either endpoint hidden) fade toward a 0.06 ghost.
     vVisible = mix(0.06, 1.0, aVisible);
+    vDamage = clamp(aDamage, 0.0, 1.0);
   }
 `;
 
@@ -107,6 +110,7 @@ const FRAG = /* glsl */ `
   in float vKind;
   in float vEmphasis;
   in float vVisible;
+  in float vDamage;
 
   out vec4 fragColor;
 
@@ -143,6 +147,12 @@ const FRAG = /* glsl */ `
       col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
     }
 
+    // Structural damage (stories + Gaps): pull the edge toward a dark ember
+    // (#4a2318) and drop its alpha, so a broken lineage visibly cools. Additive-
+    // blend safe: both moves subtract light rather than add it.
+    col = mix(col, vec3(0.2902, 0.1373, 0.0941), vDamage);
+    alpha *= (1.0 - 0.35 * vDamage);
+
     // Soft edge across the ribbon is unnecessary at ~1px widths; keep it flat.
     fragColor = vec4(col, alpha * vVisible);
   }
@@ -155,6 +165,16 @@ export interface EdgesHandle {
   emphasisAttr: THREE.InstancedBufferAttribute;
   /** Filter-visibility attribute (1 shown / 0 ghosted); write via filters only. */
   visibleAttr: THREE.InstancedBufferAttribute;
+  /** Per-edge damage 0..1 (max of endpoints); write via setDamage only. */
+  damageAttr: THREE.InstancedBufferAttribute;
+  /**
+   * Set per-edge damage (0..1, typically the max of the endpoint node damages).
+   * The fragment cools the edge toward a dark ember and drops its alpha. null
+   * clears every edge to 0 in one memset.
+   */
+  setDamage(values: Float32Array | null): void;
+  /** Story-only visibility override (see nodes.setVisibleMask). null restores. */
+  setVisibleMask(mask: Float32Array | null): void;
   /** Bezier endpoint/control attributes — the pose driver rewrites these each
    *  frame of a morph (aStart/aEnd from the endpoint nodes' current positions,
    *  aCtrl = lerp(c, c2, …)); it flips their needsUpdate itself. */
@@ -205,6 +225,7 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   const kind = new Float32Array(count);
   const emphasis = new Float32Array(count).fill(1); // rest
   const visible = new Float32Array(count).fill(1); // filter visibility
+  const damage = new Float32Array(count); // structural damage 0..1 (all 0 at rest)
 
   const c = new THREE.Color();
   for (let i = 0; i < count; i++) {
@@ -226,6 +247,8 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   emphasisAttr.setUsage(THREE.DynamicDrawUsage);
   const visibleAttr = new THREE.InstancedBufferAttribute(visible, 1);
   visibleAttr.setUsage(THREE.DynamicDrawUsage);
+  const damageAttr = new THREE.InstancedBufferAttribute(damage, 1);
+  damageAttr.setUsage(THREE.DynamicDrawUsage);
   // Endpoint + control attributes are static at rest but rewritten every frame
   // during a pose morph — mark them dynamic so the driver's updates are cheap.
   const startAttr = new THREE.InstancedBufferAttribute(start, 3);
@@ -242,6 +265,7 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   geometry.setAttribute("aColorB", new THREE.InstancedBufferAttribute(colorB, 3));
   geometry.setAttribute("aKind", new THREE.InstancedBufferAttribute(kind, 1));
   geometry.setAttribute("aEmphasis", emphasisAttr);
+  geometry.setAttribute("aDamage", damageAttr);
 
   const uniforms = {
     uViewport: { value: new THREE.Vector2(1, 1) },
@@ -272,9 +296,26 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     count,
     emphasisAttr,
     visibleAttr,
+    damageAttr,
     startAttr,
     ctrlAttr,
     endAttr,
+    setDamage(values) {
+      if (values === null) {
+        damage.fill(0);
+      } else {
+        damage.set(values);
+      }
+      damageAttr.needsUpdate = true;
+    },
+    setVisibleMask(mask) {
+      if (mask === null) {
+        visible.fill(1);
+      } else {
+        visible.set(mask);
+      }
+      visibleAttr.needsUpdate = true;
+    },
     setTime(t) {
       uniforms.uTime.value = t;
     },

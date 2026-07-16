@@ -109,7 +109,7 @@ Side-by-side scenario toggling, same student, two different lost years.
    statistics barely notices (7 of 27 challenged; 74% clear) and the runway
    is one school stage. 
 2. Miss grade 3: 271 standards challenged across seven years of runway, and
-   the fraction gate closes: 241 descendants of 3.NF go dim.
+   the fraction gate closes: 240 descendants of 3.NF go dim.
 3. Card: the percentages look similar; the years of compounding and the
    spine they sit on do not. An early gap is not "the same gap, earlier."
    It is a different, larger thing.
@@ -159,9 +159,9 @@ Reverse time-lapse, the empathy piece for early educators.
 1. Focus HS modeling/functions, map at rest. Card: ask anyone which teacher
    does the most advanced work in the district.
 2. Lapse backward, grade by grade, ancestry accumulating, until only
-   Kindergarten remains lit: K.CC's ten counting standards. Card: 234
-   standards — 49% of everything on this map — descend from a kindergartner
-   learning to count. [cite Duncan early math]
+   Kindergarten remains lit: K.CC's ten counting standards. Card: 225
+   standards, 47% of everything on this map, descend from one Kindergarten
+   standard: counting to 100. [cite Duncan early math]
 3. Card: there is no such thing as "just" teaching counting.
 
 ### 6. Find where it begins (the diagnostic move — also a tour stop)

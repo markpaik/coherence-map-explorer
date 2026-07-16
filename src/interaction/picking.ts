@@ -15,6 +15,13 @@ const CLICK_MOVE_TOLERANCE = 6; // px of travel still counts as a click, not a d
 export interface PickingHandle {
   /** Run the throttled raycast. Returns true if hover state changed. */
   update(): boolean;
+  /**
+   * Intercept the click-to-focus. When set, the guard runs on a node click
+   * BEFORE machine.focus; returning true means "handled, don't focus" (Gaps mode
+   * uses this to mark a standard missed instead of opening the panel). null
+   * clears it and restores normal click-to-focus. Hover is never affected.
+   */
+  setClickGuard(guard: ((nodeIndex: number) => boolean) | null): void;
   dispose(): void;
 }
 
@@ -27,6 +34,7 @@ export function createPicking(
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
 
+  let clickGuard: ((nodeIndex: number) => boolean) | null = null;
   let cursorX = 0;
   let cursorY = 0;
   let pointerDirty = false;
@@ -82,7 +90,10 @@ export function createPicking(
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
     if (moved > CLICK_MOVE_TOLERANCE) return; // a camera drag, not a click
     const id = pickAt(e.clientX, e.clientY);
-    if (id != null) machine.focus(id);
+    if (id == null) return;
+    // Gaps mode claims the click (marks the standard) before it can focus.
+    if (clickGuard && clickGuard(id)) return;
+    machine.focus(id);
   }
   function onPointerCancel(e: PointerEvent): void {
     downs.delete(e.pointerId);
@@ -107,6 +118,9 @@ export function createPicking(
       const id = pickAt(cursorX, cursorY);
       machine.setHover(id, cursorX, cursorY);
       return true;
+    },
+    setClickGuard(guard) {
+      clickGuard = guard;
     },
     dispose() {
       canvas.removeEventListener("pointermove", onPointerMove);

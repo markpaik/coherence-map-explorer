@@ -43,6 +43,12 @@ export interface FiltersHandle {
   /** Whether a grade currently passes the grade-chip filter (search uses this
    * as ranking context: filtered-in grades surface first). */
   isGradeActive(grade: string): boolean;
+  /** Recompute node/edge visibility from the current filter state — used to
+   * reclaim the visibility buffers after a story's spotlight override releases. */
+  recompute(): void;
+  /** Mount an extra chip (its own group) after the lens group — the Gaps MODE
+   * chip lives here, deliberately outside the single-select lens group. */
+  appendModeChip(chip: HTMLElement): void;
   dispose(): void;
 }
 
@@ -239,6 +245,16 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     },
     isGradeActive(grade) {
       return gradeActive.has(grade);
+    },
+    recompute() {
+      recompute();
+    },
+    appendModeChip(chip) {
+      const group = document.createElement("div");
+      group.className = "filter-group filter-group-mode";
+      group.setAttribute("aria-label", "Mode");
+      group.appendChild(chip);
+      groups.appendChild(group); // after grade / strand / lens groups
     },
     dispose() {
       rail.remove();

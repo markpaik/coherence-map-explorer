@@ -44,8 +44,24 @@ export interface NodesHandle {
   emphasisAttr: THREE.InstancedBufferAttribute;
   /** Filter-visibility attribute (1 shown / 0 ghosted); write via filters only. */
   visibleAttr: THREE.InstancedBufferAttribute;
+  /** Per-node structural damage 0..1 (stories + Gaps); write via setDamage only. */
+  damageAttr: THREE.InstancedBufferAttribute;
   /** True unless this instance is filtered out (picking consults this). */
   isVisible(index: number): boolean;
+  /**
+   * Set per-node damage (0..1). null clears every node to 0 in one memset.
+   * Damage composes AFTER emphasis in the shader (a chain-lit but damaged node
+   * keeps its emphasis SIZE and takes the damage COLOR), and stays sub-1.0 HDR
+   * so the ember/flicker never blooms — bloom is reserved for healthy emphasis.
+   */
+  setDamage(values: Float32Array | null): void;
+  /**
+   * Story-only visibility override: ghost every node NOT in the mask (fractional
+   * values allowed, so callers can crossfade). null restores full visibility.
+   * Bypasses the filters UI entirely; the filters recompute reclaims the buffer
+   * on story exit.
+   */
+  setVisibleMask(mask: Float32Array | null): void;
   /**
    * Overwrite instance i's world position (keeps its base radius). Updates
    * BOTH the visible mesh and the pick proxy instance matrices in place — the
@@ -86,14 +102,19 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   }
   // Filter visibility: 1 = shown, 0 = filtered out (ghosted, not hit-tested).
   const visible = new Float32Array(count).fill(1);
+  // Structural damage 0..1 (stories + Gaps); 0 = untouched, 1 = ember husk.
+  const damage = new Float32Array(count); // all 0 at rest
   const emphasisAttr = new THREE.InstancedBufferAttribute(emphasis, 1);
   emphasisAttr.setUsage(THREE.DynamicDrawUsage);
   const phaseAttr = new THREE.InstancedBufferAttribute(phase, 1);
   const visibleAttr = new THREE.InstancedBufferAttribute(visible, 1);
   visibleAttr.setUsage(THREE.DynamicDrawUsage);
+  const damageAttr = new THREE.InstancedBufferAttribute(damage, 1);
+  damageAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aEmphasis", emphasisAttr);
   geometry.setAttribute("aPhase", phaseAttr);
   geometry.setAttribute("aVisible", visibleAttr);
+  geometry.setAttribute("aDamage", damageAttr);
 
   const uniforms = {
     uTime: { value: 0 },
@@ -116,10 +137,13 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         attribute float aEmphasis;
         attribute float aPhase;
         attribute float aVisible;
+        attribute float aDamage;
         uniform float uTime;
         uniform float uShimmer;
         varying float vColorMul;
         varying float vDim;
+        varying float vDamage;
+        varying float vPhase;
         `,
       )
       .replace(
@@ -146,6 +170,10 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
           // read as dimmed — opaque, so the depth pass and edge occlusion hold.
           scl *= mix(0.14, 1.0, aVisible);
           vDim = max(dim, (1.0 - aVisible) * 0.9);
+          // Damage rides on top of emphasis: it recolors (fragment) but never
+          // resizes, so a chain-lit-but-damaged node keeps its emphasis size.
+          vDamage = clamp(aDamage, 0.0, 1.0);
+          vPhase = aPhase;
           transformed *= scl;
         }
         `,
@@ -157,8 +185,11 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         /* glsl */ `
         #include <common>
         uniform vec3 uDimColor;
+        uniform float uTime;
         varying float vColorMul;
         varying float vDim;
+        varying float vDamage;
+        varying float vPhase;
         `,
       )
       .replace(
@@ -166,11 +197,29 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         /* glsl */ `
         #include <color_fragment>
         diffuseColor.rgb = mix(diffuseColor.rgb * vColorMul, uDimColor, vDim);
+        // --- structural damage (composited AFTER emphasis) --------------------
+        // 0 = untouched; 1 = ember husk. Brightness AND saturation lerp toward a
+        // deep red-amber ember by damage; the ember pulses slowly (~2.5s) and a
+        // faint irregular per-node flicker (amplitude ∝ damage) reads as
+        // "struggling, not dead". The husk tops out near #7a3520 (< 1.0 in every
+        // channel), so damage NEVER crosses the bloom threshold — glow stays for
+        // healthy emphasis only.
+        if (vDamage > 0.0001) {
+          float d = vDamage;
+          float pulse = 0.5 + 0.5 * sin(uTime * 2.5132741 + vPhase);       // ~2.5s
+          vec3 emberLo = vec3(0.2902, 0.1216, 0.0784);                     // #4a1f14
+          vec3 emberHi = vec3(0.4784, 0.2078, 0.1255);                     // #7a3520
+          vec3 husk = mix(emberLo, emberHi, pulse);
+          float flick = sin(uTime * 6.7 + vPhase * 3.1) * 0.6
+                      + sin(uTime * 11.3 + vPhase * 1.7) * 0.4;            // irregular
+          float flickMul = 1.0 - 0.16 * d * (0.5 + 0.5 * flick);
+          diffuseColor.rgb = mix(diffuseColor.rgb, husk, d) * flickMul;
+        }
         `,
       );
   };
   // Distinct cache key so the patched program never collides with a stock basic material.
-  material.customProgramCacheKey = () => "coherence-nodes-v1";
+  material.customProgramCacheKey = () => "coherence-nodes-v2-damage";
 
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.frustumCulled = false;
@@ -245,8 +294,25 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     count,
     emphasisAttr,
     visibleAttr,
+    damageAttr,
     isVisible(index) {
       return visible[index] !== 0;
+    },
+    setDamage(values) {
+      if (values === null) {
+        damage.fill(0);
+      } else {
+        damage.set(values);
+      }
+      damageAttr.needsUpdate = true;
+    },
+    setVisibleMask(mask) {
+      if (mask === null) {
+        visible.fill(1);
+      } else {
+        visible.set(mask);
+      }
+      visibleAttr.needsUpdate = true;
     },
     setInstancePosition(index, x, y, z) {
       positions[index * 3] = x;

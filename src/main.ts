@@ -38,7 +38,11 @@ import { createFilters } from "./ui/filters";
 import { createTour } from "./ui/tour";
 import { createViewToggle } from "./ui/viewtoggle";
 import { createFallback } from "./ui/fallback";
+import { createGaps } from "./ui/gaps";
 import { createPicking } from "./interaction/picking";
+import { createDamageEngine } from "./stories/damage";
+import { createSelectorResolver } from "./stories/selectors";
+import { createStoryPlayer, createStoryPicker } from "./stories/player";
 
 const MAX_PIXEL_RATIO = 2;
 
@@ -209,6 +213,38 @@ function start(graph: GraphCore): void {
   });
   void tour;
 
+  // -- stories + Gaps (shared damage engine) --------------------------------
+  const damageEngine = createDamageEngine(graph);
+  const resolveSelector = createSelectorResolver(graph);
+  // Gaps first: the player switches it off on start (both own the damage buffer).
+  const gaps = createGaps({
+    graph,
+    damage: damageEngine,
+    nodes,
+    edges,
+    filters,
+    picking,
+    requestRender,
+    announce,
+  });
+  const storyPlayer = createStoryPlayer({
+    graph,
+    machine,
+    poseDriver,
+    damage: damageEngine,
+    resolve: resolveSelector,
+    nodes,
+    edges,
+    filters,
+    rig,
+    requestRender,
+    announce,
+    reducedMotion: () => reducedMotion,
+    onStart: () => gaps.setActive(false),
+  });
+  const storyPicker = createStoryPicker({ player: storyPlayer });
+  void storyPicker;
+
   // -- reduced motion (single control point; also the __cme debug hook) -----
   // Fans a single boolean out to every animated subsystem: idle drift, node
   // shimmer, star twinkle, edge flow comets, and the machine's cascade/camera
@@ -235,7 +271,14 @@ function start(graph: GraphCore): void {
     const m = /^#\/s\/(.+)$/.exec(location.hash);
     return m ? decodeURIComponent(m[1]) : null;
   };
+  const storyIdFromHash = (): string | null => {
+    const m = /^#\/story\/(.+)$/.exec(location.hash);
+    return m ? decodeURIComponent(m[1]) : null;
+  };
   const routeFromHash = (instant: boolean): void => {
+    // A story is playing (or is being deep-linked): the player owns the scene,
+    // not the standard router.
+    if (storyPlayer.running || storyIdFromHash()) return;
     const code = codeFromHash();
     if (code) {
       machine.focusByCode(code, { instant });
@@ -246,8 +289,10 @@ function start(graph: GraphCore): void {
   window.addEventListener("hashchange", () => routeFromHash(true));
 
   // -- global Escape: close panel / clear focus (search owns its own Esc) --
+  // The story card handles its own Esc (capture-phase, stops propagation), so
+  // this never fires mid-story; the guard is belt-and-suspenders.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && machine.focusedIndex !== null) {
+    if (e.key === "Escape" && machine.focusedIndex !== null && !storyPlayer.running) {
       machine.clearFocus();
     }
   });
@@ -274,6 +319,8 @@ function start(graph: GraphCore): void {
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;
+    // Story damage crossfade (the 1.4s "lapse") eases on the CPU like emphasis.
+    if (storyPlayer.tick(delta)) render = true;
     // Pose morph: CPU-side, so it must keep the frame pump hot while it plays.
     if (poseDriver.tick(delta)) render = true;
     // Keep the toggle's aria-pressed + depth-scale hint in sync with the pose
@@ -441,6 +488,14 @@ function start(graph: GraphCore): void {
       tour,
       // Dual-pose morph driver, for automation (drive setPose, read pose/target).
       pose: { driver: poseDriver },
+      // Stories + Gaps, for automation (start/stop/step a story, mark gaps).
+      stories: {
+        player: storyPlayer,
+        start(id: string): void {
+          storyPlayer.start(id);
+        },
+      },
+      gaps,
       // Scene handles for automated filter/visibility assertions.
       nodes,
       edges,
@@ -448,9 +503,15 @@ function start(graph: GraphCore): void {
     };
   }
 
-  // Resolve any deep link (#/s/<CODE>) now that the scene is ready — instant
-  // reveal + camera cut, panel open.
-  routeFromHash(true);
+  // Resolve any deep link now that the scene is ready. A story link
+  // (#/story/<id>) starts that story; a standard link (#/s/<CODE>) opens the
+  // panel with an instant reveal + camera cut.
+  const deepStory = storyIdFromHash();
+  if (deepStory) {
+    storyPlayer.start(deepStory, { deepLink: true });
+  } else {
+    routeFromHash(true);
+  }
 
   requestAnimationFrame(frame);
 }

@@ -1201,6 +1201,328 @@ body.touring #scene {
   }
 }
 
+/* -- stories: card + timeline scrubber + picker --------------------------- */
+
+.story-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55; /* blocks scene + chrome input while a story plays */
+  background: transparent;
+}
+.story-backdrop[hidden] {
+  display: none;
+}
+
+/* Story card, bottom-LEFT (never over the focused region, which sits center). */
+.story-card {
+  position: fixed;
+  left: clamp(16px, 3vw, 32px);
+  bottom: clamp(20px, 5vh, 48px);
+  z-index: 60;
+  width: min(420px, calc(100vw - 32px));
+  padding: 20px 22px 16px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 14px 46px rgb(0 0 0 / 0.5);
+  animation: story-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.story-card[hidden] {
+  display: none;
+}
+@keyframes story-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.story-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.story-title {
+  margin: 0 0 10px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.story-body {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.story-cite {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.story-cite[hidden] {
+  display: none;
+}
+.story-cite-link {
+  margin-left: 6px;
+  color: var(--ink-2);
+  text-decoration: underline;
+}
+.story-cite-link[hidden] {
+  display: none;
+}
+.story-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.story-controls button {
+  min-height: 44px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.story-btn-back {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.story-btn-inert {
+  opacity: 0.35;
+  cursor: default;
+}
+.story-btn-next {
+  background: linear-gradient(180deg, #b6a6ec, #8b5cf6);
+  border: none;
+  color: #0b0b18;
+  font-weight: 600;
+}
+.story-btn-next:hover {
+  filter: brightness(1.08);
+}
+.story-btn-exit {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--ink-3);
+}
+.story-btn-exit:hover {
+  color: var(--ink-2);
+}
+
+/* Timeline scrubber, bottom-CENTER: a dot per scene + the active year label. */
+.story-scrubber {
+  position: fixed;
+  left: 50%;
+  bottom: clamp(18px, 4.5vh, 36px);
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 12px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.story-scrubber[hidden] {
+  display: none;
+}
+.story-dot {
+  position: relative;
+  width: 26px;
+  height: 44px; /* 44px touch target; the visual dot is the ::before */
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.story-dot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  opacity: 0.5;
+  transition: opacity 150ms ease, background 150ms ease, transform 150ms ease;
+}
+.story-dot:hover::before {
+  opacity: 0.85;
+}
+.story-dot.active::before {
+  background: var(--ink);
+  opacity: 1;
+  transform: scale(1.25);
+}
+.story-year {
+  padding: 0 8px 0 4px;
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+/* Story picker (glass modal from the "Stories" button). */
+.story-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgb(5 5 16 / 0.55);
+}
+.story-picker-backdrop[hidden] {
+  display: none;
+}
+.story-picker {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 66;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 22px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.6);
+}
+.story-picker[hidden] {
+  display: none;
+}
+.story-picker-h {
+  margin: 0 0 14px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 20px;
+  color: var(--ink);
+}
+.story-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.story-picker-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 12px 14px;
+  background: rgb(255 255 255 / 0.02);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.story-picker-item:hover {
+  border-color: var(--ink-3);
+  background: rgb(255 255 255 / 0.05);
+}
+.story-picker-kicker {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.story-picker-title {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--ink);
+}
+.story-picker-hook {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.story-picker-close {
+  margin-top: 14px;
+  min-height: 44px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+/* While a story plays, block scene interaction (backdrop already does; this
+   also disarms camera-controls' pointer capture on the canvas). */
+body.storying #scene {
+  pointer-events: none;
+}
+/* Hide the non-story chrome so the card + scrubber own the frame (the scrubber
+   sits bottom-center, exactly where the filters rail lives). The story controls
+   the pose, so the view toggle is hidden too. Title block + depth scale stay —
+   they give the Ascent its context. */
+body.storying .search-rail,
+body.storying .filters-rail,
+body.storying .view-toggle,
+body.storying .nav-hints,
+body.storying .gaps-status {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* -- Gaps mode: chip + live status --------------------------------------- */
+
+.gaps-status {
+  position: fixed;
+  left: 50%;
+  bottom: 92px; /* clears the filters rail (bottom: 16px), even when it wraps to two rows */
+  transform: translateX(-50%);
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.gaps-status[hidden] {
+  display: none;
+}
+.gaps-clear {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink-3);
+  border-radius: 999px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.gaps-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* -- no-WebGL fallback list ------------------------------------------------ */
 
 body.nowebgl {
@@ -1333,6 +1655,12 @@ body.og .view-toggle,
 body.og .depth-scale,
 body.og .tour-card,
 body.og .tour-backdrop,
+body.og .story-card,
+body.og .story-scrubber,
+body.og .story-backdrop,
+body.og .story-picker,
+body.og .story-picker-backdrop,
+body.og .gaps-status,
 body.og #veil {
   display: none !important;
 }
@@ -1346,8 +1674,12 @@ body.og #veil {
   .tour-dot {
     transition-duration: 50ms;
   }
-  .tour-card {
+  .tour-card,
+  .story-card {
     animation-duration: 1ms;
+  }
+  .story-dot::before {
+    transition-duration: 50ms;
   }
   .search-rail.search-pulse .search-bar {
     animation: none;
@@ -1401,7 +1733,8 @@ body.og #veil {
 :root.rm .depth-scale {
   transition-duration: 50ms !important;
 }
-:root.rm .tour-card {
+:root.rm .tour-card,
+:root.rm .story-card {
   animation-duration: 1ms !important;
 }
 :root.rm .search-rail.search-pulse .search-bar {

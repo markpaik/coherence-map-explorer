@@ -32,7 +32,13 @@ const GRADE_STEP_MS = 80; // per grade layer of the cascade
 const DESCENDANT_DELAY_MS = 200; // descendants ignite this much after focus
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 
-export type MachineState = "idle" | "hover" | "focus" | "searching" | "touring";
+export type MachineState =
+  | "idle"
+  | "hover"
+  | "focus"
+  | "searching"
+  | "touring"
+  | "storying";
 
 // The right-side panel is 400px wide (see style.css); shift a focus target left
 // of center by half that (in CSS px, converted to world units by the rig) so it
@@ -47,6 +53,12 @@ function focusPanelOffsetPx(): number {
 export interface FocusOpts {
   /** Skip the cascade + camera flight (deep links: instant reveal, camera cut). */
   instant?: boolean;
+  /**
+   * Story mode: light the emphasis closure and fly the camera, but DON'T open
+   * the panel, write the hash, or narrate — the story card owns those. The
+   * camera framing is unshifted (no panel to sit beside).
+   */
+  silent?: boolean;
 }
 
 export interface EmphasisPatch {
@@ -99,12 +111,15 @@ export interface Machine {
    * standard's new position; no-op when nothing is focused.
    */
   reframe(): void;
-  /** Leave focus: back to idle, close panel, clear the hash. */
-  clearFocus(): void;
+  /** Leave focus: back to idle, close panel, clear the hash. `silent` (stories)
+   *  resets emphasis without touching the hash. */
+  clearFocus(opts?: { silent?: boolean }): void;
   /** Mark the search UI open/closed (suspends drift, reflects in `state`). */
   setSearching(on: boolean): void;
   /** Enter/leave the guided tour (suspends drift, reports state "touring"). */
   setTouring(on: boolean): void;
+  /** Enter/leave story playback (suspends drift, reports state "storying"). */
+  setStorying(on: boolean): void;
   /** Flip reduced-motion at runtime (debug hook; affects cascade + camera cuts). */
   setReducedMotion(on: boolean): void;
   /** Single choke point for all emphasis writes. */
@@ -113,6 +128,25 @@ export interface Machine {
   tick(deltaSeconds: number): boolean;
   /** Node adjacency (edge indices per node index). */
   edgesOfNode(nodeIndex: number): readonly number[];
+}
+
+// Bounding sphere of a set of node indices, read from CURRENT instance positions
+// (so framing stays correct after a dual-pose morph). The min radius keeps a lone
+// or tightly-clustered target from filling the frame. Exported so the story
+// player can frame a resolved selector union with exactly the machine's logic
+// (rather than copying it). `minRadius` mirrors the focus framing default.
+export function nodeBoundingSphere(
+  nodes: NodesHandle,
+  indices: number[],
+  minRadius = 90,
+): THREE.Sphere {
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (const i of indices) box.expandByPoint(nodes.getPosition(i, v));
+  const sphere = new THREE.Sphere();
+  box.getBoundingSphere(sphere);
+  sphere.radius = Math.max(sphere.radius, minRadius);
+  return sphere;
 }
 
 export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
@@ -180,6 +214,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   let animating = false;
   let searching = false;
   let touring = false;
+  let storying = false;
   let hovered: number | null = null;
   let focusIndex: number | null = null;
 
@@ -378,21 +413,10 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     };
   }
 
-  // Bounding sphere of a set of node indices. The min radius keeps a lone or
-  // tightly-clustered focus from filling the frame — a standard with no mapped
-  // connections (e.g. a parent whose sub-standards carry the edges) still lands
-  // in a legible local context rather than a single giant sphere.
-  function sphereOf(indices: number[]): THREE.Sphere {
-    const box = new THREE.Box3();
-    const v = new THREE.Vector3();
-    // Read CURRENT instance positions (not the static pose-A graph coords) so
-    // framing stays correct after a dual-pose morph.
-    for (const i of indices) box.expandByPoint(nodes.getPosition(i, v));
-    const sphere = new THREE.Sphere();
-    box.getBoundingSphere(sphere);
-    sphere.radius = Math.max(sphere.radius, 90);
-    return sphere;
-  }
+  // Bounding sphere of a set of node indices (see nodeBoundingSphere). Keeps a
+  // lone or tightly-clustered focus from filling the frame — a standard with no
+  // mapped connections still lands in a legible local context.
+  const sphereOf = (indices: number[]): THREE.Sphere => nodeBoundingSphere(nodes, indices);
 
   // --- emphasis rendering (idle vs focus, with hover overlay) --------------
   function renderEmphasis(): void {
@@ -501,26 +525,30 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       }
     }
 
-    // Camera: frame focus + its DIRECT neighbors (+ parts), shifted left of panel.
+    // Camera: frame focus + its DIRECT neighbors (+ parts). During a story the
+    // panel is closed, so the framing is unshifted (silent ⇒ 0 offset).
+    const silent = opts?.silent === true;
     const neighborhood = [nodeIndex, ...data.parts, ...data.buildsOn, ...data.leadsTo, ...data.related];
     lastNeighborhood = neighborhood; // reframe() replays this fit after a morph
-    void rig.focusOn(sphereOf(neighborhood), !cut, focusPanelOffsetPx());
+    void rig.focusOn(sphereOf(neighborhood), !cut, silent ? 0 : focusPanelOffsetPx());
 
-    // Panel + narration + deep link.
-    const connections: Connections = {
-      buildsOn: data.buildsOn,
-      leadsTo: data.leadsTo,
-      related: [...data.related].sort(byGradeThenCode),
-      parts: data.parts,
-      rolledUp: data.rolledUp,
-    };
-    panel.show(nodeIndex, connections);
-    const partsNote = data.parts.length ? `, ${data.parts.length} sub-standards` : "";
-    announce(
-      `Focused ${node.code}, builds on ${data.buildsOn.length} ` +
-        `${data.buildsOn.length === 1 ? "standard" : "standards"}, leads to ${data.leadsTo.length}${partsNote}`,
-    );
-    updateHash(node.code);
+    // Panel + narration + deep link — all owned by the story card while silent.
+    if (!silent) {
+      const connections: Connections = {
+        buildsOn: data.buildsOn,
+        leadsTo: data.leadsTo,
+        related: [...data.related].sort(byGradeThenCode),
+        parts: data.parts,
+        rolledUp: data.rolledUp,
+      };
+      panel.show(nodeIndex, connections);
+      const partsNote = data.parts.length ? `, ${data.parts.length} sub-standards` : "";
+      announce(
+        `Focused ${node.code}, builds on ${data.buildsOn.length} ` +
+          `${data.buildsOn.length === 1 ? "standard" : "standards"}, leads to ${data.leadsTo.length}${partsNote}`,
+      );
+      updateHash(node.code);
+    }
     requestRender();
   }
 
@@ -551,7 +579,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     requestRender();
   }
 
-  function clearFocus(): void {
+  function clearFocus(opts?: { silent?: boolean }): void {
     if (focusIndex === null) return;
     clearRevealTimers();
     focusIndex = null;
@@ -566,12 +594,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     panel.hide();
     // The panel is gone — slide the framed content back to center.
     rig.clearFocalOffset(!reducedMotion);
-    updateHash(null);
+    // Stories own the hash; a silent clear (between scenes / on exit) leaves it.
+    if (!opts?.silent) updateHash(null);
     requestRender();
   }
 
   return {
     get state() {
+      if (storying) return "storying";
       if (touring) return "touring";
       if (hovered !== null) return "hover";
       // Focus outranks searching: an open dropdown over a focused standard is
@@ -637,6 +667,10 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
     setTouring(on) {
       touring = on;
+    },
+
+    setStorying(on) {
+      storying = on;
     },
 
     setReducedMotion(on) {
