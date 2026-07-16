@@ -1,0 +1,876 @@
+/**
+ * build-graph.ts — build-time data pipeline for the Coherence Map Explorer.
+ *
+ * Reads the vendored raw dump (data/raw/data.js), drops ELA/task/orphan blocks,
+ * derives standard codes and strands, normalizes both edge kinds, sanitizes the
+ * HTML text fields, computes a deterministic seeded 3D force layout, bakes edge
+ * control points, and emits public/data/graph-core.json plus per-grade detail
+ * shards.
+ *
+ * This module is NEVER imported by client code. It is executed via
+ * `tsx scripts/build-graph.ts` (npm run data) and imported by the Vitest suite.
+ *
+ * Every structural fact from the data audit is asserted here — the build fails
+ * loudly rather than silently emitting a wrong graph.
+ */
+
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { gzipSync } from "node:zlib";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import sanitizeHtml from "sanitize-html";
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCollide,
+  forceX,
+  forceY,
+  forceZ,
+} from "d3-force-3d";
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(HERE, "..");
+const RAW_PATH = resolve(ROOT, "data/raw/data.js");
+const OUT_DIR = resolve(ROOT, "public/data");
+const DETAILS_DIR = resolve(OUT_DIR, "details");
+const PARAMS_PATH = resolve(HERE, "layout-params.json");
+const OVERRIDES_PATH = resolve(HERE, "layout-overrides.json");
+
+const SOURCE_URL = "https://tools.achievethecore.org/coherence-map/data.js";
+const ACHIEVE_BASE = "https://achievethecore.org";
+const LICENSE = "CC0 (Achieve the Core) — see README";
+
+const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"] as const;
+type Grade = (typeof GRADE_ORDER)[number];
+const GRADE_LABELS: Record<Grade, string> = {
+  K: "Kindergarten",
+  "1": "Grade 1",
+  "2": "Grade 2",
+  "3": "Grade 3",
+  "4": "Grade 4",
+  "5": "Grade 5",
+  "6": "Grade 6",
+  "7": "Grade 7",
+  "8": "Grade 8",
+  HS: "High School",
+};
+
+type Strand = "number" | "algebra" | "geometry" | "data";
+const STRAND_LABELS: Record<Strand, string> = {
+  number: "Number & Quantity",
+  algebra: "Algebra & Functions",
+  geometry: "Geometry",
+  data: "Data & Statistics",
+};
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+function assert(cond: unknown, msg: string): asserts cond {
+  if (!cond) throw new Error(`[build-graph] assertion failed: ${msg}`);
+}
+
+/** Deterministic mulberry32 PRNG returning [0, 1). */
+function makeRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+const numAsc = (a: string, b: string): number => Number(a) - Number(b);
+
+// ---------------------------------------------------------------------------
+// Raw types (loosely typed — the dump is untyped JSON)
+// ---------------------------------------------------------------------------
+interface RawStandard {
+  id: string;
+  ccmathcluster_id: string;
+  ordinal: string;
+  desc?: string;
+  example_problem?: string;
+  example_problem_url?: string;
+  example_problem_attribution?: string;
+  progressions?: string;
+  links?: { name: string; links: { name: string; url: string }[] }[];
+  modeling?: string;
+  wap?: string;
+}
+interface RawCluster {
+  id: string;
+  ccmathdomain_id: string;
+  ordinal: string;
+  msa: string;
+  name: string;
+}
+interface RawDomain {
+  id: string;
+  grade: string;
+  ordinal: string;
+  name: string;
+}
+interface RawEdge {
+  from: string;
+  to: string;
+}
+
+// ---------------------------------------------------------------------------
+// Output types
+// ---------------------------------------------------------------------------
+interface OutNode {
+  id: string;
+  code: string;
+  grade: Grade;
+  strand: Strand;
+  domain: string;
+  domainName: string;
+  clusterCode: string;
+  msa: number;
+  wap: boolean;
+  modeling: boolean;
+  deg: number;
+  pos: [number, number, number];
+}
+interface OutEdge {
+  s: string;
+  t: string;
+  k: 0 | 1;
+  c: [number, number, number];
+}
+interface GraphCore {
+  meta: {
+    standards: number;
+    prereqEdges: number;
+    relatedEdges: number;
+    source: string;
+    license: string;
+  };
+  grades: { id: Grade; label: string; x0: number; x1: number }[];
+  strands: Record<Strand, { label: string }>;
+  nodes: OutNode[];
+  edges: OutEdge[];
+}
+interface DetailEntry {
+  desc?: string;
+  example?: string;
+  exampleAttr?: string;
+  exampleUrl?: string;
+  progressions?: string;
+  clusterName?: string;
+  tasks?: { group: string; name: string; url: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Strand mapping (hard-fails on any unmapped domain ordinal)
+// ---------------------------------------------------------------------------
+function strandOf(ord: string): Strand | null {
+  if (ord.startsWith("N-") || ["CC", "NBT", "NF", "RP", "NS"].includes(ord))
+    return "number";
+  if (
+    ord.startsWith("A-") ||
+    ord.startsWith("F-") ||
+    ["OA", "EE", "F"].includes(ord)
+  )
+    return "algebra";
+  if (ord.startsWith("G-") || ord === "G") return "geometry";
+  if (ord.startsWith("S-") || ["MD", "SP"].includes(ord)) return "data";
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// HTML sanitization
+// ---------------------------------------------------------------------------
+function absolutize(url: string): string {
+  if (!url) return url;
+  if (url.startsWith("/")) return ACHIEVE_BASE + url;
+  return url;
+}
+
+const sanitizeOpts: sanitizeHtml.IOptions = {
+  allowedTags: [
+    "p",
+    "br",
+    "ul",
+    "ol",
+    "li",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "td",
+    "th",
+    "sub",
+    "sup",
+    "b",
+    "strong",
+    "i",
+    "em",
+    "span",
+    "h3",
+    "img",
+    "a",
+  ],
+  allowedAttributes: {
+    span: ["class", "data-def"],
+    a: ["href", "target", "rel"],
+    img: ["src", "alt", "loading", "decoding"],
+    td: ["colspan", "rowspan"],
+    th: ["colspan", "rowspan"],
+  },
+  allowedSchemes: ["http", "https"],
+  // Disallowed tags (e.g. <div>, <h1>, <h2> pre-transform) discard the tag but
+  // keep their text content.
+  disallowedTagsMode: "discard",
+  transformTags: {
+    h1: "h3",
+    h2: "h3",
+    a: (_tag: string, attribs): sanitizeHtml.Tag => {
+      const href = absolutize(attribs.href || "");
+      const isExternal = /^https?:\/\//i.test(href);
+      // Glossary anchor: has an id (the definition text) and no external link.
+      if (!isExternal && attribs.id) {
+        const out: Record<string, string> = {
+          class: "term",
+          "data-def": attribs.id,
+        };
+        return { tagName: "span", attribs: out };
+      }
+      if (isExternal) {
+        const out: Record<string, string> = {
+          href,
+          target: "_blank",
+          rel: "noopener",
+        };
+        return { tagName: "a", attribs: out };
+      }
+      // Anchor with neither a usable href nor an id: drop to a bare span.
+      return { tagName: "span", attribs: {} };
+    },
+    img: (_tag: string, attribs): sanitizeHtml.Tag => {
+      const out: Record<string, string> = {
+        src: absolutize(attribs.src || ""),
+        loading: "lazy",
+        decoding: "async",
+      };
+      if (attribs.alt) out.alt = attribs.alt;
+      return { tagName: "img", attribs: out };
+    },
+  },
+};
+
+// MathJax delimiters are plain text and must survive verbatim. htmlparser2 can
+// mis-tokenize a raw "<" that sits inside math (e.g. "$x<y$" → phantom <y> tag),
+// so we placeholder every math span before sanitizing and restore it after.
+const MATH_PATTERNS: RegExp[] = [
+  /\$\$[\s\S]*?\$\$/g, // $$...$$
+  /\\\[[\s\S]*?\\\]/g, // \[...\]
+  /\\\([\s\S]*?\\\)/g, // \(...\)
+  /\$[^$\n]*?\$/g, // $...$
+];
+
+function sanitizeField(html: string | undefined): string {
+  if (!html) return "";
+  const store: string[] = [];
+  let work = html;
+  for (const re of MATH_PATTERNS) {
+    work = work.replace(re, (m) => {
+      const token = `⁣MATH${store.length}⁣`;
+      store.push(m);
+      return token;
+    });
+  }
+  let clean = sanitizeHtml(work, sanitizeOpts);
+  clean = clean.replace(/⁣MATH(\d+)⁣/g, (_m, i) => store[Number(i)]);
+  return clean.trim();
+}
+
+// ---------------------------------------------------------------------------
+// Main build
+// ---------------------------------------------------------------------------
+export interface BuildResult {
+  core: GraphCore;
+  details: Record<Grade, Record<string, DetailEntry>>;
+  report: {
+    standards: number;
+    prereqEdges: number;
+    relatedEdges: number;
+    isolated: number;
+    droppedClusters: number;
+    topDegree: { code: string; deg: number }[];
+    bounds: {
+      x: [number, number];
+      y: [number, number];
+      z: [number, number];
+    };
+  };
+}
+
+interface Params {
+  seed: number;
+  bandWidth: number;
+  bandGapRatio: number;
+  hsWidthMultiplier: number;
+  hsSubColumns: string[];
+  bandMargin: number;
+  radius: number;
+  isolatedRadius: number;
+  seedJitter: number;
+  strandHomeAngles: Record<Strand, number>;
+  force: {
+    prereqDistance: number;
+    relatedDistance: number;
+    prereqStrength: number;
+    relatedStrength: number;
+    charge: number;
+    collideRadius: number;
+    radialStrength: number;
+    xStrength: number;
+  };
+  ticks: number;
+  alphaMin: number;
+  velocityDecay: number;
+  ctrl: { push: number; jitter: number; nearAxisEpsilon: number };
+}
+
+interface SimNode {
+  id: string;
+  strand: Strand;
+  grade: Grade;
+  band: Band;
+  subCol: number; // -1 for non-HS
+  x: number;
+  y: number;
+  z: number;
+}
+interface Band {
+  id: Grade;
+  x0: number;
+  x1: number;
+  center: number;
+}
+
+export function buildGraph(): BuildResult {
+  const params: Params = JSON.parse(readFileSync(PARAMS_PATH, "utf8"));
+  const overrides: Record<string, [number, number, number]> = JSON.parse(
+    readFileSync(OVERRIDES_PATH, "utf8"),
+  );
+  const rng = makeRng(params.seed);
+
+  // --- 1. Read + parse ------------------------------------------------------
+  let raw = readFileSync(RAW_PATH, "utf8").trim();
+  raw = raw.replace(/^window\.cc\s*=\s*/, "").replace(/;\s*$/, "");
+  const cc = JSON.parse(raw) as {
+    standards: Record<string, RawStandard>;
+    clusters: Record<string, RawCluster>;
+    domains: Record<string, RawDomain>;
+    edges: RawEdge[];
+    nd_edges: RawEdge[];
+  };
+
+  const standards = cc.standards;
+  const clusters = cc.clusters;
+  const domains = cc.domains;
+
+  // --- 2. Drop orphan clusters; validate join integrity --------------------
+  const usedClusterIds = new Set<string>();
+  for (const s of Object.values(standards)) usedClusterIds.add(s.ccmathcluster_id);
+
+  let droppedClusters = 0;
+  const keptClusters: Record<string, RawCluster> = {};
+  for (const c of Object.values(clusters)) {
+    const domainExists = Boolean(domains[c.ccmathdomain_id]);
+    const used = usedClusterIds.has(c.id);
+    if (!domainExists) {
+      // Orphan cluster referencing a missing domain — must be used by nobody.
+      assert(!used, `orphan cluster ${c.id} (missing domain) is used by a standard`);
+      droppedClusters++;
+      continue;
+    }
+    keptClusters[c.id] = c;
+  }
+  assert(droppedClusters === 6, `expected to drop 6 orphan clusters, dropped ${droppedClusters}`);
+
+  const standardList = Object.values(standards);
+  assert(standardList.length === 480, `expected 480 standards, got ${standardList.length}`);
+  for (const s of standardList) {
+    const c = keptClusters[s.ccmathcluster_id];
+    assert(c, `standard ${s.id} references missing/dropped cluster ${s.ccmathcluster_id}`);
+    assert(domains[c.ccmathdomain_id], `cluster ${c.id} references missing domain`);
+  }
+
+  // --- 3. Derive codes ------------------------------------------------------
+  function deriveCode(s: RawStandard): string {
+    const c = keptClusters[s.ccmathcluster_id];
+    const d = domains[c.ccmathdomain_id];
+    return d.grade === "HS"
+      ? `${d.ordinal}.${c.ordinal}.${s.ordinal}`
+      : `${d.grade}.${d.ordinal}.${c.ordinal}.${s.ordinal}`;
+  }
+  const codeById = new Map<string, string>();
+  const seenCodes = new Set<string>();
+  for (const s of standardList) {
+    const code = deriveCode(s);
+    assert(!seenCodes.has(code), `duplicate derived code ${code}`);
+    seenCodes.add(code);
+    codeById.set(s.id, code);
+  }
+  assert(codeById.get("9") === "1.MD.A.1", `golden code: id 9 → ${codeById.get("9")}`);
+  assert(seenCodes.has("F-IF.A.1"), "golden code F-IF.A.1 missing");
+  assert(seenCodes.has("4.NF.B.3.a"), "golden code 4.NF.B.3.a missing");
+
+  // --- 4. Strand assignment (hard-fail on unmapped domain ordinal) ---------
+  const distinctOrdinals = new Set<string>();
+  for (const c of Object.values(keptClusters))
+    distinctOrdinals.add(domains[c.ccmathdomain_id].ordinal);
+  const unmapped = [...distinctOrdinals].filter((o) => strandOf(o) === null);
+  assert(
+    unmapped.length === 0,
+    `unmapped domain ordinal(s): ${unmapped.join(", ")}`,
+  );
+
+  // --- Grade bands (X axis) -------------------------------------------------
+  const W = params.bandWidth;
+  const gap = params.bandGapRatio * W;
+  const bands = new Map<Grade, Band>();
+  let cursor = 0;
+  for (const g of GRADE_ORDER) {
+    const width = g === "HS" ? W * params.hsWidthMultiplier : W;
+    const x0 = cursor;
+    const x1 = cursor + width;
+    bands.set(g, { id: g, x0, x1, center: (x0 + x1) / 2 });
+    cursor = x1 + gap;
+  }
+  // Center the whole X extent about the origin.
+  const totalWidth = cursor - gap;
+  const shift = -totalWidth / 2;
+  for (const b of bands.values()) {
+    b.x0 += shift;
+    b.x1 += shift;
+    b.center += shift;
+  }
+
+  function hsSubColumn(ord: string): number {
+    const idx = params.hsSubColumns.indexOf(ord[0]);
+    assert(idx >= 0, `HS domain ordinal ${ord} has no sub-column mapping`);
+    return idx;
+  }
+  function subColInterval(band: Band, subCol: number): [number, number] {
+    const n = params.hsSubColumns.length;
+    const w = (band.x1 - band.x0) / n;
+    return [band.x0 + subCol * w, band.x0 + (subCol + 1) * w];
+  }
+
+  // --- Build node metadata --------------------------------------------------
+  interface NodeMeta {
+    id: string;
+    code: string;
+    grade: Grade;
+    strand: Strand;
+    domainOrd: string;
+    domainName: string;
+    clusterCode: string;
+    msa: number;
+    wap: boolean;
+    modeling: boolean;
+    subCol: number;
+  }
+  const meta = new Map<string, NodeMeta>();
+  const gradeCount: Record<string, number> = {};
+  for (const s of standardList) {
+    const c = keptClusters[s.ccmathcluster_id];
+    const d = domains[c.ccmathdomain_id];
+    const grade = d.grade as Grade;
+    const strand = strandOf(d.ordinal)!;
+    const subCol = grade === "HS" ? hsSubColumn(d.ordinal) : -1;
+    const clusterCode =
+      grade === "HS"
+        ? `${d.ordinal}.${c.ordinal}`
+        : `${grade}.${d.ordinal}.${c.ordinal}`;
+    const msa = Number(c.msa);
+    assert(msa === 0 || msa === 1 || msa === 2, `bad msa ${c.msa} on cluster ${c.id}`);
+    meta.set(s.id, {
+      id: s.id,
+      code: codeById.get(s.id)!,
+      grade,
+      strand,
+      domainOrd: d.ordinal,
+      domainName: d.name,
+      clusterCode,
+      msa,
+      wap: s.wap === "1",
+      modeling: s.modeling === "1",
+      subCol,
+    });
+    gradeCount[grade] = (gradeCount[grade] || 0) + 1;
+  }
+
+  // --- 5. Edges -------------------------------------------------------------
+  const validIds = new Set(Object.keys(standards));
+  // Prereq (directed)
+  const prereq: { s: string; t: string }[] = [];
+  const seenPrereq = new Set<string>();
+  for (const e of cc.edges) {
+    assert(validIds.has(e.from) && validIds.has(e.to), `dangling prereq edge ${e.from}->${e.to}`);
+    assert(e.from !== e.to, `self-loop prereq edge on ${e.from}`);
+    const key = `${e.from}>${e.to}`;
+    assert(!seenPrereq.has(key), `duplicate prereq edge ${key}`);
+    seenPrereq.add(key);
+    prereq.push({ s: e.from, t: e.to });
+  }
+  assert(prereq.length === 757, `expected 757 prereq edges, got ${prereq.length}`);
+
+  // DAG check (Kahn topological sort)
+  {
+    const indeg = new Map<string, number>();
+    const adj = new Map<string, string[]>();
+    for (const id of validIds) {
+      indeg.set(id, 0);
+      adj.set(id, []);
+    }
+    for (const e of prereq) {
+      adj.get(e.s)!.push(e.t);
+      indeg.set(e.t, indeg.get(e.t)! + 1);
+    }
+    const queue = [...validIds].filter((id) => indeg.get(id) === 0);
+    let visited = 0;
+    while (queue.length) {
+      const n = queue.shift()!;
+      visited++;
+      for (const m of adj.get(n)!) {
+        indeg.set(m, indeg.get(m)! - 1);
+        if (indeg.get(m) === 0) queue.push(m);
+      }
+    }
+    assert(visited === validIds.size, `prereq edges are not a DAG (cycle detected)`);
+  }
+
+  // Related (undirected, deduped)
+  const relatedSet = new Set<string>();
+  for (const e of cc.nd_edges) {
+    assert(validIds.has(e.from) && validIds.has(e.to), `dangling related edge ${e.from}->${e.to}`);
+    if (e.from === e.to) continue;
+    const [a, b] = numAsc(e.from, e.to) <= 0 ? [e.from, e.to] : [e.to, e.from];
+    relatedSet.add(`${a}|${b}`);
+  }
+  const related = [...relatedSet].map((p) => {
+    const [s, t] = p.split("|");
+    return { s, t };
+  });
+  assert(related.length === 142, `expected 142 related edges, got ${related.length}`);
+
+  // Degrees (both kinds count)
+  const deg = new Map<string, number>();
+  for (const id of validIds) deg.set(id, 0);
+  for (const e of prereq) {
+    deg.set(e.s, deg.get(e.s)! + 1);
+    deg.set(e.t, deg.get(e.t)! + 1);
+  }
+  for (const e of related) {
+    deg.set(e.s, deg.get(e.s)! + 1);
+    deg.set(e.t, deg.get(e.t)! + 1);
+  }
+
+  // --- 7. Layout ------------------------------------------------------------
+  const HALF_PI_TURN = Math.PI / 180;
+  function homePoint(strand: Strand): [number, number] {
+    const a = params.strandHomeAngles[strand] * HALF_PI_TURN;
+    return [params.radius * Math.cos(a), params.radius * Math.sin(a)];
+  }
+
+  const sortedIds = [...validIds].sort(numAsc);
+  const simNodes: SimNode[] = [];
+  const isolatedIds: string[] = [];
+  for (const id of sortedIds) {
+    if (deg.get(id) === 0) {
+      isolatedIds.push(id);
+      continue;
+    }
+    const m = meta.get(id)!;
+    const band = bands.get(m.grade)!;
+    const [hy, hz] = homePoint(m.strand);
+    const cx = m.grade === "HS" ? (subColInterval(band, m.subCol)[0] + subColInterval(band, m.subCol)[1]) / 2 : band.center;
+    simNodes.push({
+      id,
+      strand: m.strand,
+      grade: m.grade,
+      band,
+      subCol: m.subCol,
+      x: cx + (rng() - 0.5) * params.seedJitter,
+      y: hy + (rng() - 0.5) * params.seedJitter,
+      z: hz + (rng() - 0.5) * params.seedJitter,
+    });
+  }
+
+  // Clamp helper (X only; sub-column for HS)
+  const margin = params.bandMargin;
+  function clampX(n: SimNode): void {
+    let lo: number, hi: number;
+    if (n.grade === "HS") {
+      [lo, hi] = subColInterval(n.band, n.subCol);
+    } else {
+      lo = n.band.x0;
+      hi = n.band.x1;
+    }
+    lo += margin;
+    hi -= margin;
+    if (n.x < lo) n.x = lo;
+    else if (n.x > hi) n.x = hi;
+  }
+
+  // Links over both edge kinds.
+  const simLinks = [
+    ...prereq.map((e) => ({ source: e.s, target: e.t, kind: 0 })),
+    ...related.map((e) => ({ source: e.s, target: e.t, kind: 1 })),
+  ];
+
+  const F = params.force;
+  const sim = forceSimulation(simNodes, 3).stop();
+  sim.force(
+    "link",
+    forceLink(simLinks)
+      .id((n: SimNode) => n.id)
+      .distance((l: { kind: number }) => (l.kind === 0 ? F.prereqDistance : F.relatedDistance))
+      .strength((l: { kind: number }) => (l.kind === 0 ? F.prereqStrength : F.relatedStrength)),
+  );
+  sim.force("charge", forceManyBody().strength(F.charge));
+  sim.force("collide", forceCollide(F.collideRadius));
+  sim.force(
+    "x",
+    forceX((n: SimNode) =>
+      n.grade === "HS"
+        ? (subColInterval(n.band, n.subCol)[0] + subColInterval(n.band, n.subCol)[1]) / 2
+        : n.band.center,
+    ).strength(F.xStrength),
+  );
+  sim.force("y", forceY((n: SimNode) => homePoint(n.strand)[0]).strength(F.radialStrength));
+  sim.force("z", forceZ((n: SimNode) => homePoint(n.strand)[1]).strength(F.radialStrength));
+  sim.velocityDecay(params.velocityDecay);
+  sim.randomSource(rng);
+  const alphaDecay = 1 - Math.pow(params.alphaMin, 1 / params.ticks);
+  sim.alpha(1).alphaMin(params.alphaMin).alphaDecay(alphaDecay);
+
+  for (let i = 0; i < params.ticks; i++) {
+    sim.tick();
+    for (const n of simNodes) clampX(n);
+  }
+  for (const n of simNodes) clampX(n);
+
+  // Position map
+  const pos = new Map<string, [number, number, number]>();
+  for (const n of simNodes) pos.set(n.id, [n.x, n.y, n.z]);
+
+  // Isolated nodes: golden-angle halo ring per band.
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  const bandIsoIndex = new Map<Grade, number>();
+  for (const id of isolatedIds) {
+    const m = meta.get(id)!;
+    const band = bands.get(m.grade)!;
+    const idx = bandIsoIndex.get(m.grade) ?? 0;
+    bandIsoIndex.set(m.grade, idx + 1);
+    const a = GOLDEN * idx;
+    pos.set(id, [
+      band.center,
+      params.isolatedRadius * Math.cos(a),
+      params.isolatedRadius * Math.sin(a),
+    ]);
+  }
+
+  // Overrides (applied last)
+  for (const [code, xyz] of Object.entries(overrides)) {
+    const id = [...codeById.entries()].find(([, c]) => c === code)?.[0];
+    if (id) pos.set(id, xyz);
+  }
+
+  // --- 8. Edge control points ----------------------------------------------
+  function controlPoint(s: string, t: string, srcStrand: Strand): [number, number, number] {
+    const a = pos.get(s)!;
+    const b = pos.get(t)!;
+    const mx = (a[0] + b[0]) / 2;
+    const my = (a[1] + b[1]) / 2;
+    const mz = (a[2] + b[2]) / 2;
+    const chord = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    const push = params.ctrl.push * chord;
+    const rr = Math.hypot(my, mz);
+    let dy: number, dz: number;
+    if (rr < params.ctrl.nearAxisEpsilon) {
+      const [hy, hz] = homePoint(srcStrand);
+      const hl = Math.hypot(hy, hz) || 1;
+      dy = hy / hl;
+      dz = hz / hl;
+    } else {
+      dy = my / rr;
+      dz = mz / rr;
+    }
+    // Perpendicular (in YZ plane) for jitter.
+    const py = -dz;
+    const pz = dy;
+    const jit = push * params.ctrl.jitter * (rng() * 2 - 1);
+    return [
+      round2(mx),
+      round2(my + dy * push + py * jit),
+      round2(mz + dz * push + pz * jit),
+    ];
+  }
+
+  // --- 9. Emit --------------------------------------------------------------
+  const nodes: OutNode[] = sortedIds.map((id) => {
+    const m = meta.get(id)!;
+    const p = pos.get(id)!;
+    for (const v of p) assert(Number.isFinite(v), `non-finite position on ${id}`);
+    return {
+      id,
+      code: m.code,
+      grade: m.grade,
+      strand: m.strand,
+      domain: m.domainOrd,
+      domainName: m.domainName,
+      clusterCode: m.clusterCode,
+      msa: m.msa,
+      wap: m.wap,
+      modeling: m.modeling,
+      deg: deg.get(id)!,
+      pos: [round2(p[0]), round2(p[1]), round2(p[2])],
+    };
+  });
+
+  const outEdges: OutEdge[] = [];
+  for (const e of [...prereq].sort((a, b) => numAsc(a.s, b.s) || numAsc(a.t, b.t))) {
+    outEdges.push({ s: e.s, t: e.t, k: 0, c: controlPoint(e.s, e.t, meta.get(e.s)!.strand) });
+  }
+  for (const e of [...related].sort((a, b) => numAsc(a.s, b.s) || numAsc(a.t, b.t))) {
+    outEdges.push({ s: e.s, t: e.t, k: 1, c: controlPoint(e.s, e.t, meta.get(e.s)!.strand) });
+  }
+
+  const core: GraphCore = {
+    meta: {
+      standards: nodes.length,
+      prereqEdges: prereq.length,
+      relatedEdges: related.length,
+      source: SOURCE_URL,
+      license: LICENSE,
+    },
+    grades: GRADE_ORDER.map((g) => {
+      const b = bands.get(g)!;
+      return { id: g, label: GRADE_LABELS[g], x0: round2(b.x0), x1: round2(b.x1) };
+    }),
+    strands: {
+      number: { label: STRAND_LABELS.number },
+      algebra: { label: STRAND_LABELS.algebra },
+      geometry: { label: STRAND_LABELS.geometry },
+      data: { label: STRAND_LABELS.data },
+    },
+    nodes,
+    edges: outEdges,
+  };
+
+  // Details, sharded by grade.
+  const details = {} as Record<Grade, Record<string, DetailEntry>>;
+  for (const g of GRADE_ORDER) details[g] = {};
+  for (const s of standardList) {
+    const m = meta.get(s.id)!;
+    const c = keptClusters[s.ccmathcluster_id];
+    const entry: DetailEntry = {};
+    const desc = sanitizeField(s.desc);
+    const example = sanitizeField(s.example_problem);
+    const progressions = sanitizeField(s.progressions);
+    if (desc) entry.desc = desc;
+    if (example) entry.example = example;
+    if (s.example_problem_attribution && s.example_problem_attribution.trim())
+      entry.exampleAttr = s.example_problem_attribution.trim();
+    if (s.example_problem_url && s.example_problem_url.trim())
+      entry.exampleUrl = absolutize(s.example_problem_url.trim());
+    if (progressions) entry.progressions = progressions;
+    if (c.name) entry.clusterName = c.name;
+    const tasks: { group: string; name: string; url: string }[] = [];
+    for (const grp of s.links || []) {
+      for (const l of grp.links || []) {
+        if (!l.url) continue;
+        tasks.push({ group: grp.name, name: l.name, url: absolutize(l.url) });
+      }
+    }
+    if (tasks.length) entry.tasks = tasks;
+    details[m.grade][s.id] = entry;
+  }
+
+  // Bounds report
+  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity, zmin = Infinity, zmax = -Infinity;
+  for (const n of nodes) {
+    xmin = Math.min(xmin, n.pos[0]); xmax = Math.max(xmax, n.pos[0]);
+    ymin = Math.min(ymin, n.pos[1]); ymax = Math.max(ymax, n.pos[1]);
+    zmin = Math.min(zmin, n.pos[2]); zmax = Math.max(zmax, n.pos[2]);
+  }
+  const topDegree = [...nodes]
+    .sort((a, b) => b.deg - a.deg)
+    .slice(0, 10)
+    .map((n) => ({ code: n.code, deg: n.deg }));
+
+  return {
+    core,
+    details,
+    report: {
+      standards: nodes.length,
+      prereqEdges: prereq.length,
+      relatedEdges: related.length,
+      isolated: isolatedIds.length,
+      droppedClusters,
+      topDegree,
+      bounds: { x: [round2(xmin), round2(xmax)], y: [round2(ymin), round2(ymax)], z: [round2(zmin), round2(zmax)] },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// CLI: write files + print report
+// ---------------------------------------------------------------------------
+function writeAll(result: BuildResult): void {
+  mkdirSync(DETAILS_DIR, { recursive: true });
+  const coreJson = JSON.stringify(result.core);
+  writeFileSync(resolve(OUT_DIR, "graph-core.json"), coreJson);
+  const shardSizes: { name: string; bytes: number; gzip: number }[] = [];
+  for (const g of GRADE_ORDER) {
+    const json = JSON.stringify(result.details[g]);
+    const file = resolve(DETAILS_DIR, `${g}.json`);
+    writeFileSync(file, json);
+    shardSizes.push({
+      name: `details/${g}.json`,
+      bytes: Buffer.byteLength(json),
+      gzip: gzipSync(json).length,
+    });
+  }
+
+  const coreBytes = Buffer.byteLength(coreJson);
+  const coreGzip = gzipSync(coreJson).length;
+  const kb = (n: number) => (n / 1024).toFixed(1) + "kB";
+
+  const r = result.report;
+  console.log("\n=== Coherence Map Explorer — data pipeline report ===");
+  console.log(`standards:      ${r.standards}`);
+  console.log(`prereq edges:   ${r.prereqEdges}`);
+  console.log(`related edges:  ${r.relatedEdges}`);
+  console.log(`isolated nodes: ${r.isolated}`);
+  console.log(`dropped clusters (orphan): ${r.droppedClusters}`);
+  console.log("\n-- file sizes (raw / gzip) --");
+  console.log(`graph-core.json   ${kb(coreBytes)} / ${kb(coreGzip)}${coreGzip > 120 * 1024 ? "  ⚠ OVER 120kB gzip budget" : ""}`);
+  for (const s of shardSizes) console.log(`${s.name.padEnd(18)}${kb(s.bytes)} / ${kb(s.gzip)}`);
+  console.log("\n-- position bounds --");
+  console.log(`x: [${r.bounds.x[0]}, ${r.bounds.x[1]}]  y: [${r.bounds.y[0]}, ${r.bounds.y[1]}]  z: [${r.bounds.z[0]}, ${r.bounds.z[1]}]`);
+  console.log("\n-- top-degree standards --");
+  for (const t of r.topDegree) console.log(`  ${t.code.padEnd(12)} deg ${t.deg}`);
+  console.log("\nWrote public/data/graph-core.json + details/{K,1..8,HS}.json\n");
+}
+
+// Only run the CLI when executed directly (not when imported by tests).
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  writeAll(buildGraph());
+}

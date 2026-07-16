@@ -1,0 +1,32 @@
+{
+  "name": "coherence-map-explorer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "3D WebGL knowledge-graph explorer of the Common Core math coherence map.",
+  "scripts": {
+    "data": "tsx scripts/build-graph.ts",
+    "dev": "npm run data && vite",
+    "build": "npm run data && tsc --noEmit && vite build",
+    "test": "npm run data && vitest run",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "camera-controls": "^3.1.2",
+    "minisearch": "^7.2.0",
+    "postprocessing": "^6.39.2",
+    "three": "0.185.1",
+    "troika-three-text": "^0.52.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/sanitize-html": "^2.16.1",
+    "@types/three": "^0.185.1",
+    "d3-force-3d": "^3.0.6",
+    "sanitize-html": "^2.17.6",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.0.0"
+  }
+}

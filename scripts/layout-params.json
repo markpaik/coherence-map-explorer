@@ -1,0 +1,35 @@
+{
+  "seed": 1337,
+  "bandWidth": 60,
+  "bandGapRatio": 0.35,
+  "hsWidthMultiplier": 2.5,
+  "hsSubColumns": ["N", "A", "F", "G", "S"],
+  "bandMargin": 3,
+  "radius": 55,
+  "isolatedRadius": 85,
+  "seedJitter": 12,
+  "strandHomeAngles": {
+    "number": 0,
+    "algebra": 90,
+    "geometry": 180,
+    "data": 270
+  },
+  "force": {
+    "prereqDistance": 30,
+    "relatedDistance": 65,
+    "prereqStrength": 0.5,
+    "relatedStrength": 0.15,
+    "charge": -35,
+    "collideRadius": 7,
+    "radialStrength": 0.09,
+    "xStrength": 0.18
+  },
+  "ticks": 450,
+  "alphaMin": 0.001,
+  "velocityDecay": 0.4,
+  "ctrl": {
+    "push": 0.12,
+    "jitter": 0.15,
+    "nearAxisEpsilon": 5
+  }
+}

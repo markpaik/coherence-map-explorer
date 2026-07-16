@@ -1,0 +1,11 @@
+{
+  // Coherence Map Explorer — Cloudflare static-assets (SPA) deployment.
+  // The built Vite output in ./dist is served directly; unmatched routes
+  // fall back to index.html so client-side state (deep links) resolves.
+  "name": "coherence-map-explorer",
+  "compatibility_date": "2026-07-15",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
