@@ -2,8 +2,14 @@
   "seed": 1337,
   "bandWidth": 60,
   "bandGapRatio": 0.35,
-  "hsWidthMultiplier": 2.5,
-  "hsSubColumns": ["N", "A", "F", "G", "S"],
+  "hsWidthMultiplier": 4.0,
+  "hsSubColumns": [
+    "N",
+    "A",
+    "F",
+    "G",
+    "S"
+  ],
   "bandMargin": 3,
   "radius": 55,
   "isolatedRadius": 85,
@@ -19,8 +25,8 @@
     "relatedDistance": 65,
     "prereqStrength": 0.5,
     "relatedStrength": 0.15,
-    "charge": -35,
-    "collideRadius": 7,
+    "charge": -42,
+    "collideRadius": 8,
     "radialStrength": 0.09,
     "xStrength": 0.18
   },
