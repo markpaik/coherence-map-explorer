@@ -1,24 +1,25 @@
-// Grade etchings: K 1 2 … 8 HS as large, very dim troika Text — etched
-// constellation names floating below each grade band. Fixed in world space
-// (billboarding OFF): each label is rotated once to face the initial camera
-// azimuth, so orbiting past them reads like flying over engravings.
-//
-// Plain troika Text (10 instances = 10 draw calls) — BatchedText exists in
-// newer troika builds but 10 labels don't justify chasing it.
+// Grade markers: K 1 2 … 8 HS as extruded 3D type (Space Grotesk 600,
+// converted to a minimal 11-glyph typeface.json by scripts/make-typeface.mjs).
+// Real geometry, fixed in world space below each grade band — orbiting past
+// them reads like flying over monuments, not sprites. Two-tone materials fake
+// directional light without adding a light rig: faces carry a lifted indigo,
+// extrusion sides fall into shadow.
 
 import * as THREE from "three";
-import { Text } from "troika-three-text";
+import { FontLoader, type Font } from "three/addons/loaders/FontLoader.js";
+import { TextGeometry } from "three/addons/geometries/TextGeometry.js";
 import type { GraphGrade } from "../data";
 
-const FONT_URL = "/fonts/space-grotesk-latin-600-normal.woff"; // troika parses WOFF1, not WOFF2
-const COLOR = 0x2a2848;
-const OPACITY = 0.4;
-const FONT_SIZE = 28;
-const ETCH_Y = -240; // below the whole cloud (data y-min is -218; DESIGN's -95 predates the layout)
+const FONT_URL = "/fonts/space-grotesk-600.typeface.json";
+const FACE_COLOR = 0x34315e; // lifted indigo — reads over #050510 without glowing
+const SIDE_COLOR = 0x16142e; // extrusion walls fall toward the background
+const FONT_SIZE = 26;
+const DEPTH = 5;
+const ETCH_Y = -240; // below the whole cloud (data y-min ≈ -218)
 
 export interface EtchesHandle {
   group: THREE.Group;
-  /** Resolves when every label has synced (first correct render possible). */
+  /** Resolves when the font has loaded and every marker is built. */
   ready: Promise<void>;
   dispose(): void;
 }
@@ -27,34 +28,54 @@ export function createEtches(grades: GraphGrade[], cameraAzimuth: number): Etche
   const group = new THREE.Group();
   group.name = "etches";
 
-  const labels: Text[] = [];
-  const syncs: Promise<void>[] = [];
+  const geometries: TextGeometry[] = [];
+  const faceMat = new THREE.MeshBasicMaterial({ color: FACE_COLOR });
+  const sideMat = new THREE.MeshBasicMaterial({ color: SIDE_COLOR });
 
-  for (const grade of grades) {
-    const label = new Text();
-    label.text = grade.id;
-    label.font = FONT_URL;
-    label.fontSize = FONT_SIZE;
-    label.color = COLOR;
-    label.fillOpacity = OPACITY;
-    label.anchorX = "center";
-    label.anchorY = "middle";
-    label.letterSpacing = 0.02;
-    label.position.set((grade.x0 + grade.x1) / 2, ETCH_Y, 0);
-    // Face the initial camera azimuth, then stay put (etching, not sprite).
-    label.rotation.y = cameraAzimuth;
-    label.material.depthWrite = false;
-    label.renderOrder = -1; // with edges, before nodes' transparents ordering
-    group.add(label);
-    labels.push(label);
-    syncs.push(new Promise<void>((resolve) => label.sync(resolve)));
-  }
+  const ready = new FontLoader()
+    .loadAsync(FONT_URL)
+    .then((font: Font) => {
+      for (const grade of grades) {
+        const geometry = new TextGeometry(grade.id, {
+          font,
+          size: FONT_SIZE,
+          depth: DEPTH,
+          curveSegments: 6,
+          bevelEnabled: true,
+          bevelThickness: 0.8,
+          bevelSize: 0.5,
+          bevelSegments: 2,
+        });
+        geometry.computeBoundingBox();
+        const bb = geometry.boundingBox!;
+        // Center on the band's x-midpoint; extrusion straddles z = 0.
+        geometry.translate(
+          -(bb.max.x + bb.min.x) / 2,
+          0,
+          -(bb.max.z + bb.min.z) / 2,
+        );
+        geometries.push(geometry);
+
+        // ExtrudeGeometry material groups: 0 = front/back faces, 1 = sides.
+        const mesh = new THREE.Mesh(geometry, [faceMat, sideMat]);
+        mesh.position.set((grade.x0 + grade.x1) / 2, ETCH_Y, 0);
+        // Face the initial camera azimuth once, then stay put (monument).
+        mesh.rotation.y = cameraAzimuth;
+        group.add(mesh);
+      }
+    })
+    .catch((err: unknown) => {
+      // Markers are ornament — a font failure must never take down the scene.
+      console.warn("[cme] grade markers unavailable:", err);
+    });
 
   return {
     group,
-    ready: Promise.all(syncs).then(() => undefined),
+    ready,
     dispose() {
-      for (const label of labels) label.dispose();
+      for (const g of geometries) g.dispose();
+      faceMat.dispose();
+      sideMat.dispose();
     },
   };
 }

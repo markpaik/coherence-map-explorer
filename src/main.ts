@@ -20,7 +20,7 @@
 
 import "./style.css";
 import * as THREE from "three";
-import { loadGraph, type GraphCore, type GraphNode } from "./data";
+import { loadGraph, loadSearchDocs, type GraphCore, type GraphNode } from "./data";
 import { BG } from "./scene/palette";
 import { createNodes } from "./scene/nodes";
 import { createEdges } from "./scene/edges";
@@ -145,6 +145,24 @@ function start(graph: GraphCore): void {
     trace: () => machine.trace(),
     close: () => machine.clearFocus(),
   });
+  // Hover text: search docs prefetched off the critical path (idle callback,
+  // shared cache with search/panel). Until they land, tooltips omit the line.
+  let hoverDocs: Map<string, string> | null = null;
+  const prefetchHoverDocs = (): void => {
+    void loadSearchDocs()
+      .then((docs) => {
+        hoverDocs = new Map(docs.map((d) => [d.id, d.text]));
+      })
+      .catch(() => {
+        hoverDocs = null; // hover simply stays terse; search will retry itself
+      });
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(prefetchHoverDocs, { timeout: 4000 });
+  } else {
+    window.setTimeout(prefetchHoverDocs, 1500); // Safari has no idle callback
+  }
+
   machine = createMachine(graph, {
     nodes,
     edges,
@@ -155,6 +173,7 @@ function start(graph: GraphCore): void {
     announce,
     reducedMotion,
     requestRender,
+    getDocText: (nodeId) => hoverDocs?.get(nodeId),
   });
 
   const picking = createPicking(canvas, rig.camera, nodes, machine);
@@ -285,6 +304,12 @@ function start(graph: GraphCore): void {
     requestRender();
   }
   window.addEventListener("resize", resize);
+  // Chrome freezes occluded tabs: resize events fired while hidden are lost,
+  // leaving the canvas at a stale size when the tab thaws. Re-measure on
+  // every return to visibility.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resize();
+  });
   resize();
 
   // Etches sync asynchronously (font parse in a worker); repaint when ready.

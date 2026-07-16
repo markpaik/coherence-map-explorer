@@ -59,8 +59,13 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   // Active state (default: everything shown).
   const gradeActive = new Set(GRADES);
   const strandActive = new Set<StrandId>(STRAND_ORDER);
-  let majorOnly = false;
-  let wapSpotlight = false;
+  // Lens: a single-select emphasis view. Major work and Widely Applicable
+  // Prerequisites answer different questions (where this YEAR's time goes vs
+  // what matters most BEYOND graduation) — composing them as independent
+  // toggles produced intersections nobody could interpret (in K-8 every
+  // standard is WAP, so the combination only bit in HS, silently).
+  type Lens = "all" | "major" | "wap";
+  let lens: Lens = "all";
 
   const visN = nodes.visibleAttr.array as Float32Array;
   const visE = edges.visibleAttr.array as Float32Array;
@@ -71,8 +76,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       const shown =
         gradeActive.has(n.grade) &&
         strandActive.has(n.strand) &&
-        (!majorOnly || n.msa === 0) &&
-        (!wapSpotlight || n.wap);
+        (lens === "all" || (lens === "major" ? n.msa === 0 : n.wap));
       visN[i] = shown ? 1 : 0;
     }
     for (let i = 0; i < edges.count; i++) {
@@ -108,8 +112,22 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   // Track chips so programmatic state changes (tour) update the UI.
   const strandChips = new Map<StrandId, HTMLButtonElement>();
   const gradeChips = new Map<string, HTMLButtonElement>();
-  let majorChip!: HTMLButtonElement;
-  let wapChip!: HTMLButtonElement;
+  const lensChips = new Map<Lens, HTMLButtonElement>();
+
+  const LENSES: { id: Lens; label: string; explain: string }[] = [
+    {
+      id: "major",
+      label: "Major work",
+      explain:
+        "The clusters each grade is asked to spend most of the year on (65–85% of instructional time).",
+    },
+    {
+      id: "wap",
+      label: "Widely applicable prerequisites",
+      explain:
+        "The standards whose mastery carries furthest into college majors and careers: all of K–8, plus the flagged high-school content.",
+    },
+  ];
 
   function makeChip(
     label: string,
@@ -155,25 +173,45 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     strandGroup.appendChild(chip);
   }
 
-  // Toggles.
-  const toggleGroup = document.createElement("div");
-  toggleGroup.className = "filter-group";
-  majorChip = makeChip("Major work", false, (on) => (majorOnly = on));
-  majorChip.classList.add("filter-toggle");
-  wapChip = makeChip("Widely applicable prerequisites", false, (on) => (wapSpotlight = on));
-  wapChip.classList.add("filter-toggle");
-  toggleGroup.append(majorChip, wapChip);
+  // Lens group: single-select. Clicking the active lens returns to "all".
+  const lensGroup = document.createElement("div");
+  lensGroup.className = "filter-group";
+  lensGroup.setAttribute("aria-label", "Lens");
 
-  groups.append(gradeGroup, strandGroup, toggleGroup);
-  rail.append(disclosure, groups);
+  const explainer = document.createElement("p");
+  explainer.className = "lens-explainer";
+  explainer.hidden = true;
+
+  function setLens(next: Lens): void {
+    lens = lens === next ? "all" : next;
+    const active = LENSES.find((l) => l.id === lens);
+    explainer.hidden = !active;
+    explainer.textContent = active ? active.explain : "";
+    syncChips();
+    recompute();
+  }
+
+  for (const l of LENSES) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "filter-chip filter-toggle";
+    chip.textContent = l.label;
+    chip.title = l.explain;
+    chip.setAttribute("aria-pressed", "false");
+    chip.addEventListener("click", () => setLens(l.id));
+    lensChips.set(l.id, chip);
+    lensGroup.appendChild(chip);
+  }
+
+  groups.append(gradeGroup, strandGroup, lensGroup);
+  rail.append(explainer, disclosure, groups);
   document.body.appendChild(rail);
 
   // Reflect a strand's aria-pressed to match the active set.
   function syncChips(): void {
     for (const [s, chip] of strandChips) chip.setAttribute("aria-pressed", String(strandActive.has(s)));
     for (const [g, chip] of gradeChips) chip.setAttribute("aria-pressed", String(gradeActive.has(g)));
-    majorChip.setAttribute("aria-pressed", String(majorOnly));
-    wapChip.setAttribute("aria-pressed", String(wapSpotlight));
+    for (const [id, chip] of lensChips) chip.setAttribute("aria-pressed", String(lens === id));
   }
 
   return {
@@ -181,8 +219,8 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       strandActive.clear();
       strandActive.add(strand);
       for (const g of GRADES) gradeActive.add(g);
-      majorOnly = false;
-      wapSpotlight = false;
+      lens = "all";
+      explainer.hidden = true;
       syncChips();
       recompute();
     },
@@ -191,8 +229,8 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       for (const g of GRADES) gradeActive.add(g);
       strandActive.clear();
       for (const s of STRAND_ORDER) strandActive.add(s);
-      majorOnly = false;
-      wapSpotlight = false;
+      lens = "all";
+      explainer.hidden = true;
       syncChips();
       recompute();
     },

@@ -70,6 +70,11 @@ export interface MachineDeps {
   reducedMotion: boolean;
   /** Flag the render loop (timer-driven cascade steps run outside rAF). */
   requestRender: () => void;
+  /**
+   * Plain-text standard description for hover (search-doc text, prefetched
+   * post-boot). Absent or returning undefined = tooltip omits the text line.
+   */
+  getDocText?: (nodeId: string) => string | undefined;
 }
 
 export interface Machine {
@@ -507,7 +512,21 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
       renderEmphasis();
       const n = graph.nodes[nodeIndex];
-      tooltip.show(n.code, nodeContext(n), cursorX, cursorY);
+      const nIn = preds[nodeIndex].length;
+      const nOut = succ[nodeIndex].length;
+      tooltip.show(
+        {
+          code: n.code,
+          detail: nodeContext(n),
+          text: deps.getDocText?.(n.id),
+          meta:
+            nIn + nOut === 0
+              ? "No mapped connections"
+              : `Builds on ${nIn} · Leads to ${nOut}`,
+        },
+        cursorX,
+        cursorY,
+      );
       canvas.style.cursor = "pointer";
     },
 

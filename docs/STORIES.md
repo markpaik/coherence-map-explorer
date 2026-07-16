@@ -112,8 +112,14 @@ Side-by-side scenario toggling, same student, two different lost years.
    the fraction gate closes: 241 descendants of 3.NF go dim.
 3. Card: the percentages look similar; the years of compounding and the
    spine they sit on do not. An early gap is not "the same gap, earlier."
-   It is a different, larger thing. This is why pandemic recovery was
-   hardest in math, and hardest of all for the youngest. [cite]
+   It is a different, larger thing.
+4. Honesty card (the structure is not the whole story): in the real
+   pandemic data, middle schoolers' recovery stalled worst — 8th graders
+   needed roughly nine extra months of math instruction while 3rd and 4th
+   graders returned to pre-pandemic growth (Lewis & Kuhfeld 2023, NWEA).
+   Structure says early gaps reach further; recovery also depends on how
+   much runway and intervention a student has left. Both things are true,
+   and both are reasons this work is hard.
 
 ### 3. Swiss cheese (after Sal Khan)
 One student, three silent holes: 3.OA.A.2 (division as sharing), 4.NF.B.4
@@ -162,13 +168,46 @@ the grade label — at the gap." Ends by opening the real panel so the viewer
 can do it themselves on any standard. (Tour keeps the 60-second version;
 the story is the full walk.)
 
-## Candidate additions (pending research verification)
-- Algebra as the gatekeeper (college-completion evidence) — strong hook,
-  needs a defensible citation.
-- Summer slide (math fades faster than reading over summers) — natural
-  time-lapse form.
-- The multiplicative wall (grades 3-5 shift from additive to multiplicative
-  reasoning) — pedagogically rich; may fold into story 3 instead.
+## Verified citation ledger (frozen 2026-07-16)
+- Pandemic loss: math fell 0.20-0.27 SD vs 0.09-0.18 reading, grades 3-8
+  (Kuhfeld, Soland & Lewis 2022, Educational Researcher 51(7)). Recovery:
+  ~0.17 SD still missing in 2025; middle school stalled worst, 8th graders
+  ~9.1 extra months needed (Lewis & Kuhfeld 2023, NWEA; Kuhfeld & Lewis
+  2025, Brookings). Never mix instruments (NWEA/NAEP) on one card.
+- Opportunity myth: 26% of assignments grade-appropriate; students met the
+  bar on assigned work 71% of the time but showed grade-level mastery on
+  17%; 500+ hours/year on below-grade work; behind-students given
+  grade-level work gained ~7 months (TNTP 2018, The Opportunity Myth;
+  descriptive study, association not RCT). Do NOT use the 56% stat as the
+  topline — it is the students-of-color-on-grade-level-work success rate
+  (vs 65% white peers), an equity comparison.
+- Fractions gate: grade 5 fraction/division knowledge uniquely predicts HS
+  algebra and overall math 5-6 years later in US and UK samples, controls
+  incl. IQ, SES, whole-number arithmetic — which did NOT uniquely predict
+  (Siegler et al. 2012, Psychological Science 23(7)).
+- Early math: school-entry math skills are the strongest predictor of later
+  achievement, above reading and attention, across six longitudinal
+  datasets (Duncan et al. 2007, Developmental Psychology 43(6), corrected
+  2010).
+- Mastery/swiss cheese: 1:1 mastery tutoring ~2 SD (Bloom 1984, the 2 Sigma
+  paper — small studies, aspirational benchmark); scalable mastery-learning
+  programs ~0.52 SD across 108 studies (Kulik, Kulik & Bangert-Drowns 1990).
+  Never present 2 sigma as mastery learning's classroom effect.
+
+## Candidate additions (verified, Mark to green-light)
+- ADOPT-RECOMMENDED — "The gatekeeper": highest math course completed
+  (beyond Algebra II) is among the strongest predictors of bachelor's
+  completion, stronger than class rank or test scores (Adelman 1999,
+  Answers in the Tool Box; refined 2006). Maps perfectly onto the HS
+  prereq chains; correlational, say so.
+- Coda card for story 3 or 5 — whole-number bias (1/5 "bigger than" 1/4)
+  persists into adulthood (Braithwaite & Siegler 2018, Developmental
+  Science): "this is not a node you outgrow."
+- SKIP for now — summer slide (Cooper 1996, ~2.6 months math loss) is
+  classic but actively contested (von Hippel); a card would need a
+  "debated" label, which dilutes trust in the other cards.
+- The multiplicative wall (grades 3-5) — pedagogically rich; folds into
+  story 3's hole selection rather than standing alone.
 
 ## Build plan
 1. Engine + damage shader states + Gaps mode (Opus build, precise spec) —

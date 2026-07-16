@@ -24,9 +24,13 @@ function hexColor(v: number): string {
 
 export function createFallback(graph: GraphCore, reason: string): void {
   // Hide the 3D-only chrome (canvas host, boot veil, the inert search rail).
+  // style.display beats the hidden attribute when a CSS rule sets display.
   for (const id of ["scene", "veil", "search-rail"]) {
     const el = document.getElementById(id);
-    if (el) el.hidden = true;
+    if (el) {
+      el.hidden = true;
+      el.style.display = "none";
+    }
   }
   document.body.classList.add("nowebgl");
 
@@ -175,10 +179,13 @@ export function createFallback(graph: GraphCore, reason: string): void {
       }),
   );
 
-  // Filter: substring match on code + title; hide empty grade groups.
+  // Filter: token-AND match on code + title ("add fractions" matches a row
+  // containing both words anywhere); hide grade groups that empty out.
   searchInput.addEventListener("input", () => {
-    const q = searchInput.value.trim().toLowerCase();
-    for (const r of rows) r.el.hidden = q !== "" && !r.haystack.includes(q);
+    const tokens = searchInput.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    for (const r of rows) {
+      r.el.hidden = tokens.length > 0 && !tokens.every((t) => r.haystack.includes(t));
+    }
     for (const g of groupEls) {
       g.section.hidden = g.rowEls.every((el) => el.hidden);
     }

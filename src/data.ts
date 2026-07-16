@@ -86,6 +86,9 @@ export function loadDetails(grade: string): Promise<DetailShard> {
       if (!res.ok) throw new Error(`Failed to load details for ${grade}: HTTP ${res.status}`);
       return res.json() as Promise<DetailShard>;
     });
+    // Cache successes only — a transient network failure must not poison the
+    // shard for the rest of the session (retry re-fetches).
+    p.catch(() => shardCache.delete(grade));
     shardCache.set(grade, p);
   }
   return p;
@@ -111,6 +114,9 @@ export function loadSearchDocs(): Promise<SearchDoc[]> {
     searchDocsPromise = fetch("/data/search.json").then((res) => {
       if (!res.ok) throw new Error(`Failed to load search index: HTTP ${res.status}`);
       return res.json() as Promise<SearchDoc[]>;
+    });
+    searchDocsPromise.catch(() => {
+      searchDocsPromise = null; // same: don't cache failures
     });
   }
   return searchDocsPromise;

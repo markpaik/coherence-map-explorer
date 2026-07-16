@@ -183,7 +183,12 @@ export function createPanel(
     dragging = true;
     dragStartPointerY = e.clientY;
     dragStartSheetY = sheetY;
-    handle.setPointerCapture(e.pointerId);
+    // Guarded: capture can throw for already-inactive pointers (cancel races).
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch {
+      /* keep dragging via bubbling events */
+    }
   }
   function onHandleMove(e: PointerEvent): void {
     if (!dragging) return;
@@ -193,7 +198,11 @@ export function createPanel(
   function onHandleUp(e: PointerEvent): void {
     if (!dragging) return;
     dragging = false;
-    handle.releasePointerCapture(e.pointerId);
+    try {
+      handle.releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released */
+    }
     // Swipe down past the peek → close. Otherwise snap to the nearer of the two.
     if (sheetY > peekY() + 0.12 * vh()) {
       requests.close();
@@ -413,15 +422,44 @@ export function createPanel(
     }
 
     let detail;
+    let loadFailed = false;
     try {
       const shard = await loadDetails(n.grade);
       detail = shard[n.id];
     } catch {
       detail = undefined;
+      loadFailed = true;
     }
     if (token !== openToken) return;
 
-    desc.innerHTML = detail?.desc ?? "<p class=\"panel-desc-missing\">No description available.</p>";
+    if (detail?.desc) {
+      desc.innerHTML = detail.desc; // pipeline-sanitized
+    } else if (loadFailed) {
+      // Fetch failed (offline, server gone): fall back to the cached search
+      // excerpt so the panel is never empty, and offer a real retry — the
+      // loader evicts failed fetches, so retrying actually refetches.
+      desc.textContent = "";
+      const excerpt = docsById?.get(n.id)?.text;
+      if (excerpt) {
+        const p = document.createElement("p");
+        p.textContent = excerpt;
+        desc.appendChild(p);
+      }
+      const note = document.createElement("p");
+      note.className = "panel-desc-missing";
+      note.textContent = excerpt
+        ? "Showing a short excerpt — the full text didn't load. "
+        : "The standard's text didn't load. ";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "panel-retry";
+      retry.textContent = "Retry";
+      retry.addEventListener("click", () => void fillAsync(focusIndex, conn, openToken));
+      note.appendChild(retry);
+      desc.appendChild(note);
+    } else {
+      desc.innerHTML = '<p class="panel-desc-missing">No description available.</p>';
+    }
     renderTasks(detail?.tasks, detail?.example, detail?.exampleAttr, detail?.exampleUrl);
     renderProgressions(detail?.progressions);
 

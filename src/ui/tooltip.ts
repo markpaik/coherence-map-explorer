@@ -1,13 +1,24 @@
-// Hover tooltip: a small DOM glass chip near the cursor — code (Space
-// Grotesk 600, strand ink) + grade/domain context. 120ms delay in, none out.
-// Phase 2 choice: tooltip only, no in-scene troika code label (DESIGN allows
-// either; the chip stays crisp at any zoom and costs zero draw calls).
+// Hover tooltip: a glass mini-card near the cursor — code (Space Grotesk 600,
+// strand ink), grade/domain context, the first line of the standard itself
+// (2-line clamp), and its connection counts. 120ms delay in, none out.
+// The text line comes from the prefetched search docs; before they land the
+// card simply renders without it.
 
 const SHOW_DELAY_MS = 120;
 const OFFSET = 14; // px from cursor
 
+export interface TooltipContent {
+  code: string;
+  /** Context line: domain · cluster. */
+  detail: string;
+  /** Plain-text standard description (clamped to 2 lines by CSS). */
+  text?: string;
+  /** Connections line, e.g. "Builds on 5 · Leads to 4". */
+  meta?: string;
+}
+
 export interface TooltipHandle {
-  show(code: string, detail: string, x: number, y: number): void;
+  show(content: TooltipContent, x: number, y: number): void;
   move(x: number, y: number): void;
   hide(): void;
   dispose(): void;
@@ -23,16 +34,20 @@ export function createTooltip(container: HTMLElement): TooltipHandle {
   codeEl.className = "tooltip-code";
   const detailEl = document.createElement("span");
   detailEl.className = "tooltip-detail";
-  el.append(codeEl, detailEl);
+  const textEl = document.createElement("span");
+  textEl.className = "tooltip-text";
+  const metaEl = document.createElement("span");
+  metaEl.className = "tooltip-meta";
+  el.append(codeEl, detailEl, textEl, metaEl);
   container.appendChild(el);
 
   let showTimer: number | null = null;
 
   function place(x: number, y: number): void {
-    // Keep the chip inside the viewport; flip sides near the right/bottom edge.
+    // Keep the card inside the viewport; flip sides near the right/bottom edge.
     const rect = el.getBoundingClientRect();
-    const w = rect.width || 180;
-    const h = rect.height || 44;
+    const w = rect.width || 260;
+    const h = rect.height || 72;
     let left = x + OFFSET;
     let top = y + OFFSET;
     if (left + w > window.innerWidth - 8) left = x - OFFSET - w;
@@ -41,10 +56,14 @@ export function createTooltip(container: HTMLElement): TooltipHandle {
   }
 
   return {
-    show(code, detail, x, y) {
+    show(content, x, y) {
       if (showTimer !== null) window.clearTimeout(showTimer);
-      codeEl.textContent = code;
-      detailEl.textContent = detail;
+      codeEl.textContent = content.code;
+      detailEl.textContent = content.detail;
+      textEl.textContent = content.text ?? "";
+      textEl.hidden = !content.text;
+      metaEl.textContent = content.meta ?? "";
+      metaEl.hidden = !content.meta;
       showTimer = window.setTimeout(() => {
         el.hidden = false;
         place(x, y);

@@ -3,7 +3,13 @@
 // means only HDR (hover/focus/shimmer-peak) colors glow — per DESIGN.md.
 
 import { HalfFloatType, type Camera, type Scene, type WebGLRenderer } from "three";
-import { BloomEffect, EffectComposer, EffectPass, RenderPass } from "postprocessing";
+import {
+  BloomEffect,
+  EffectComposer,
+  EffectPass,
+  RenderPass,
+  VignetteEffect,
+} from "postprocessing";
 
 export interface BloomRig {
   composer: EffectComposer;
@@ -38,8 +44,12 @@ export function createBloom(
     resolutionScale: opts.resolutionScale ?? 1.0,
   });
 
+  // Gentle vignette: pulls the eye toward the constellation and gives the
+  // frame an observatory-glass feel without visibly darkening the data.
+  const vignette = new VignetteEffect({ offset: 0.28, darkness: 0.55 });
+
   composer.addPass(new RenderPass(scene, camera));
-  composer.addPass(new EffectPass(camera, bloom));
+  composer.addPass(new EffectPass(camera, bloom, vignette));
 
   return {
     composer,
