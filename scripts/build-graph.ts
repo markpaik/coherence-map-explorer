@@ -139,6 +139,10 @@ interface OutNode {
   modeling: boolean;
   deg: number;
   pos: [number, number, number];
+  /** Sub-standard ids (e.g. 4.NF.B.3 -> its .a-.d), code-derived; omitted when none. */
+  children?: string[];
+  /** Parent standard id for a sub-standard; omitted at top level. */
+  parent?: string;
 }
 interface OutEdge {
   s: string;
@@ -801,10 +805,54 @@ export function buildGraph(): BuildResult {
   const pos = new Map<string, [number, number, number]>();
   for (const n of simNodes) pos.set(n.id, [n.x, n.y, n.z]);
 
-  // Isolated nodes: golden-angle halo ring per band.
+  // Standard families: a "parent" standard like 4.NF.B.3 whose sub-standards
+  // are 4.NF.B.3.a-d. Derived purely from code prefixes; the raw data carries
+  // no explicit link. 13 such parents have zero edges of their own while their
+  // children hold all the connections — the original tool's UI hid this, but a
+  // bare "no connections" dead-end is exactly wrong for the one standard our
+  // own search placeholder advertises. We do NOT fabricate edges (the 757
+  // stays verbatim ATC data); instead we emit the family relation and seat
+  // edgeless parents at their children's centroid rather than on the halo.
+  const childrenOf = new Map<string, string[]>(); // parent id -> child ids
+  const parentOf = new Map<string, string>(); // child id -> parent id
+  const idByCode = new Map<string, string>();
+  for (const [id, c] of codeById) idByCode.set(c, id);
+  for (const [id, code] of codeById) {
+    const dot = code.lastIndexOf(".");
+    if (dot <= 0) continue;
+    const parentCode = code.slice(0, dot);
+    const pid = idByCode.get(parentCode);
+    if (!pid) continue;
+    parentOf.set(id, pid);
+    if (!childrenOf.has(pid)) childrenOf.set(pid, []);
+    childrenOf.get(pid)!.push(id);
+  }
+  for (const kids of childrenOf.values()) kids.sort((a, b) => codeById.get(a)!.localeCompare(codeById.get(b)!));
+
+  // Isolated nodes: parents with placed children sit at the family centroid
+  // (slightly offset so they don't overlap a child); the rest form the
+  // golden-angle halo ring per band.
   const GOLDEN = Math.PI * (3 - Math.sqrt(5));
   const bandIsoIndex = new Map<Grade, number>();
+  const haloIds: string[] = [];
   for (const id of isolatedIds) {
+    const kids = (childrenOf.get(id) ?? []).filter((k) => pos.has(k));
+    if (kids.length) {
+      let cx = 0, cy = 0, cz = 0;
+      for (const k of kids) {
+        const kp = pos.get(k)!;
+        cx += kp[0]; cy += kp[1]; cz += kp[2];
+      }
+      const n = kids.length;
+      // Lift slightly above the family plane; clamp X into the parent's band.
+      const band = bands.get(meta.get(id)!.grade)!;
+      const x = Math.min(band.x1, Math.max(band.x0, cx / n));
+      pos.set(id, [x, cy / n + 9, cz / n]);
+      continue;
+    }
+    haloIds.push(id);
+  }
+  for (const id of haloIds) {
     const m = meta.get(id)!;
     const band = bands.get(m.grade)!;
     const idx = bandIsoIndex.get(m.grade) ?? 0;
@@ -854,12 +902,35 @@ export function buildGraph(): BuildResult {
     ];
   }
 
+  // Display degree: an edgeless parent (deg 0) sizes to the count of distinct
+  // external standards its sub-standards connect to, so a cluster-heading node
+  // reads as substantial rather than a lone speck. Purely a visual radius input
+  // — the emitted edge set is unchanged.
+  const neighborIds = new Map<string, Set<string>>();
+  for (const id of validIds) neighborIds.set(id, new Set());
+  for (const e of prereq) {
+    neighborIds.get(e.s)!.add(e.t);
+    neighborIds.get(e.t)!.add(e.s);
+  }
+  for (const e of related) {
+    neighborIds.get(e.s)!.add(e.t);
+    neighborIds.get(e.t)!.add(e.s);
+  }
+  const displayDeg = new Map<string, number>(deg);
+  for (const [pid, kids] of childrenOf) {
+    if (deg.get(pid) !== 0) continue;
+    const family = new Set([pid, ...kids]);
+    const ext = new Set<string>();
+    for (const k of kids) for (const nb of neighborIds.get(k) ?? []) if (!family.has(nb)) ext.add(nb);
+    if (ext.size) displayDeg.set(pid, ext.size);
+  }
+
   // --- 9. Emit --------------------------------------------------------------
   const nodes: OutNode[] = sortedIds.map((id) => {
     const m = meta.get(id)!;
     const p = pos.get(id)!;
     for (const v of p) assert(Number.isFinite(v), `non-finite position on ${id}`);
-    return {
+    const out: OutNode = {
       id,
       code: m.code,
       grade: m.grade,
@@ -870,9 +941,14 @@ export function buildGraph(): BuildResult {
       msa: m.msa,
       wap: m.wap,
       modeling: m.modeling,
-      deg: deg.get(id)!,
+      deg: displayDeg.get(id)!,
       pos: [round2(p[0]), round2(p[1]), round2(p[2])],
     };
+    const kids = childrenOf.get(id);
+    if (kids?.length) out.children = kids;
+    const par = parentOf.get(id);
+    if (par) out.parent = par;
+    return out;
   });
 
   const outEdges: OutEdge[] = [];

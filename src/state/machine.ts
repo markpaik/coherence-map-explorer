@@ -151,6 +151,18 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     }
   });
 
+  // Standard families (parent -> child node indices) from the pipeline's
+  // code-derived children[]. An edgeless parent (e.g. 4.NF.B.3) rolls up its
+  // children's connections at focus time so it is never a dead end.
+  const partsOf: number[][] = Array.from({ length: nodeCount }, () => []);
+  graph.nodes.forEach((n, i) => {
+    if (!n.children) return;
+    for (const cid of n.children) {
+      const ci = indexById.get(cid);
+      if (ci !== undefined) partsOf[i].push(ci);
+    }
+  });
+
   // --- emphasis buffers ----------------------------------------------------
   const nodeTarget = new Float32Array(nodeCount).fill(EMPHASIS.REST);
   const edgeTarget = new Float32Array(edgeCount).fill(EMPHASIS.REST);
@@ -211,6 +223,8 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     related: number[];
     buildsOn: number[]; // direct incoming prereqs
     leadsTo: number[]; // direct outgoing prereqs
+    parts: number[]; // sub-standards of a parent standard (may be empty)
+    rolledUp: boolean; // true when buildsOn/leadsTo came from the children
     nodeFinal: Map<number, Emphasis>;
     edgeFinal: Map<number, Emphasis>;
     nodeReveal: Map<number, number>; // ms
@@ -218,9 +232,22 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   }
 
   function bfs(start: number, adj: number[][]): number[] {
-    const seen = new Set<number>([start]);
+    return bfsFrom(adj[start], adj, new Set([start]));
+  }
+
+  // BFS over `adj` seeded from `frontier`, never revisiting anything already in
+  // `seen` (used for rolled-up parents: seed = children's neighbours, seen =
+  // the family so the closure excludes the parent and its own sub-standards).
+  function bfsFrom(frontier: number[], adj: number[][], seen: Set<number>): number[] {
     const out: number[] = [];
-    const queue = [start];
+    const queue: number[] = [];
+    for (const n of frontier) {
+      if (!seen.has(n)) {
+        seen.add(n);
+        out.push(n);
+        queue.push(n);
+      }
+    }
     while (queue.length) {
       const n = queue.shift()!;
       for (const m of adj[n]) {
@@ -238,35 +265,70 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     gradeIndex[a] - gradeIndex[b] || (graph.nodes[a].code < graph.nodes[b].code ? -1 : 1);
 
   function computeFocus(focus: number): FocusData {
-    const ancestors = bfs(focus, preds);
-    const descendants = bfs(focus, succ);
-    const related = [...relatedAdj[focus]];
+    const parts = partsOf[focus];
+    // A parent standard with no edges of its own (e.g. 4.NF.B.3, whose .a-.d
+    // hold the connections) rolls up its children's neighbours, excluding the
+    // family itself, so focusing it lights a real neighbourhood instead of a
+    // dead end. Parents that already carry their own edges are left as-is.
+    const ownEdgeless =
+      parts.length > 0 &&
+      preds[focus].length === 0 &&
+      succ[focus].length === 0 &&
+      relatedAdj[focus].length === 0;
+    let rolledUp = false;
+    let seedPreds = preds[focus];
+    let seedSucc = succ[focus];
+    let seedRelated = relatedAdj[focus];
+    if (ownEdgeless) {
+      const family = new Set<number>([focus, ...parts]);
+      const roll = (adj: number[][]): number[] => {
+        const set = new Set<number>();
+        for (const c of parts) for (const nb of adj[c]) if (!family.has(nb)) set.add(nb);
+        return [...set];
+      };
+      seedPreds = roll(preds);
+      seedSucc = roll(succ);
+      seedRelated = roll(relatedAdj);
+      rolledUp = true;
+    }
+    // BFS ancestry/descendants seed from the (possibly rolled-up) direct sets.
+    const ancestors = rolledUp
+      ? bfsFrom(seedPreds, preds, new Set([focus, ...parts]))
+      : bfs(focus, preds);
+    const descendants = rolledUp
+      ? bfsFrom(seedSucc, succ, new Set([focus, ...parts]))
+      : bfs(focus, succ);
+    const related = [...seedRelated];
     const ancSet = new Set(ancestors);
     const descSet = new Set(descendants);
-    const closure = new Set<number>([focus, ...ancestors, ...descendants]);
+    // When rolled up, the children stand in for the focus in the lineage: they
+    // anchor both ends of the chain and light like it.
+    const anchors = new Set<number>([focus, ...(rolledUp ? parts : [])]);
 
     // Node emphasis: related (weakest) < chain < focus (strongest) wins.
     const nodeFinal = new Map<number, Emphasis>();
     for (const r of related) nodeFinal.set(r, EMPHASIS.RELATED);
     for (const a of ancestors) nodeFinal.set(a, EMPHASIS.CHAIN);
     for (const d of descendants) nodeFinal.set(d, EMPHASIS.CHAIN);
+    if (rolledUp) for (const p of parts) nodeFinal.set(p, EMPHASIS.CHAIN);
     nodeFinal.set(focus, EMPHASIS.FOCUS);
 
     // Edge emphasis: prereq edge inside the ancestor OR descendant lineage is a
-    // hot flowing CHAIN edge; a related edge touching the focus is a dashed
-    // RELATED shimmer. Everything else stays dimmed (the base).
+    // hot flowing CHAIN edge; a related edge touching the focus (or its parts)
+    // is a dashed RELATED shimmer. Everything else stays dimmed (the base).
+    const relatedAnchorAdj = new Set(related);
     const edgeFinal = new Map<number, Emphasis>();
     for (let i = 0; i < edgeCount; i++) {
       const s = edgeS[i];
       const t = edgeT[i];
       if (s < 0 || t < 0) continue;
       if (edgeK[i] === 0) {
-        const inAnc = (s === focus || ancSet.has(s)) && (t === focus || ancSet.has(t));
-        const inDesc = (s === focus || descSet.has(s)) && (t === focus || descSet.has(t));
+        const inAnc = (anchors.has(s) || ancSet.has(s)) && (anchors.has(t) || ancSet.has(t));
+        const inDesc = (anchors.has(s) || descSet.has(s)) && (anchors.has(t) || descSet.has(t));
         if (inAnc || inDesc) edgeFinal.set(i, EMPHASIS.CHAIN);
-      } else if (s === focus || t === focus) {
-        const other = s === focus ? t : s;
-        if (relatedAdj[focus].includes(other)) edgeFinal.set(i, EMPHASIS.RELATED);
+      } else if (anchors.has(s) || anchors.has(t)) {
+        const other = anchors.has(s) ? t : s;
+        if (relatedAnchorAdj.has(other)) edgeFinal.set(i, EMPHASIS.RELATED);
       }
     }
 
@@ -275,6 +337,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     const nodeReveal = new Map<number, number>();
     nodeReveal.set(focus, 0);
     for (const r of related) nodeReveal.set(r, 0);
+    if (rolledUp) for (const p of parts) nodeReveal.set(p, 0);
     const fg = gradeIndex[focus];
     for (const a of ancestors) {
       const layer = Math.max(fg - gradeIndex[a], 1);
@@ -295,8 +358,10 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       ancestors,
       descendants,
       related,
-      buildsOn: [...preds[focus]].sort(byGradeThenCode),
-      leadsTo: [...succ[focus]].sort(byGradeThenCode),
+      buildsOn: [...seedPreds].sort(byGradeThenCode),
+      leadsTo: [...seedSucc].sort(byGradeThenCode),
+      parts: [...parts].sort(byGradeThenCode),
+      rolledUp,
       nodeFinal,
       edgeFinal,
       nodeReveal,
@@ -428,8 +493,8 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       }
     }
 
-    // Camera: frame focus + its DIRECT neighbors, shifted left of the panel.
-    const neighborhood = [nodeIndex, ...data.buildsOn, ...data.leadsTo, ...data.related];
+    // Camera: frame focus + its DIRECT neighbors (+ parts), shifted left of panel.
+    const neighborhood = [nodeIndex, ...data.parts, ...data.buildsOn, ...data.leadsTo, ...data.related];
     void rig.focusOn(sphereOf(neighborhood), !cut, focusPanelOffsetPx());
 
     // Panel + narration + deep link.
@@ -437,11 +502,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       buildsOn: data.buildsOn,
       leadsTo: data.leadsTo,
       related: [...data.related].sort(byGradeThenCode),
+      parts: data.parts,
+      rolledUp: data.rolledUp,
     };
     panel.show(nodeIndex, connections);
+    const partsNote = data.parts.length ? `, ${data.parts.length} sub-standards` : "";
     announce(
       `Focused ${node.code}, builds on ${data.buildsOn.length} ` +
-        `${data.buildsOn.length === 1 ? "standard" : "standards"}, leads to ${data.leadsTo.length}`,
+        `${data.buildsOn.length === 1 ? "standard" : "standards"}, leads to ${data.leadsTo.length}${partsNote}`,
     );
     updateHash(node.code);
     requestRender();

@@ -31,6 +31,10 @@ export interface GraphNode {
   modeling: boolean;
   deg: number;
   pos: [number, number, number];
+  /** Sub-standard ids (4.NF.B.3 -> its .a-.d); code-derived at build time. */
+  children?: string[];
+  /** Parent standard id for a sub-standard. */
+  parent?: string;
 }
 
 export interface GraphEdge {

@@ -604,6 +604,15 @@ body {
   font-size: 13px;
   color: var(--ink-3);
 }
+.conn-parts .conn-h {
+  color: var(--ink-2);
+}
+.conn-rollup-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
 
 .panel-trace {
   display: block;

@@ -16,6 +16,8 @@ import { loadDetails, loadSearchDocs } from "../data";
 import { STRAND_COLORS } from "../scene/palette";
 
 export interface Connections {
+  parts?: number[]; // sub-standards of a parent standard (node indices)
+  rolledUp?: boolean; // connections were rolled up from the sub-standards
   buildsOn: number[]; // node indices — direct incoming prerequisites
   leadsTo: number[]; // node indices — direct outgoing prerequisites
   related: number[]; // node indices — related neighbours
@@ -338,6 +340,26 @@ export function createPanel(
 
   function renderConnections(conn: Connections): void {
     connections.replaceChildren();
+    const parts = conn.parts ?? [];
+    // A parent standard: name its sub-standards, and explain that the
+    // connections below are theirs rolled up (so the panel is never a dead end
+    // for a cluster-heading standard whose edges live on its children).
+    if (parts.length) {
+      const group = document.createElement("div");
+      group.className = "conn-group conn-parts";
+      const h = document.createElement("h3");
+      h.className = "conn-h";
+      h.textContent = `Sub-standards · ${parts.length}`;
+      group.appendChild(h);
+      for (const idx of parts) group.appendChild(connectionButton(idx));
+      if (conn.rolledUp) {
+        const note = document.createElement("p");
+        note.className = "conn-rollup-note";
+        note.textContent = "This standard is a heading; the connections below belong to its sub-standards.";
+        group.appendChild(note);
+      }
+      connections.appendChild(group);
+    }
     const groups: [string, number[]][] = [
       ["Builds on", conn.buildsOn],
       ["Leads to", conn.leadsTo],
@@ -355,7 +377,7 @@ export function createPanel(
       connections.appendChild(group);
     }
     const hasAny = conn.buildsOn.length || conn.leadsTo.length || conn.related.length;
-    if (!hasAny) {
+    if (!hasAny && !parts.length) {
       const none = document.createElement("p");
       none.className = "conn-empty";
       none.textContent = "No mapped connections.";
