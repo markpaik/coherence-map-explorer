@@ -128,10 +128,11 @@ export function createPanel(
 
   // Drag handle — visible only as a bottom sheet (≤720px); pointer target for
   // the snap-point gesture. Decorative to AT (the sheet is a labeled region).
-  const handle = document.createElement("div");
+  const handle = document.createElement("button");
+  handle.type = "button";
   handle.className = "panel-handle";
-  handle.setAttribute("aria-hidden", "true");
-  handle.innerHTML = '<span class="panel-handle-bar"></span>';
+  handle.setAttribute("aria-label", "Toggle panel height between full and peek");
+  handle.innerHTML = '<span class="panel-handle-bar" aria-hidden="true"></span>';
 
   const closeBtn = document.createElement("button");
   closeBtn.className = "panel-close";
@@ -240,6 +241,15 @@ export function createPanel(
     const target = sheetY > peekY() / 2 ? peekY() : 0;
     setSheetY(target, true);
   }
+  // Keyboard/switch equivalent of the drag gesture (fleet a11y finding):
+  // Enter/Space toggles between the full sheet and the 40% peek.
+  handle.addEventListener("keydown", (e) => {
+    if (!isSheet()) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setSheetY(sheetY === 0 ? peekY() : 0, true);
+    }
+  });
   handle.addEventListener("pointerdown", onHandleDown);
   handle.addEventListener("pointermove", onHandleMove);
   handle.addEventListener("pointerup", onHandleUp);
@@ -448,8 +458,12 @@ export function createPanel(
     if (example) {
       const det = document.createElement("details");
       det.className = "worked-example";
+      // (summary text set below; attribution names the source so the level-
+      // appropriate problem reads as an invitation, not a generic disclosure)
       const sum = document.createElement("summary");
-      sum.textContent = "Worked example";
+      sum.textContent = exampleAttr
+        ? `Worked example at this level · ${exampleAttr}`
+        : "Worked example at this level";
       det.appendChild(sum);
       const ex = document.createElement("div");
       ex.className = "example-body math-host";

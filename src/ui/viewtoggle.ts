@@ -53,8 +53,9 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
   scale.className = "depth-scale";
   scale.setAttribute("aria-hidden", "true");
   scale.innerHTML =
-    '<span class="depth-scale-mark depth-scale-top">30 <span class="depth-scale-sep">·</span> deepest chain</span>' +
-    '<span class="depth-scale-mark depth-scale-bottom">0 <span class="depth-scale-sep">·</span> foundations</span>';
+    '<span class="depth-scale-mark depth-scale-top">30 prerequisites deep</span>' +
+    '<span class="depth-scale-axis" aria-hidden="true">height = prerequisite depth</span>' +
+    '<span class="depth-scale-mark depth-scale-bottom">foundations <span class="depth-scale-sep">·</span> nothing beneath</span>';
   scale.style.opacity = "0";
 
   document.body.append(scale, group);

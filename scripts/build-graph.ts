@@ -201,6 +201,8 @@ interface SearchDoc {
   text: string; // plain-text desc (math stripped, tags removed), ~240 chars
   domainName: string;
   clusterName: string;
+  /** 1 when the standard carries a worked example (hover advertises it). */
+  ex?: 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -925,10 +927,16 @@ export function buildGraph(): BuildResult {
     ]);
   }
 
-  // Overrides (applied last, in pre-macro-form space)
+  // Overrides (applied last). Validated: an unknown code fails the build
+  // loudly (a typo'd override silently no-oping cost us an audit finding),
+  // and the x coordinate is re-clamped into the standard's grade band so an
+  // override can art-direct within a band but never tear a node out of it.
   for (const [code, xyz] of Object.entries(overrides)) {
     const id = [...codeById.entries()].find(([, c]) => c === code)?.[0];
-    if (id) pos.set(id, xyz);
+    assert(id, `layout-overrides.json: unknown standard code "${code}"`);
+    const band = bands.get(meta.get(id)!.grade)!;
+    const x = Math.min(band.x1 - params.bandMargin, Math.max(band.x0 + params.bandMargin, xyz[0]));
+    pos.set(id, [x, xyz[1], xyz[2]]);
   }
 
   // --- 7b. Pose B: the Ascent ------------------------------------------------
@@ -1199,7 +1207,7 @@ export function buildGraph(): BuildResult {
   const search: SearchDoc[] = sortedIds.map((id) => {
     const m = meta.get(id)!;
     const c = keptClusters[standards[id].ccmathcluster_id];
-    return {
+    const doc: SearchDoc = {
       id,
       code: m.code,
       grade: m.grade,
@@ -1208,6 +1216,10 @@ export function buildGraph(): BuildResult {
       domainName: m.domainName,
       clusterName: c.name ?? "",
     };
+    // Flag standards carrying a level-appropriate worked example so the hover
+    // card can advertise it before the panel opens (326 of 480 have one).
+    if (standards[id].example_problem?.trim()) doc.ex = 1;
+    return doc;
   });
   assert(search.length === 480, `expected 480 search docs, got ${search.length}`);
 

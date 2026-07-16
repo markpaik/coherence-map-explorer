@@ -272,8 +272,10 @@ body {
 .depth-scale {
   position: fixed;
   left: clamp(14px, 2vw, 26px);
-  top: 20vh;
-  bottom: 20vh;
+  /* Clear of the title block (which reaches ~34vh on short viewports) and of
+     the filter rail below — the scale annotates the massif, not the chrome. */
+  top: max(36vh, 300px);
+  bottom: 22vh;
   z-index: 9;
   display: flex;
   flex-direction: column;
@@ -289,6 +291,16 @@ body {
 }
 .depth-scale-mark {
   white-space: nowrap;
+}
+.depth-scale-axis {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  align-self: flex-start;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  opacity: 0.8;
 }
 .depth-scale-sep {
   color: var(--ink-2);
@@ -973,6 +985,11 @@ body {
     min-height: 44px; /* full-width tap zone ≥ 44px */
     cursor: grab;
     touch-action: none; /* we own the vertical gesture */
+    /* now a real <button> (keyboard-operable): strip chrome */
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
   }
   .panel-handle-bar {
     width: 42px;
@@ -1138,7 +1155,10 @@ body {
   border: 1px solid var(--line);
   color: var(--ink-2);
 }
-.tour-btn-back:disabled {
+.tour-btn-back:disabled,
+.tour-btn-inert {
+  /* aria-disabled pattern: stays focusable (the trap must not leak to <body>)
+     but reads and behaves inert. */
   opacity: 0.35;
   cursor: default;
 }

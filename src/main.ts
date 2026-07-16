@@ -149,11 +149,11 @@ function start(graph: GraphCore): void {
   });
   // Hover text: search docs prefetched off the critical path (idle callback,
   // shared cache with search/panel). Until they land, tooltips omit the line.
-  let hoverDocs: Map<string, string> | null = null;
+  let hoverDocs: Map<string, { text: string; ex: boolean }> | null = null;
   const prefetchHoverDocs = (): void => {
     void loadSearchDocs()
       .then((docs) => {
-        hoverDocs = new Map(docs.map((d) => [d.id, d.text]));
+        hoverDocs = new Map(docs.map((d) => [d.id, { text: d.text, ex: d.ex === 1 }]));
       })
       .catch(() => {
         hoverDocs = null; // hover simply stays terse; search will retry itself
@@ -175,7 +175,8 @@ function start(graph: GraphCore): void {
     announce,
     reducedMotion,
     requestRender,
-    getDocText: (nodeId) => hoverDocs?.get(nodeId),
+    getDocText: (nodeId) => hoverDocs?.get(nodeId)?.text,
+    hasExample: (nodeId) => hoverDocs?.get(nodeId)?.ex ?? false,
   });
 
   const picking = createPicking(canvas, rig.camera, nodes, machine);

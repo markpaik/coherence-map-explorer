@@ -165,7 +165,11 @@ export function createTour(deps: TourDeps): TourHandle {
     captionEl.textContent = stop.caption;
     card.setAttribute("aria-label", `Guided tour, step ${index + 1} of ${stops.length}`);
     dotEls.forEach((d, i) => d.classList.toggle("active", i === index));
-    backBtn.disabled = index === 0;
+    // aria-disabled, not the disabled attribute: a truly disabled button drops
+    // keyboard focus to <body> when activated on stop 1, escaping the trap.
+    // Back stays focusable; goTo(-1) is already a guarded no-op.
+    backBtn.setAttribute("aria-disabled", String(index === 0));
+    backBtn.classList.toggle("tour-btn-inert", index === 0);
     nextBtn.textContent = index === stops.length - 1 ? "Done" : "Next";
   }
 
@@ -182,6 +186,7 @@ export function createTour(deps: TourDeps): TourHandle {
     running = true;
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     index = 0;
+    machine.setHover(null); // a stale pre-tour hover must not linger under the card
     machine.setTouring(true);
     document.body.classList.add("touring");
     backdrop.hidden = false;

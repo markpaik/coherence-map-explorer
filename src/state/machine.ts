@@ -75,6 +75,8 @@ export interface MachineDeps {
    * post-boot). Absent or returning undefined = tooltip omits the text line.
    */
   getDocText?: (nodeId: string) => string | undefined;
+  /** Whether the standard carries a worked example (hover advertises it). */
+  hasExample?: (nodeId: string) => boolean;
 }
 
 export interface Machine {
@@ -572,8 +574,10 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     get state() {
       if (touring) return "touring";
       if (hovered !== null) return "hover";
-      if (searching) return "searching";
+      // Focus outranks searching: an open dropdown over a focused standard is
+      // still fundamentally a focus state (fleet: the old order masked focus).
       if (focusIndex !== null) return "focus";
+      if (searching) return "searching";
       return "idle";
     },
     get focusedIndex() {
@@ -598,15 +602,18 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       const n = graph.nodes[nodeIndex];
       const nIn = preds[nodeIndex].length;
       const nOut = succ[nodeIndex].length;
+      const parts: string[] = [];
+      if (nIn + nOut === 0 && !partsOf[nodeIndex].length) parts.push("No mapped connections");
+      else if (partsOf[nodeIndex].length && nIn + nOut === 0)
+        parts.push(`${partsOf[nodeIndex].length} sub-standards`);
+      else parts.push(`Builds on ${nIn} · Leads to ${nOut}`);
+      if (deps.hasExample?.(n.id)) parts.push("worked example");
       tooltip.show(
         {
           code: n.code,
           detail: nodeContext(n),
           text: deps.getDocText?.(n.id),
-          meta:
-            nIn + nOut === 0
-              ? "No mapped connections"
-              : `Builds on ${nIn} · Leads to ${nOut}`,
+          meta: parts.join(" · "),
         },
         cursorX,
         cursorY,

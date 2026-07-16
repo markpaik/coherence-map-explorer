@@ -128,6 +128,8 @@ export interface SearchDoc {
   text: string;
   domainName: string;
   clusterName: string;
+  /** 1 when the standard carries a level-appropriate worked example. */
+  ex?: 1;
 }
 
 let searchDocsPromise: Promise<SearchDoc[]> | null = null;
