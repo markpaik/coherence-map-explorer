@@ -68,6 +68,9 @@ export function createPicking(
   // spuriously fire focus() when a finger lifts mid-gesture.
   const downs = new Map<number, { x: number; y: number; primary: boolean }>();
   function onPointerDown(e: PointerEvent): void {
+    // A phone tap arrives with no preceding pointermove, so the touch-sized
+    // pick proxy must be armed here too — not only in onPointerMove.
+    nodes.setTouchPicking(e.pointerType === "touch");
     downs.set(e.pointerId, { x: e.clientX, y: e.clientY, primary: e.button === 0 });
   }
   function onPointerUp(e: PointerEvent): void {

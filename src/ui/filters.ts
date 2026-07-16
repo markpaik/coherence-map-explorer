@@ -40,6 +40,9 @@ export interface FiltersHandle {
   setStrandsOnly(strand: StrandId): void;
   /** Restore every filter to its default (all shown). Syncs the chips. */
   reset(): void;
+  /** Whether a grade currently passes the grade-chip filter (search uses this
+   * as ranking context: filtered-in grades surface first). */
+  isGradeActive(grade: string): boolean;
   dispose(): void;
 }
 
@@ -233,6 +236,9 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       explainer.hidden = true;
       syncChips();
       recompute();
+    },
+    isGradeActive(grade) {
+      return gradeActive.has(grade);
     },
     dispose() {
       rail.remove();

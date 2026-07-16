@@ -37,11 +37,15 @@ function shortTitle(text: string, words = 8): string {
 export interface SearchHandle {
   /** Briefly ring the search rail (the tour's "Find your standard" stop). */
   pulse(): void;
+  /** Provide grade-filter context: filtered-in grades rank first in results.
+   * Wired after createFilters (search is constructed before the filter rail). */
+  setGradeContext(isActive: (grade: string) => boolean): void;
   dispose(): void;
 }
 
 export function createSearch(deps: SearchDeps): SearchHandle {
   const { graph, machine } = deps;
+  let gradeContext: ((grade: string) => boolean) | null = null;
   const rail = document.getElementById("search-rail");
   const inputEl = document.getElementById("search-input") as HTMLInputElement | null;
   if (!rail || !inputEl) throw new Error("Search rail missing (#search-rail / #search-input)");
@@ -175,10 +179,18 @@ export function createSearch(deps: SearchDeps): SearchHandle {
       renderResults();
       return;
     }
-    const hits = index.search(q).slice(0, MAX_RESULTS);
-    results = hits
+    const hits = index.search(q).slice(0, MAX_RESULTS * 2);
+    let docs = hits
       .map((h) => docsById.get(h.id))
       .filter((d): d is SearchDoc => d !== undefined);
+    // Grade context: when the user has narrowed the grade chips, results from
+    // those grades surface first (stable within each partition, so relevance
+    // order is preserved). A teacher filtered to grade 4 typing "add
+    // fractions" sees 4.NF before the grade-5 phrasing match.
+    if (gradeContext && docs.some((d) => !gradeContext!(d.grade))) {
+      docs = [...docs.filter((d) => gradeContext!(d.grade)), ...docs.filter((d) => !gradeContext!(d.grade))];
+    }
+    results = docs.slice(0, MAX_RESULTS);
     active = results.length ? 0 : -1;
     renderResults();
   }
@@ -259,6 +271,9 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   document.addEventListener("keydown", onGlobalKey);
 
   return {
+    setGradeContext(isActive) {
+      gradeContext = isActive;
+    },
     pulse() {
       rail.classList.remove("search-pulse");
       // reflow so re-adding the class restarts the animation

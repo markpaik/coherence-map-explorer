@@ -18,7 +18,7 @@ import { EMPHASIS, STRAND_COLORS, restRadius } from "./palette";
 
 const DIM_TARGET = 0x0a0a18; // dimmed nodes lerp toward this (factor 0.82)
 const PROXY_RADIUS_FACTOR = 2.5; // pick radius vs. visual radius
-const TOUCH_EXTRA_FACTOR = 1.6; // additional proxy scale for touch pointers
+const TOUCH_EXTRA_FACTOR = 2.0; // additional proxy scale for touch pointers (fleet: taps still felt smaller than the dots look)
 
 // Per-state tables, indexed by EMPHASIS value: [colorMul, scale, dimMix]
 // dimMix is the lerp factor toward DIM_TARGET (0.82 when fully dimmed).

@@ -179,6 +179,7 @@ function start(graph: GraphCore): void {
   const picking = createPicking(canvas, rig.camera, nodes, machine);
   const search = createSearch({ graph, machine });
   const filters = createFilters({ graph, nodes, edges, requestRender });
+  search.setGradeContext((g) => filters.isGradeActive(g));
   const tour = createTour({
     machine,
     rig,
