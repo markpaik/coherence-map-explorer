@@ -16,8 +16,10 @@ export interface GraphGrade {
   label: string;
   x0: number;
   x1: number;
-  /** Etch position along the spiral (K-8 only; HS is labeled by courses). */
+  /** Etch position in pose A / constellation (K-8 only; HS is labeled by courses). */
   marker?: [number, number, number];
+  /** Etch position in pose B / the Ascent (K-8 only; along the massif ground line). */
+  marker2?: [number, number, number];
 }
 
 export interface GraphNode {
@@ -33,6 +35,13 @@ export interface GraphNode {
   modeling: boolean;
   deg: number;
   pos: [number, number, number];
+  /** Pose B / "the Ascent" position: x = same K→HS timeline, y = dependency
+   *  depth * 13 - 90, z = compressed cross-section. */
+  pos2: [number, number, number];
+  /** Dependency-chain depth (0 = foundation … up to 30 = deepest chain). */
+  depth: number;
+  /** High-school course memberships (e.g. ["A1","A2"]); K-8 nodes omit it. */
+  courses?: string[];
   /** Sub-standard ids (4.NF.B.3 -> its .a-.d); code-derived at build time. */
   children?: string[];
   /** Parent standard id for a sub-standard. */
@@ -42,14 +51,16 @@ export interface GraphNode {
 export interface GraphCourse {
   id: string; // "A1" | "G" | "A2" | "ADV"
   label: string; // "Algebra I" …
-  marker: [number, number, number]; // etch position along the spiral
+  marker: [number, number, number]; // etch position in pose A / constellation
+  marker2: [number, number, number]; // etch position in pose B / the Ascent
 }
 
 export interface GraphEdge {
   s: string; // source node id
   t: string; // target node id
   k: 0 | 1; // 0 = prerequisite (directed), 1 = related (undirected)
-  c: [number, number, number]; // baked quadratic-bezier control point
+  c: [number, number, number]; // baked quadratic-bezier control point (pose A)
+  c2: [number, number, number]; // baked quadratic-bezier control point (pose B)
 }
 
 export interface GraphCore {

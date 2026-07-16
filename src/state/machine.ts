@@ -91,6 +91,12 @@ export interface Machine {
   focusByCode(code: string, opts?: FocusOpts): boolean;
   /** Trace-to-foundations: pull the camera back to frame the ancestor closure. */
   trace(): void;
+  /**
+   * Re-run the focus camera fit for the CURRENT focus (no cascade re-run). The
+   * pose driver calls this after a morph so an active focus reframes to the
+   * standard's new position; no-op when nothing is focused.
+   */
+  reframe(): void;
   /** Leave focus: back to idle, close panel, clear the hash. */
   clearFocus(): void;
   /** Mark the search UI open/closed (suspends drift, reflects in `state`). */
@@ -180,6 +186,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   let curNodeOv = new Map<number, Emphasis>();
   let curEdgeOv = new Map<number, Emphasis>();
   let lastAncestors: number[] = []; // for trace-to-foundations framing
+  let lastNeighborhood: number[] = []; // for pose-morph reframing (no cascade re-run)
   let revealTimers: number[] = [];
 
   function clearRevealTimers(): void {
@@ -376,10 +383,9 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   function sphereOf(indices: number[]): THREE.Sphere {
     const box = new THREE.Box3();
     const v = new THREE.Vector3();
-    for (const i of indices) {
-      const p = graph.nodes[i].pos;
-      box.expandByPoint(v.set(p[0], p[1], p[2]));
-    }
+    // Read CURRENT instance positions (not the static pose-A graph coords) so
+    // framing stays correct after a dual-pose morph.
+    for (const i of indices) box.expandByPoint(nodes.getPosition(i, v));
     const sphere = new THREE.Sphere();
     box.getBoundingSphere(sphere);
     sphere.radius = Math.max(sphere.radius, 90);
@@ -495,6 +501,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
     // Camera: frame focus + its DIRECT neighbors (+ parts), shifted left of panel.
     const neighborhood = [nodeIndex, ...data.parts, ...data.buildsOn, ...data.leadsTo, ...data.related];
+    lastNeighborhood = neighborhood; // reframe() replays this fit after a morph
     void rig.focusOn(sphereOf(neighborhood), !cut, focusPanelOffsetPx());
 
     // Panel + narration + deep link.
@@ -534,6 +541,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     requestRender();
   }
 
+  function reframe(): void {
+    if (focusIndex === null) return;
+    // Same fit as focus() — the neighborhood indices are unchanged; only their
+    // positions moved with the pose. Reuse the stored set, no cascade re-run.
+    void rig.focusOn(sphereOf(lastNeighborhood), !reducedMotion, focusPanelOffsetPx());
+    requestRender();
+  }
+
   function clearFocus(): void {
     if (focusIndex === null) return;
     clearRevealTimers();
@@ -542,6 +557,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     curNodeOv = new Map();
     curEdgeOv = new Map();
     lastAncestors = [];
+    lastNeighborhood = [];
     tooltip.hide();
     canvas.style.cursor = "";
     applyEmphasis({ baseNode: EMPHASIS.REST, baseEdge: EMPHASIS.REST });
@@ -605,6 +621,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     focus,
     focusByCode,
     trace,
+    reframe,
     clearFocus,
 
     setSearching(on) {

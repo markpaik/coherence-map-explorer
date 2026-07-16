@@ -46,6 +46,18 @@ export interface NodesHandle {
   visibleAttr: THREE.InstancedBufferAttribute;
   /** True unless this instance is filtered out (picking consults this). */
   isVisible(index: number): boolean;
+  /**
+   * Overwrite instance i's world position (keeps its base radius). Updates
+   * BOTH the visible mesh and the pick proxy instance matrices in place — the
+   * pose driver drives this every morph frame, which is why raycast picking
+   * keeps landing on the moving dots. Batched: flip commitPositions() once per
+   * frame after a run of setInstancePosition calls.
+   */
+  setInstancePosition(index: number, x: number, y: number, z: number): void;
+  /** Flag both instance-matrix buffers dirty and refresh the proxy bounds. */
+  commitPositions(): void;
+  /** Read instance i's current world position (for pose-correct camera framing). */
+  getPosition(index: number, out: THREE.Vector3): THREE.Vector3;
   /** Advance the shimmer clock (seconds). */
   setTime(t: number): void;
   /** Toggle the idle brightness shimmer (off under reduced motion). */
@@ -165,15 +177,26 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   mesh.name = "nodes";
 
   // -- transforms + colors ----------------------------------------------
+  // Current world position per instance (mutable — the pose driver morphs it
+  // between graph.pos and graph.pos2). Seeded to pose A (the constellation).
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) positions.set(nodes[i].pos, i * 3);
+
   const m = new THREE.Matrix4();
   const color = new THREE.Color();
-  for (let i = 0; i < count; i++) {
-    const n = nodes[i];
-    const r = restRadius(n.deg);
+
+  // Compose one instance's visible matrix from its stored position + base
+  // radius (emphasis scale rides on top in the shader, never in the matrix).
+  function writeVisibleMatrix(i: number): void {
+    const r = restRadius(nodes[i].deg);
     m.makeScale(r, r, r);
-    m.setPosition(n.pos[0], n.pos[1], n.pos[2]);
+    m.setPosition(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
     mesh.setMatrixAt(i, m);
-    color.setHex(STRAND_COLORS[n.strand]);
+  }
+
+  for (let i = 0; i < count; i++) {
+    writeVisibleMatrix(i);
+    color.setHex(STRAND_COLORS[nodes[i].strand]);
     mesh.setColorAt(i, color); // every instance colored before first render
   }
   mesh.instanceMatrix.needsUpdate = true;
@@ -194,16 +217,16 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   proxy.name = "nodes-proxy";
 
   let touchMode = false;
-  function writeProxyMatrices(): void {
+  const pm = new THREE.Matrix4();
+  function writeProxyMatrix(i: number): void {
     const factor = PROXY_RADIUS_FACTOR * (touchMode ? TOUCH_EXTRA_FACTOR : 1);
-    const pm = new THREE.Matrix4();
-    for (let i = 0; i < count; i++) {
-      const n = nodes[i];
-      const r = restRadius(n.deg) * factor;
-      pm.makeScale(r, r, r);
-      pm.setPosition(n.pos[0], n.pos[1], n.pos[2]);
-      proxy.setMatrixAt(i, pm);
-    }
+    const r = restRadius(nodes[i].deg) * factor;
+    pm.makeScale(r, r, r);
+    pm.setPosition(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+    proxy.setMatrixAt(i, pm);
+  }
+  function writeProxyMatrices(): void {
+    for (let i = 0; i < count; i++) writeProxyMatrix(i);
     proxy.instanceMatrix.needsUpdate = true;
     proxy.computeBoundingSphere();
   }
@@ -224,6 +247,21 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     visibleAttr,
     isVisible(index) {
       return visible[index] !== 0;
+    },
+    setInstancePosition(index, x, y, z) {
+      positions[index * 3] = x;
+      positions[index * 3 + 1] = y;
+      positions[index * 3 + 2] = z;
+      writeVisibleMatrix(index);
+      writeProxyMatrix(index);
+    },
+    commitPositions() {
+      mesh.instanceMatrix.needsUpdate = true;
+      proxy.instanceMatrix.needsUpdate = true;
+      proxy.computeBoundingSphere();
+    },
+    getPosition(index, out) {
+      return out.set(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
     },
     boundsSphere,
     boundsBox: box,

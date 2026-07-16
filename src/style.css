@@ -226,6 +226,75 @@ body {
   opacity: 0.45;
 }
 
+/* -- view toggle (Constellation / Ascent), bottom-right above the hints ----- */
+
+.view-toggle {
+  position: fixed;
+  right: clamp(16px, 2.5vw, 28px);
+  bottom: clamp(46px, 7vh, 62px);
+  z-index: 11;
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+.view-seg {
+  min-height: 44px; /* touch target */
+  padding: 0 15px;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+  background: none;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 150ms ease, background 150ms ease;
+}
+.view-seg[aria-pressed="true"] {
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.1);
+}
+.view-seg:hover:not([aria-pressed="true"]):not(:disabled) {
+  color: var(--ink);
+}
+.view-seg:disabled {
+  cursor: default;
+}
+
+/* -- depth scale hint (left edge; visible in the Ascent) -------------------- */
+
+.depth-scale {
+  position: fixed;
+  left: clamp(14px, 2vw, 26px);
+  top: 20vh;
+  bottom: 20vh;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+  user-select: none;
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  transition: opacity 400ms ease;
+}
+.depth-scale-mark {
+  white-space: nowrap;
+}
+.depth-scale-sep {
+  color: var(--ink-2);
+  margin: 0 2px;
+}
+
 /* -- hover tooltip (glass chip) ------------------------------------------ */
 
 .tooltip {
@@ -1240,6 +1309,8 @@ body.og .title-block,
 body.og .search-rail,
 body.og .filters-rail,
 body.og .nav-hints,
+body.og .view-toggle,
+body.og .depth-scale,
 body.og .tour-card,
 body.og .tour-backdrop,
 body.og #veil {
@@ -1267,6 +1338,9 @@ body.og #veil {
     transition-duration: 1ms;
   }
   .nav-hints {
+    transition-duration: 1ms;
+  }
+  .depth-scale {
     transition-duration: 1ms;
   }
 }
@@ -1303,7 +1377,8 @@ body.og #veil {
 :root.rm .panel,
 :root.rm .search-rail,
 :root.rm .search-results,
-:root.rm .tour-dot {
+:root.rm .tour-dot,
+:root.rm .depth-scale {
   transition-duration: 50ms !important;
 }
 :root.rm .tour-card {

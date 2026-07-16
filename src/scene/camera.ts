@@ -32,6 +32,12 @@ export interface CameraRig {
   focusOn(sphere: THREE.Sphere, transition?: boolean, panelOffsetPx?: number): Promise<void>;
   /** Return to the heroic landing framing and clear any panel focal offset. */
   frameHome(transition?: boolean): void;
+  /**
+   * Swap the "home" cloud bounds (called after a pose morph) so frameHome and
+   * the tour's wide shots refit to whichever pose is now on screen. Also rescales
+   * the dolly min/max distance to the new cloud radius.
+   */
+  setHomeBounds(box: THREE.Box3, sphere: THREE.Sphere): void;
   /** Clear the panel focal offset (used when the panel closes with no reframe). */
   clearFocalOffset(transition?: boolean): void;
   setDriftEnabled(on: boolean): void;
@@ -48,11 +54,19 @@ export function createCameraRig(
   const camera = new THREE.PerspectiveCamera(50, opts.aspect, 1, 5000);
   const controls = new CameraControls(camera, domElement);
 
+  // Home bounds are mutable: the dual-pose morph swaps them so frameHome refits
+  // to whichever pose is on screen (the Ascent's massif is much taller than the
+  // constellation, so its dolly range differs too).
+  let homeBox = boundsBox.clone();
+  let homeSphere = bounds.clone();
+  function applyDistanceRange(): void {
+    controls.minDistance = homeSphere.radius * 0.15;
+    controls.maxDistance = homeSphere.radius * 4;
+  }
+  applyDistanceRange();
+  controls.dollyToCursor = true;
   controls.smoothTime = 0.25;
   controls.draggingSmoothTime = 0.12;
-  controls.dollyToCursor = true;
-  controls.minDistance = bounds.radius * 0.15;
-  controls.maxDistance = bounds.radius * 4;
 
   // Initial framing: heroic 3/4 view — slightly right of straight-on,
   // slightly above the plane — then fit the cloud's BOX from that direction
@@ -61,7 +75,7 @@ export function createCameraRig(
   function frameHome(transition = false): void {
     void controls.setFocalOffset(0, 0, 0, transition);
     void controls.rotateTo(0.42, Math.PI / 2 - 0.22, transition);
-    void controls.fitToBox(boundsBox, transition, {
+    void controls.fitToBox(homeBox, transition, {
       paddingTop: 30,
       paddingBottom: 80, // breathing room above the search rail + grade etches
       paddingLeft: 40,
@@ -131,6 +145,11 @@ export function createCameraRig(
     },
     frameHome(transition = true) {
       frameHome(transition);
+    },
+    setHomeBounds(box, sphere) {
+      homeBox = box.clone();
+      homeSphere = sphere.clone();
+      applyDistanceRange();
     },
     clearFocalOffset(transition = true) {
       void controls.setFocalOffset(0, 0, 0, transition);

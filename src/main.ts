@@ -29,12 +29,14 @@ import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
 import { createNebula } from "./scene/nebula";
 import { createEtches } from "./scene/etches";
+import { createPoseDriver } from "./scene/pose";
 import { createMachine, type Machine } from "./state/machine";
 import { createTooltip } from "./ui/tooltip";
 import { createPanel } from "./ui/panel";
 import { createSearch } from "./ui/search";
 import { createFilters } from "./ui/filters";
 import { createTour } from "./ui/tour";
+import { createViewToggle } from "./ui/viewtoggle";
 import { createFallback } from "./ui/fallback";
 import { createPicking } from "./interaction/picking";
 
@@ -114,7 +116,7 @@ function start(graph: GraphCore): void {
     reducedMotion,
     aspect: window.innerWidth / window.innerHeight,
   });
-  const etches = createEtches(graph.grades, rig.controls.azimuthAngle);
+  const etches = createEtches(graph.grades, graph.courses, rig.controls.azimuthAngle);
   scene.add(etches.group);
 
   const bloom = createBloom(renderer, scene, rig.camera, {
@@ -179,6 +181,23 @@ function start(graph: GraphCore): void {
   const picking = createPicking(canvas, rig.camera, nodes, machine);
   const search = createSearch({ graph, machine });
   const filters = createFilters({ graph, nodes, edges, requestRender });
+
+  // Dual-pose "unravel" morph. The driver owns pose geometry only (positions /
+  // edge attributes / etch transforms); it asks the machine to reframe an active
+  // focus after a morph. It reads the live `reducedMotion` flag, so toggle and
+  // story-driven setPose calls cut instantly under reduced motion.
+  const poseDriver = createPoseDriver({
+    graph,
+    nodes,
+    edges,
+    etches,
+    rig,
+    machine,
+    requestRender,
+    reducedMotion: () => reducedMotion,
+  });
+  const viewToggle = createViewToggle({ driver: poseDriver });
+  let lastReflectedPose = poseDriver.pose;
   search.setGradeContext((g) => filters.isGradeActive(g));
   const tour = createTour({
     machine,
@@ -254,6 +273,14 @@ function start(graph: GraphCore): void {
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;
+    // Pose morph: CPU-side, so it must keep the frame pump hot while it plays.
+    if (poseDriver.tick(delta)) render = true;
+    // Keep the toggle's aria-pressed + depth-scale hint in sync with the pose
+    // (cheap; fires only when the pose actually changed, incl. instant cuts).
+    if (poseDriver.pose !== lastReflectedPose) {
+      lastReflectedPose = poseDriver.pose;
+      viewToggle.reflect(poseDriver.pose, poseDriver.target);
+    }
     // Suspend idle drift whenever the user is engaged (hover, focus, search).
     if (rig.update(delta, machine.state !== "idle")) render = true;
 
@@ -411,6 +438,8 @@ function start(graph: GraphCore): void {
       },
       machine,
       tour,
+      // Dual-pose morph driver, for automation (drive setPose, read pose/target).
+      pose: { driver: poseDriver },
       // Scene handles for automated filter/visibility assertions.
       nodes,
       edges,

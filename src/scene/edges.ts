@@ -155,6 +155,12 @@ export interface EdgesHandle {
   emphasisAttr: THREE.InstancedBufferAttribute;
   /** Filter-visibility attribute (1 shown / 0 ghosted); write via filters only. */
   visibleAttr: THREE.InstancedBufferAttribute;
+  /** Bezier endpoint/control attributes — the pose driver rewrites these each
+   *  frame of a morph (aStart/aEnd from the endpoint nodes' current positions,
+   *  aCtrl = lerp(c, c2, …)); it flips their needsUpdate itself. */
+  startAttr: THREE.InstancedBufferAttribute;
+  ctrlAttr: THREE.InstancedBufferAttribute;
+  endAttr: THREE.InstancedBufferAttribute;
   setTime(t: number): void;
   setFlowEnabled(on: boolean): void;
   setViewport(widthPx: number, heightPx: number, pixelRatio: number): void;
@@ -220,10 +226,18 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   emphasisAttr.setUsage(THREE.DynamicDrawUsage);
   const visibleAttr = new THREE.InstancedBufferAttribute(visible, 1);
   visibleAttr.setUsage(THREE.DynamicDrawUsage);
+  // Endpoint + control attributes are static at rest but rewritten every frame
+  // during a pose morph — mark them dynamic so the driver's updates are cheap.
+  const startAttr = new THREE.InstancedBufferAttribute(start, 3);
+  const ctrlAttr = new THREE.InstancedBufferAttribute(ctrl, 3);
+  const endAttr = new THREE.InstancedBufferAttribute(end, 3);
+  startAttr.setUsage(THREE.DynamicDrawUsage);
+  ctrlAttr.setUsage(THREE.DynamicDrawUsage);
+  endAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aVisible", visibleAttr);
-  geometry.setAttribute("aStart", new THREE.InstancedBufferAttribute(start, 3));
-  geometry.setAttribute("aCtrl", new THREE.InstancedBufferAttribute(ctrl, 3));
-  geometry.setAttribute("aEnd", new THREE.InstancedBufferAttribute(end, 3));
+  geometry.setAttribute("aStart", startAttr);
+  geometry.setAttribute("aCtrl", ctrlAttr);
+  geometry.setAttribute("aEnd", endAttr);
   geometry.setAttribute("aColorA", new THREE.InstancedBufferAttribute(colorA, 3));
   geometry.setAttribute("aColorB", new THREE.InstancedBufferAttribute(colorB, 3));
   geometry.setAttribute("aKind", new THREE.InstancedBufferAttribute(kind, 1));
@@ -258,6 +272,9 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     count,
     emphasisAttr,
     visibleAttr,
+    startAttr,
+    ctrlAttr,
+    endAttr,
     setTime(t) {
       uniforms.uTime.value = t;
     },

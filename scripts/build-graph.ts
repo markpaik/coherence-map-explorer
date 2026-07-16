@@ -991,11 +991,16 @@ export function buildGraph(): BuildResult {
     COURSE_ORDER.forEach((c, i) => {
       const [lo, hi] = subColInterval(hsBand, i);
       const cx = round2((lo + hi) / 2);
+      // Two ranks: long course names over narrow sub-bands collide when they
+      // share one ground line, so odd-indexed labels step back and down.
+      const rank = i % 2;
+      const zOff = rank * -40;
+      const yOff = rank * -16;
       courseMarkers.push({
         id: c,
         label: COURSE_LABELS[c],
-        marker: [cx, -240, 0],
-        marker2: [cx, A.yBase - 34, 0],
+        marker: [cx, -240 + yOff, zOff],
+        marker2: [cx, A.yBase - 34 + yOff, zOff],
       });
     });
   }

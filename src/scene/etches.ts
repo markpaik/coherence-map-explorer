@@ -35,10 +35,21 @@ export interface EtchesHandle {
   group: THREE.Group;
   /** Resolves when fonts have loaded and every marker is built. */
   ready: Promise<void>;
+  /**
+   * Slide every marker between its two poses: 0 = constellation (marker),
+   * 1 = the Ascent (marker2). The pose driver calls this with the global eased
+   * progress every morph frame (no per-marker stagger). Markers built later
+   * (async font load) adopt the current pose so they never pop in at pose A.
+   */
+  setPose(p: number): void;
   dispose(): void;
 }
 
-export function createEtches(grades: GraphGrade[], courses: GraphCourse[]): EtchesHandle {
+export function createEtches(
+  grades: GraphGrade[],
+  courses: GraphCourse[],
+  cameraAzimuth: number,
+): EtchesHandle {
   const group = new THREE.Group();
   group.name = "etches";
 
@@ -47,7 +58,23 @@ export function createEtches(grades: GraphGrade[], courses: GraphCourse[]): Etch
   const sideMat = new THREE.MeshBasicMaterial({ color: SIDE_COLOR });
   const loader = new FontLoader();
 
-  function addMarker(font: Font, text: string, size: number, marker: [number, number, number]): void {
+  // Each marker remembers both pose positions so setPose can lerp it. The z of
+  // both poses is 0, so the outward-facing yaw is pose-invariant (fixed once).
+  interface Marker {
+    mesh: THREE.Mesh;
+    a: [number, number, number];
+    b: [number, number, number];
+  }
+  const markers: Marker[] = [];
+  let pose = 0; // 0 = constellation, 1 = the Ascent
+
+  function addMarker(
+    font: Font,
+    text: string,
+    size: number,
+    marker: [number, number, number],
+    marker2: [number, number, number] | undefined,
+  ): void {
     const geometry = new TextGeometry(text, {
       font,
       size,
@@ -63,28 +90,41 @@ export function createEtches(grades: GraphGrade[], courses: GraphCourse[]): Etch
     geometry.translate(-(bb.max.x + bb.min.x) / 2, 0, -(bb.max.z + bb.min.z) / 2);
     geometries.push(geometry);
     const mesh = new THREE.Mesh(geometry, [faceMat, sideMat]);
-    mesh.position.set(marker[0], marker[1], marker[2]);
-    // Stand upright, reading face turned outward from the spiral's core: the
-    // outward direction in plan is the marker's own bearing from the origin.
-    mesh.rotation.y = Math.atan2(marker[0], marker[2]);
+    const a = marker;
+    const b = marker2 ?? marker; // no pose-B target ⇒ stays put
+    // Adopt the current pose immediately (markers may load mid-morph or while
+    // already in the Ascent) so nothing pops in at the wrong place.
+    mesh.position.set(
+      a[0] + (b[0] - a[0]) * pose,
+      a[1] + (b[1] - a[1]) * pose,
+      a[2] + (b[2] - a[2]) * pose,
+    );
+    // Stand upright, reading face turned to the camera's home azimuth. The
+    // markers line the ground plane in both poses, so one fixed facing keeps
+    // every label legible; per-marker radial "face outward" logic mirrored
+    // the text on the far side (a spiral-era leftover caught at the art gate).
+    mesh.rotation.y = cameraAzimuth;
     group.add(mesh);
+    markers.push({ mesh, a, b });
   }
 
   const ready = (async () => {
     try {
       const gradeFont = await loader.loadAsync(GRADE_FONT_URL);
       for (const g of grades) {
-        if (g.marker) addMarker(gradeFont, g.id, GRADE_SIZE, g.marker);
+        if (g.marker) addMarker(gradeFont, g.id, GRADE_SIZE, g.marker, g.marker2);
       }
       // Course labels need A,B,D,E,G,I,L,M,N,O,R,T,V,Y + space — a separate
       // subset face. If it is missing (older build), fall back to initials
       // renderable with the grade face (no crash, degraded gracefully).
       try {
         const courseFont = await loader.loadAsync(COURSE_FONT_URL);
-        for (const c of courses) addMarker(courseFont, COURSE_TEXT[c.id] ?? c.label.toUpperCase(), COURSE_SIZE, c.marker);
+        for (const c of courses)
+          addMarker(courseFont, COURSE_TEXT[c.id] ?? c.label.toUpperCase(), COURSE_SIZE, c.marker, c.marker2);
       } catch {
         console.warn("[cme] course typeface missing; falling back to short marks");
-        for (const c of courses) addMarker(gradeFont, c.id.replace(/[^A-Z0-9]/g, ""), COURSE_SIZE, c.marker);
+        for (const c of courses)
+          addMarker(gradeFont, c.id.replace(/[^A-Z0-9]/g, ""), COURSE_SIZE, c.marker, c.marker2);
       }
     } catch (err) {
       // Markers are ornament — a font failure must never take down the scene.
@@ -95,6 +135,16 @@ export function createEtches(grades: GraphGrade[], courses: GraphCourse[]): Etch
   return {
     group,
     ready,
+    setPose(p) {
+      pose = p;
+      for (const { mesh, a, b } of markers) {
+        mesh.position.set(
+          a[0] + (b[0] - a[0]) * p,
+          a[1] + (b[1] - a[1]) * p,
+          a[2] + (b[2] - a[2]) * p,
+        );
+      }
+    },
     dispose() {
       for (const g of geometries) g.dispose();
       faceMat.dispose();
