@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildGraph } from "../scripts/build-graph";
+import {
+  buildGraph,
+  sanitizeField,
+  absolutize,
+  safeLinkUrl,
+} from "../scripts/build-graph";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -164,6 +169,107 @@ describe("HTML sanitization", () => {
         for (const t of tasks) expect(t.url.startsWith("/")).toBe(false);
       }
     }
+  });
+});
+
+describe("math-span sanitization (no placeholder bypass)", () => {
+  it("escapes HTML injected inside $…$ so it can't reach innerHTML live", () => {
+    const out = sanitizeField(
+      "<p>See $x<img src=x onerror=alert(1)>$ here</p>",
+    );
+    // The injected tag is inert: escaped, never a raw element.
+    expect(out).not.toContain("<img");
+    expect(out).not.toContain("onerror=alert(1)>");
+    expect(out).toContain("$x&lt;img src=x onerror=alert(1)&gt;$");
+  });
+
+  it("escapes markup smuggled between a stray/unbalanced pair of $", () => {
+    const out = sanitizeField(
+      "<p>Stray $foo <script>evil()</script> bar$ baz</p>",
+    );
+    expect(out).not.toMatch(/<script/i);
+    expect(out).toContain("&lt;script&gt;evil()&lt;/script&gt;");
+  });
+
+  it("preserves real math delimiters verbatim (round-trips for KaTeX)", () => {
+    // & and < inside genuine math are HTML-escaped in the string, but the
+    // delimiters themselves survive and the browser un-escapes the text node
+    // back to the true LaTeX source before KaTeX reads it.
+    const out = sanitizeField("<p>$a < b$ and $$c & d$$</p>");
+    expect(out).toContain("$a &lt; b$");
+    expect(out).toContain("$$c &amp; d$$");
+    // delimiters intact
+    expect(out).toMatch(/\$a /);
+    expect(out).toMatch(/\$\$c /);
+  });
+
+  it("neutralizes a forged placeholder token in the source", () => {
+    // U+2063-wrapped MATH0 in the source must not smuggle a stored index.
+    const out = sanitizeField("<p>⁣MATH0⁣ then $y<z$</p>");
+    expect(out).not.toContain("⁣");
+    expect(out).toContain("MATH0"); // inert plain text, delimiters stripped
+    expect(out).toContain("$y&lt;z$"); // the real math still gets index 0
+  });
+
+  it("emits no raw event-handler markup or <img inside math in any shard", () => {
+    const corpus = Object.values(detailShards)
+      .map((s) => JSON.stringify(s))
+      .join("");
+    expect(/onerror\s*=/i.test(corpus)).toBe(false);
+    expect(/on\w+\s*=\s*["']?\w/i.test(corpus)).toBe(false);
+  });
+});
+
+describe("structured link-field scheme validation", () => {
+  it("safeLinkUrl accepts only absolute http(s), dropping other schemes", () => {
+    expect(safeLinkUrl("https://example.org/x")).toBe("https://example.org/x");
+    expect(safeLinkUrl("http://example.org/x")).toBe("http://example.org/x");
+    // site-root paths are absolutized to achievethecore.org (still http(s))
+    expect(safeLinkUrl("/page/1/foo")).toBe(
+      "https://achievethecore.org/page/1/foo",
+    );
+    // dangerous / non-http schemes and bare/scheme-less URLs are dropped
+    expect(safeLinkUrl("javascript:alert(1)")).toBeUndefined();
+    expect(safeLinkUrl("data:text/html,<script>alert(1)</script>")).toBeUndefined();
+    expect(safeLinkUrl("vbscript:msgbox(1)")).toBeUndefined();
+    expect(safeLinkUrl("s3.amazonaws.com/bucket/file.pdf")).toBeUndefined();
+  });
+
+  it("every emitted task/example URL is absolute http(s)", () => {
+    for (const shard of Object.values(detailShards)) {
+      for (const entry of Object.values(shard)) {
+        const ex = (entry as { exampleUrl?: string }).exampleUrl;
+        if (ex !== undefined) expect(ex).toMatch(/^https?:\/\//);
+        const tasks = (entry as { tasks?: { url: string }[] }).tasks || [];
+        for (const t of tasks) expect(t.url).toMatch(/^https?:\/\//);
+      }
+    }
+  });
+});
+
+describe("URL absolutization", () => {
+  it("treats a protocol-relative //host URL as https, not a site-root path", () => {
+    expect(absolutize("//cdn.example.org/img.png")).toBe(
+      "https://cdn.example.org/img.png",
+    );
+    // regression guard: never the doubled-slash bug
+    expect(absolutize("//cdn.example.org/img.png")).not.toContain(
+      "achievethecore.org//",
+    );
+  });
+  it("still absolutizes a single-leading-slash path against achievethecore", () => {
+    expect(absolutize("/page/9/x")).toBe("https://achievethecore.org/page/9/x");
+  });
+  it("leaves an already-absolute URL untouched", () => {
+    expect(absolutize("https://achievethecore.org/y")).toBe(
+      "https://achievethecore.org/y",
+    );
+  });
+  it("no emitted URL has the doubled-slash-after-host defect", () => {
+    const corpus = Object.values(detailShards)
+      .map((s) => JSON.stringify(s))
+      .join("");
+    expect(corpus).not.toContain("achievethecore.org//");
   });
 });
 

@@ -1,0 +1,42 @@
+# Coherence Map Explorer — security response headers.
+#
+# Cloudflare Workers static assets serve this Netlify-style `_headers` file
+# natively (it is copied verbatim from public/ into dist/ by Vite, and dist/ is
+# the assets directory in wrangler.jsonc). Docs:
+# https://developers.cloudflare.com/workers/static-assets/headers/
+# NOTE: `_headers` is a Cloudflare *runtime* feature; it does NOT take effect
+# under `vite preview` (a plain static server) — only on the deployed Worker.
+#
+# One rule, applied to every response (assets + the SPA index.html fallback).
+# Comments are only reliably parsed BETWEEN rules, so every directive is
+# documented here rather than inline in the indented block below.
+#
+# --- Content-Security-Policy, directive by directive ---
+#   default-src 'self'          Baseline: same-origin only unless a directive below widens it.
+#   base-uri 'self'             Pin <base> so injected markup can't repoint relative URLs off-origin.
+#   object-src 'none'           No <object>/<embed>/<applet> (legacy plugin XSS surface).
+#   frame-ancestors 'none'      This page may not be embedded in a frame (anti-clickjacking; mirrors X-Frame-Options).
+#   frame-src 'none'            The app embeds no iframes of its own.
+#   script-src 'self'           Only Vite's hashed same-origin ES modules load; there are NO inline scripts.
+#   style-src 'self' 'unsafe-inline'  Same-origin CSS bundle PLUS the inline style attributes KaTeX
+#                               injects when it auto-renders math (unavoidable without a nonce we can't mint at build time).
+#   img-src 'self' data: https: Worked-example images come from many external CC0 hosts seen in the data
+#                               (s3.amazonaws.com, www.dropbox.com/*.dropboxusercontent.com, achievethecore.org,
+#                               web.archive.org, *.illustrativemathematics.org, www.census.gov, …). Enumerating
+#                               every host is brittle and would silently break images as the dataset evolves, so
+#                               we allow any https host + data: URIs + same-origin. This is the one deliberately
+#                               permissive directive; it exposes no secrets (a static, credential-free site) and
+#                               still forbids plaintext http (blocked as mixed content on the https deploy anyway).
+#   font-src 'self'             Space Grotesk + KaTeX woff2/woff are all same-origin hashed assets.
+#   connect-src 'self'          fetch() of graph-core/detail/search JSON and the typeface JSON is same-origin only.
+#   form-action 'self'          No cross-origin form submissions.
+#   upgrade-insecure-requests   Auto-upgrade the data's http:// image URLs to https:// (they're already
+#                               mixed-content on an https deploy; this makes the upgrade explicit and cross-browser).
+# External task/worked-example LINKS open in new tabs (top-level navigations, not subresources),
+# so CSP does not govern them.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; form-action 'self'; upgrade-insecure-requests

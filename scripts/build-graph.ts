@@ -199,8 +199,12 @@ function strandOf(ord: string): Strand | null {
 // ---------------------------------------------------------------------------
 // HTML sanitization
 // ---------------------------------------------------------------------------
-function absolutize(url: string): string {
+export function absolutize(url: string): string {
   if (!url) return url;
+  // Protocol-relative ("//host/path") — adopt https, do NOT treat as a
+  // site-root path (that would yield "https://achievethecore.org//host/path").
+  // Must be checked before the single-slash case, since "//" also starts "/".
+  if (url.startsWith("//")) return "https:" + url;
   if (url.startsWith("/")) return ACHIEVE_BASE + url;
   return url;
 }
@@ -230,6 +234,20 @@ function fixUrl(url: string): string {
 
 function isDeadImage(url: string): boolean {
   return linkFixes.deadImagePatterns.some((p) => url.includes(p));
+}
+
+/**
+ * Scheme guard for the STRUCTURED link fields (task URLs, worked-example source
+ * URL). Those fields skip sanitizeHtml — they are assigned straight to `a.href`
+ * in panel.ts — so a `javascript:`/`data:`/`vbscript:` URL in the source would
+ * be a live click-XSS. Accept only absolute http(s) after link-fix
+ * normalization; anything else (other scheme, protocol-relative, or bare/
+ * scheme-less) returns undefined and the caller drops the field. Site-root
+ * ("/…") URLs are fine — fixUrl absolutizes them to https://achievethecore.org.
+ */
+export function safeLinkUrl(url: string): string | undefined {
+  const fixed = fixUrl(url);
+  return /^https?:\/\//i.test(fixed) ? fixed : undefined;
 }
 
 const sanitizeOpts: sanitizeHtml.IOptions = {
@@ -319,19 +337,54 @@ const MATH_PATTERNS: RegExp[] = [
   /\$[^$\n]*?\$/g, // $...$
 ];
 
-function sanitizeField(html: string | undefined): string {
+// Sentinel wrapping each protected math span. U+2063 (INVISIBLE SEPARATOR) has
+// no legitimate use in this content; any pre-existing occurrence in the source
+// is stripped before protecting so crafted input can't forge a token like
+// `⁣MATH0⁣` and smuggle another span's stored index into the restored output.
+const MATH_TOKEN_DELIM = "⁣";
+const MATH_TOKEN_RE = new RegExp(
+  `${MATH_TOKEN_DELIM}MATH(\\d+)${MATH_TOKEN_DELIM}`,
+  "g",
+);
+
+/**
+ * Minimal HTML escape for text that will be assigned via innerHTML. `&` MUST be
+ * escaped first, otherwise the `&` in the `&lt;`/`&gt;` we introduce would be
+ * double-escaped. The round-trip is faithful: on innerHTML assignment the
+ * browser un-escapes `&amp;`/`&lt;`/`&gt;` back to `&`/`<`/`>` in the resulting
+ * text node, so KaTeX auto-render (which reads text nodes) receives the exact
+ * original LaTeX source — while the raw string is inert as HTML on assignment.
+ */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function sanitizeField(html: string | undefined): string {
   if (!html) return "";
   const store: string[] = [];
-  let work = html;
+  // Neutralize any pre-existing sentinel delimiters so injected source text
+  // cannot forge a placeholder token (and thus smuggle a stored index).
+  let work = html.split(MATH_TOKEN_DELIM).join("");
   for (const re of MATH_PATTERNS) {
     work = work.replace(re, (m) => {
-      const token = `⁣MATH${store.length}⁣`;
+      const token = `${MATH_TOKEN_DELIM}MATH${store.length}${MATH_TOKEN_DELIM}`;
       store.push(m);
       return token;
     });
   }
   let clean = sanitizeHtml(work, sanitizeOpts);
-  clean = clean.replace(/⁣MATH(\d+)⁣/g, (_m, i) => store[Number(i)]);
+  // Restore each math span, but HTML-ESCAPE its raw source. Without this, any
+  // markup inside `$…$` (e.g. `$<img onerror=…>$`, or prose caught between a
+  // stray pair of `$`) would bypass sanitizeHtml and reach panel.ts's innerHTML
+  // as live HTML. Escaping makes it inert on assignment while preserving the
+  // LaTeX for KaTeX (see escapeHtml). A missing index restores to nothing.
+  clean = clean.replace(MATH_TOKEN_RE, (_m, i) => {
+    const src = store[Number(i)];
+    return src === undefined ? "" : escapeHtml(src);
+  });
   return clean.trim();
 }
 
@@ -866,15 +919,19 @@ export function buildGraph(): BuildResult {
     if (example) entry.example = example;
     if (s.example_problem_attribution && s.example_problem_attribution.trim())
       entry.exampleAttr = s.example_problem_attribution.trim();
-    if (s.example_problem_url && s.example_problem_url.trim())
-      entry.exampleUrl = fixUrl(s.example_problem_url.trim());
+    if (s.example_problem_url && s.example_problem_url.trim()) {
+      const safe = safeLinkUrl(s.example_problem_url.trim());
+      if (safe) entry.exampleUrl = safe; // drop non-http(s) example sources
+    }
     if (progressions) entry.progressions = progressions;
     if (c.name) entry.clusterName = c.name;
     const tasks: { group: string; name: string; url: string }[] = [];
     for (const grp of s.links || []) {
       for (const l of grp.links || []) {
         if (!l.url) continue;
-        tasks.push({ group: grp.name, name: l.name, url: fixUrl(l.url) });
+        const safe = safeLinkUrl(l.url);
+        if (!safe) continue; // drop non-http(s) task links (skip the entry)
+        tasks.push({ group: grp.name, name: l.name, url: safe });
       }
     }
     if (tasks.length) entry.tasks = tasks;
