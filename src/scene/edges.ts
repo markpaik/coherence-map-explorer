@@ -104,6 +104,7 @@ const FRAG = /* glsl */ `
 
   uniform float uTime;
   uniform float uFlow; // 1 = animate prereq comets, 0 = frozen (reduced motion)
+  uniform float uStory; // 1 while a story plays: healthy edges lift toward the chain look
 
   in float vT;
   in vec3 vColor;
@@ -131,23 +132,30 @@ const FRAG = /* glsl */ `
     vec3 col = vColor;
     float alpha;
 
+    // Story lift: while a story plays, HEALTHY edges rise toward the chain look
+    // (bright, flowing) so the constellation reads as alive with learning;
+    // damage kills the lift (gone by d≈0.7), leaving broken lineages to cool
+    // via the ember mix below. max(), not ×, so an already-chain-lit edge never
+    // double-brightens.
+    float story = uStory * (1.0 - clamp(vDamage * 1.45, 0.0, 1.0));
+
     if (vKind < 0.5) {
       // Prerequisite (directed): HDR-bright with directional comets when chain/hot.
-      alpha = mix(aP[i0], aP[i1], f);
-      col *= mix(mulP[i0], mulP[i1], f);
-      float flow = mix(flowP[i0], flowP[i1], f);
+      alpha = max(mix(aP[i0], aP[i1], f), 0.65 * story);
+      col *= max(mix(mulP[i0], mulP[i1], f), 1.0 + 0.8 * story);
+      float flow = max(mix(flowP[i0], flowP[i1], f), story);
       float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
       float comet = pow(fr, 3.0);
       col += vColor * comet * 2.0 * flow;
     } else {
       // Related (undirected): in-shader dash, slow shimmer, NEVER a flow comet.
       float dash = step(0.5, fract(vT * 14.0));
-      alpha = mix(aR[i0], aR[i1], f) * dash;
-      float shim = mix(shimR[i0], shimR[i1], f);
+      alpha = max(mix(aR[i0], aR[i1], f), 0.4 * story) * dash;
+      float shim = max(mix(shimR[i0], shimR[i1], f), story);
       col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
     }
 
-    // Structural damage (stories + Gaps): pull the edge toward a dark ember
+    // Structural damage (stories): pull the edge toward a dark ember
     // (#4a2318) and drop its alpha, so a broken lineage visibly cools. Additive-
     // blend safe: both moves subtract light rather than add it.
     col = mix(col, vec3(0.2902, 0.1373, 0.0941), vDamage);
@@ -167,6 +175,8 @@ export interface EdgesHandle {
   visibleAttr: THREE.InstancedBufferAttribute;
   /** Per-edge damage 0..1 (max of endpoints); write via setDamage only. */
   damageAttr: THREE.InstancedBufferAttribute;
+  /** Story-mode lift (0 = off, 1 = healthy edges glow + flow); stories only. */
+  setStory(amount: number): void;
   /**
    * Set per-edge damage (0..1, typically the max of the endpoint node damages).
    * The fragment cools the edge toward a dark ember and drops its alpha. null
@@ -272,6 +282,7 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     uPxRatio: { value: 1 },
     uTime: { value: 0 },
     uFlow: { value: 1 },
+    uStory: { value: 0 },
   };
 
   const material = new THREE.ShaderMaterial({
@@ -307,6 +318,9 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
         damage.set(values);
       }
       damageAttr.needsUpdate = true;
+    },
+    setStory(amount) {
+      uniforms.uStory.value = amount;
     },
     setVisibleMask(mask) {
       if (mask === null) {

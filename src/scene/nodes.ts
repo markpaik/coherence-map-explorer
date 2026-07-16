@@ -44,7 +44,7 @@ export interface NodesHandle {
   emphasisAttr: THREE.InstancedBufferAttribute;
   /** Filter-visibility attribute (1 shown / 0 ghosted); write via filters only. */
   visibleAttr: THREE.InstancedBufferAttribute;
-  /** Per-node structural damage 0..1 (stories + Gaps); write via setDamage only. */
+  /** Per-node structural damage 0..1 (stories); write via setDamage only. */
   damageAttr: THREE.InstancedBufferAttribute;
   /** True unless this instance is filtered out (picking consults this). */
   isVisible(index: number): boolean;
@@ -78,6 +78,8 @@ export interface NodesHandle {
   setTime(t: number): void;
   /** Toggle the idle brightness shimmer (off under reduced motion). */
   setShimmerEnabled(on: boolean): void;
+  /** Story-mode luminance lift for undamaged nodes (1 = off; ~1.9 = shine). */
+  setStoryLift(mul: number): void;
   /** Grow the proxy pick radius for touch pointers (idempotent). */
   setTouchPicking(on: boolean): void;
   /** Bounding sphere of the whole node cloud (for camera framing). */
@@ -102,7 +104,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   }
   // Filter visibility: 1 = shown, 0 = filtered out (ghosted, not hit-tested).
   const visible = new Float32Array(count).fill(1);
-  // Structural damage 0..1 (stories + Gaps); 0 = untouched, 1 = ember husk.
+  // Structural damage 0..1 (stories); 0 = untouched, 1 = ember husk.
   const damage = new Float32Array(count); // all 0 at rest
   const emphasisAttr = new THREE.InstancedBufferAttribute(emphasis, 1);
   emphasisAttr.setUsage(THREE.DynamicDrawUsage);
@@ -122,12 +124,19 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     // 1 = idle shimmer on; 0 forces the multiplier to exactly 1.0 (no glow) so
     // reduced-motion is truly still, not just frozen at a random shimmer phase.
     uShimmer: { value: 1 },
+    // Story lift: during story playback, UNDAMAGED nodes brighten toward this
+    // multiplier (the brighter strand tones cross the bloom threshold and halo
+    // softly) so "every light here is something learned" is literal. Damage
+    // attenuates the lift to nothing, widening the narrative contrast between
+    // shining and struggling. 1.0 = off.
+    uStoryLift: { value: 1 },
   };
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uniforms.uTime;
     shader.uniforms.uDimColor = uniforms.uDimColor;
     shader.uniforms.uShimmer = uniforms.uShimmer;
+    shader.uniforms.uStoryLift = uniforms.uStoryLift;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -141,6 +150,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         uniform float uTime;
         uniform float uShimmer;
         varying float vColorMul;
+        varying float vShim;
         varying float vDim;
         varying float vDamage;
         varying float vPhase;
@@ -166,6 +176,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
           // uShimmer=0 (reduced motion) collapses it to exactly 1.0 → no glow.
           float shimmer = mix(1.0, 1.14 + 0.08 * sin(uTime * ${((Math.PI * 2) / 6).toFixed(6)} + aPhase), uShimmer);
           vColorMul = mul * shimmer;
+          vShim = shimmer; // story lift re-applies the breath on top of its own floor
           // Filtered-out instances shrink to a faint background speck (ghost) and
           // read as dimmed — opaque, so the depth pass and edge occlusion hold.
           scl *= mix(0.14, 1.0, aVisible);
@@ -186,7 +197,9 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         #include <common>
         uniform vec3 uDimColor;
         uniform float uTime;
+        uniform float uStoryLift;
         varying float vColorMul;
+        varying float vShim;
         varying float vDim;
         varying float vDamage;
         varying float vPhase;
@@ -196,7 +209,15 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         "#include <color_fragment>",
         /* glsl */ `
         #include <color_fragment>
-        diffuseColor.rgb = mix(diffuseColor.rgb * vColorMul, uDimColor, vDim);
+        // Story lift: while a story plays, HEALTHY nodes rise to at least
+        // chain-level brightness (shimmer preserved), so the lit strands cross
+        // the bloom threshold and halo; damage kills the lift (gone by d≈0.7)
+        // and the ember pass below takes over. max(), not ×, so a focus/chain
+        // node never stacks the lift on top of its own emphasis. Applied BEFORE
+        // the dim mix, so spotlight-ghosted nodes stay ghosted.
+        float lift = mix(uStoryLift, 1.0, clamp(vDamage * 1.45, 0.0, 1.0));
+        float mulTotal = max(vColorMul, lift * vShim);
+        diffuseColor.rgb = mix(diffuseColor.rgb * mulTotal, uDimColor, vDim);
         // --- structural damage (composited AFTER emphasis) --------------------
         // 0 = untouched; 1 = ember husk. Damage distinguishes OUTAGE from
         // STRUGGLE: a fully-dead node (d >= 0.95) is a steady dark ember with
@@ -230,7 +251,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
       );
   };
   // Distinct cache key so the patched program never collides with a stock basic material.
-  material.customProgramCacheKey = () => "coherence-nodes-v3-struggle";
+  material.customProgramCacheKey = () => "coherence-nodes-v4-storylift";
 
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.frustumCulled = false;
@@ -347,6 +368,9 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     },
     setShimmerEnabled(on) {
       uniforms.uShimmer.value = on ? 1 : 0;
+    },
+    setStoryLift(mul) {
+      uniforms.uStoryLift.value = mul;
     },
     setTouchPicking(on) {
       if (on === touchMode) return;

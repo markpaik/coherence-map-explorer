@@ -21,9 +21,9 @@ The transition between them — **the unravel** — is a signature moment, not a
 camera cut: entering the Ascent, nodes settle foundations-first (35ms stagger
 per depth layer, 650ms per-node smoothstep, ~1.7s total) so the viewer watches
 mathematics assemble into a load-bearing structure; returning, the summit
-releases first and the structure gathers back into the galaxy. Stories and the
-Gaps simulator auto-unravel; a Constellation/Ascent toggle (bottom-right)
-offers both poses to everyone. Reduced motion cuts instantly.
+releases first and the structure gathers back into the galaxy. Stories
+auto-unravel; a Constellation/Ascent toggle (bottom-right) offers both poses
+to everyone. Reduced motion cuts instantly.
 
 The high-school arc in both poses is organized by CCSS Appendix A's
 traditional pathway: Algebra I, Geometry, Algebra II sub-bands (23 standards

@@ -1,5 +1,5 @@
-// Selector resolution — the shared grammar the story scripts (src/stories/
-// scripts.ts) and the Gaps simulator speak. A selector is a string that names a
+// Selector resolution — the grammar the story scripts (src/stories/
+// scripts.ts) speak. A selector is a string that names a
 // set of standards; resolving it returns a Set of NODE INDICES into graph.nodes
 // (indices, not ids, so callers can index the emphasis/damage/visibility buffers
 // directly).

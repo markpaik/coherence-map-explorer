@@ -62,10 +62,17 @@ float `aDamage` on nodes; edges inherit max of endpoints):
 
 | State | Look |
 |---|---|
-| strong / learned | rest brightness, full saturation |
+| strong / learned | story lift: raised to chain-level brightness (×1.9 floor under the shimmer, `max()` so emphasis never stacks); the brighter strand tones cross the bloom threshold and halo |
 | missed (damage = 1) | near-dark husk: 0.25 brightness, desaturated 80%, slow ember pulse in deep red-amber `#4a1f14` -> `#7a3520` |
-| challenged (0 < damage < 1) | brightness and saturation lerp toward husk by damage; a faint irregular flicker (per-node phase, amplitude ∝ damage) reads as "struggling, not dead" |
-| unaffected | untouched rest state; in contrast with damage around it, it reads as hopeful |
+| challenged (0 < damage < 1) | brightness and saturation lerp toward husk by damage; a faint irregular flicker (per-node phase, amplitude ∝ damage) reads as "struggling, not dead"; the story lift dies by damage ≈ 0.7 |
+| unaffected | story-lifted like strong/learned; in contrast with damage around it, it reads as hopeful |
+
+Edges carry the same narrative: while a story plays, HEALTHY prerequisite
+edges rise toward the chain look (0.65 alpha, ×1.8 HDR, directional flow
+comets) and related pairs shimmer — the constellation is visibly alive with
+learning. Damage attenuates the edge lift on the same curve as nodes, so a
+broken lineage's rivers stop flowing and cool to ember while everything
+around them still streams.
 
 Damage never uses the strand hues for the ember (colorblind-safe: ember is a
 luminance+shape change, not only a hue change; flicker is the secondary
@@ -77,21 +84,14 @@ Structural exposure, not a learning model, and one card per story says so
 plainly ("The map shows what the work stands on, not what any child can or
 cannot do").
 
-Two models, deliberately different, both honest:
+One model: **structural exposure**. For standard v with ancestor set A(v),
+damage(v) = |A(v) ∩ M| / |A(v)|; missed = 1. Cards quantify this model
+(271 damaged, and so on): how much of a standard's foundation is gone.
+Computed client-side over the 757-edge DAG.
 
-- **Stories (structural exposure)**: for standard v with ancestor set A(v),
-  damage(v) = |A(v) ∩ M| / |A(v)|; missed = 1. Cards quantify this model
-  (271 damaged, and so on): how much of a standard's foundation is gone.
-- **Gaps mode (Mark's decay model)**: marking a standard hits its immediate
-  dependents hard and FADES with distance, because students patch over
-  far-off gaps superficially: damage(v) = max over missed ancestors m of
-  0.62^hopdist(m, v). The Gaps UI says so in one line ("Impact fades with
-  distance: students patch over far-off gaps, thinly").
-
-Both computed client-side over the 757-edge DAG. Stories drive the first;
-the interactive Gaps tool (bottom-right tools corner, beside the pose
-toggle, NOT in the filter rail: it is a tool, not a filter) drives the
-second.
+(An interactive "Gaps" simulator with a hop-decay variant shipped briefly
+and was removed in July 2026: the stories carry the same argument with
+narration and evidence, and the standalone tool diluted them.)
 
 Damage look distinguishes outage from struggle: a dead node (damage ≈ 1) is
 a steady dark ember with a slow pulse; a half-damaged node visibly wavers
@@ -397,8 +397,8 @@ prerequisite is the mechanism)**
   story 3's hole selection rather than standing alone.
 
 ## Build plan
-1. Engine + damage shader states + Gaps mode (Opus build, precise spec) —
-   the impact model is shared infrastructure.
+1. Engine + damage shader states (Opus build, precise spec) — the impact
+   model is shared infrastructure.
 2. Story scripts + card copy (Fable — copy is design).
 3. Citation freeze after the research brief lands; every [cite] resolved or
    the claim is cut.

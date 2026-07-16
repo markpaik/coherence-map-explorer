@@ -46,9 +46,6 @@ export interface StoryPlayerDeps {
   requestRender: () => void;
   announce: (msg: string) => void;
   reducedMotion: () => boolean;
-  /** Fired when a story starts — used to switch Gaps mode off so the two never
-   *  fight over the shared damage buffer. */
-  onStart?: () => void;
 }
 
 export interface StoryPlayerHandle {
@@ -264,7 +261,6 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       return;
     }
     if (running) stopImmediate(); // restart cleanly (no pose return churn)
-    deps.onStart?.(); // e.g. switch Gaps off — both own the damage buffer
 
     running = true;
     currentStory = story;
@@ -275,6 +271,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
 
     machine.setHover(null); // a stale hover must not linger under the backdrop
     machine.setStorying(true);
+    // Narrative luminance: while the story plays, healthy nodes rise to
+    // chain-level brightness and healthy prereq edges glow and FLOW — the
+    // constellation is alive with learning. Damage attenuates both lifts, so
+    // broken lineages visibly go dark against the shine.
+    nodes.setStoryLift(1.9);
+    edges.setStory(1);
     document.body.classList.add("storying");
     backdrop.hidden = false;
     card.begin(story);
@@ -297,7 +299,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     holdRemaining = 0;
     damageCur.fill(0);
     nodes.setDamage(null);
+    nodes.setStoryLift(1);
     edges.setDamage(null);
+    edges.setStory(0);
     nodes.setVisibleMask(null);
     edges.setVisibleMask(null);
     filters.recompute(); // reclaim the visibility buffers for the live filters

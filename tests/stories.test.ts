@@ -104,48 +104,6 @@ describe("damage engine (real graph)", () => {
   });
 });
 
-describe("gaps decay model (computeDecay)", () => {
-  // A tiny hand-built prereq DAG so hop distances are exact and obvious:
-  //   A → B → C   and   E → C   (D is isolated)
-  // decay defaults to 0.62; a direct dependent reads 0.62, two hops 0.62² etc.
-  const node = (id: string) => ({ id, code: id }) as unknown as GraphCore["nodes"][number];
-  const edge = (s: string, t: string) => ({ s, t, k: 0 }) as unknown as GraphCore["edges"][number];
-  const tiny = {
-    nodes: [node("A"), node("B"), node("C"), node("D"), node("E")],
-    edges: [edge("A", "B"), edge("B", "C"), edge("E", "C")],
-  } as unknown as GraphCore;
-  const eng = createDamageEngine(tiny);
-  const idx = new Map(tiny.nodes.map((n, i) => [n.id, i]));
-  const at = (arr: Float32Array, id: string): number => arr[idx.get(id)!];
-
-  it("a missed standard reads damage 1", () => {
-    expect(at(eng.computeDecay(new Set(["A"])), "A")).toBe(1);
-  });
-
-  it("a direct dependent decays to 0.62 (one hop)", () => {
-    expect(at(eng.computeDecay(new Set(["A"])), "B")).toBeCloseTo(0.62, 6);
-  });
-
-  it("two hops decay to 0.3844 (0.62²)", () => {
-    expect(at(eng.computeDecay(new Set(["A"])), "C")).toBeCloseTo(0.3844, 6);
-  });
-
-  it("a non-descendant reads 0", () => {
-    const dmg = eng.computeDecay(new Set(["A"]));
-    expect(at(dmg, "D")).toBe(0); // isolated
-    expect(at(dmg, "E")).toBe(0); // upstream of C, not downstream of A
-  });
-
-  it("max-wins when two missed ancestors reach the same node", () => {
-    // C is 2 hops from A (0.3844) and 1 hop from E (0.62); the nearer wins.
-    expect(at(eng.computeDecay(new Set(["A", "E"])), "C")).toBeCloseTo(0.62, 6);
-  });
-
-  it("honors a custom decay factor", () => {
-    expect(at(eng.computeDecay(new Set(["A"]), 0.5), "C")).toBeCloseTo(0.25, 6);
-  });
-});
-
 describe("story scripts validate against the graph", () => {
   const sceneSelectors = (scene: (typeof STORIES)[number]["scenes"][number]): string[] => {
     const sels: string[] = [];

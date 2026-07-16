@@ -1536,103 +1536,9 @@ body.storying #scene {
 body.storying .search-rail,
 body.storying .filters-rail,
 body.storying .view-toggle,
-body.storying .nav-hints,
-body.storying .gaps-tool {
+body.storying .nav-hints {
   opacity: 0;
   pointer-events: none;
-}
-
-/* -- Gaps mode: a TOOL in the bottom-right corner, stacked above the view
-   toggle (it is NOT a filter — it does not live in the filters rail). ------- */
-
-.gaps-tool {
-  position: fixed;
-  right: clamp(16px, 2.5vw, 28px);
-  /* Sit directly above the Constellation/Ascent toggle (bottom clamp(46px,
-     7vh,62px), ~52px tall) — clear it plus a small gap. */
-  bottom: calc(clamp(46px, 7vh, 62px) + 58px);
-  z-index: 11;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  pointer-events: none; /* only the interactive children take pointer events */
-}
-.gaps-panel {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  max-width: min(320px, calc(100vw - 32px));
-}
-.gaps-panel[hidden] {
-  display: none;
-}
-.gaps-explainer {
-  margin: 0;
-  padding: 8px 12px;
-  font-size: 12px;
-  line-height: 1.4;
-  text-align: right;
-  color: var(--ink-2);
-  background: var(--surface);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.gaps-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  font-size: 13px;
-  color: var(--ink);
-  background: var(--surface);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  pointer-events: auto;
-}
-.gaps-clear {
-  font: inherit;
-  font-size: 12px;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--ink-3);
-  border-radius: 999px;
-  padding: 3px 12px;
-  cursor: pointer;
-}
-.gaps-clear:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-/* The pill — glass, styled like a view-toggle segment; 44px touch target. */
-.gaps-pill {
-  min-height: 44px;
-  padding: 0 18px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--ink-2);
-  background: var(--surface);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-  pointer-events: auto;
-  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
-}
-.gaps-pill[aria-pressed="true"] {
-  color: var(--ink);
-  border-color: var(--ink-2);
-  background: rgb(255 255 255 / 0.1);
-}
-.gaps-pill:hover:not([aria-pressed="true"]) {
-  color: var(--ink);
 }
 
 /* -- no-WebGL fallback list ------------------------------------------------ */
@@ -1772,7 +1678,6 @@ body.og .story-scrubber,
 body.og .story-backdrop,
 body.og .story-picker,
 body.og .story-picker-backdrop,
-body.og .gaps-tool,
 body.og #veil {
   display: none !important;
 }

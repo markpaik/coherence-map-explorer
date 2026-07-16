@@ -11,6 +11,7 @@
 // reduced-motion flag; the tour passes the same flag to the rig's hero moves,
 // and the card's fade collapses under prefers-reduced-motion (see style.css).
 
+import type { StrandId } from "../data";
 import type { Machine } from "../state/machine";
 import type { CameraRig } from "../scene/camera";
 import type { FiltersHandle } from "./filters";
@@ -48,6 +49,19 @@ export function createTour(deps: TourDeps): TourHandle {
   const transition = (): boolean => !reducedMotion();
   const autoAdvanceOn = (): boolean => !reducedMotion();
 
+  // Four-rivers stop: cycle the strands one river at a time (2s each — one
+  // full loop per 8s dwell) so all four colors actually take the stage.
+  // Under reduced motion the cycle is off and all four rivers stay lit at once.
+  const RIVERS: StrandId[] = ["number", "algebra", "geometry", "data"];
+  const RIVER_STEP_MS = 2000;
+  let riverTimer: number | null = null;
+  function stopRivers(): void {
+    if (riverTimer !== null) {
+      window.clearInterval(riverTimer);
+      riverTimer = null;
+    }
+  }
+
   // --- the six stops (captions are DESIGN copy, verbatim) ----------------
   const stops: Stop[] = [
     {
@@ -62,7 +76,7 @@ export function createTour(deps: TourDeps): TourHandle {
     {
       title: "Where fractions begin",
       caption:
-        "Grade 3's first fraction standard. Gold lines flow in from what it builds on and out to everything it unlocks.",
+        "Grade 3's first fraction standard. Only two quiet lines flow in, from partitioning shapes and measuring lengths. A cascade of gold flows out to everything fractions unlock.",
       enter() {
         machine.focusByCode("3.NF.A.1");
       },
@@ -87,13 +101,20 @@ export function createTour(deps: TourDeps): TourHandle {
     {
       title: "Four rivers",
       caption:
-        "Number, Algebra, Geometry, Data. Toggle any strand or grade to follow one river across thirteen years.",
+        "Number, Algebra, Geometry, Data. Watch each river light up in turn, then toggle any strand or grade to follow one across thirteen years.",
       enter() {
         machine.clearFocus();
-        filters.setStrandsOnly("number");
         rig.frameHome(transition());
+        if (reducedMotion()) return; // all four rivers stay lit, no cycling
+        let riverIndex = 0;
+        filters.setStrandsOnly(RIVERS[riverIndex]);
+        riverTimer = window.setInterval(() => {
+          riverIndex = (riverIndex + 1) % RIVERS.length;
+          filters.setStrandsOnly(RIVERS[riverIndex]);
+        }, RIVER_STEP_MS);
       },
       leave() {
+        stopRivers();
         filters.reset(); // restore all filters on leaving this stop
       },
     },
@@ -320,6 +341,7 @@ export function createTour(deps: TourDeps): TourHandle {
       return running;
     },
     dispose() {
+      stopRivers();
       document.removeEventListener("keydown", onKeydown, true);
       backdrop.remove();
       card.remove();

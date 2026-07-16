@@ -39,7 +39,6 @@ import { createFilters } from "./ui/filters";
 import { createTour } from "./ui/tour";
 import { createViewToggle } from "./ui/viewtoggle";
 import { createFallback } from "./ui/fallback";
-import { createGaps } from "./ui/gaps";
 import { createPicking } from "./interaction/picking";
 import { createDamageEngine } from "./stories/damage";
 import { createSelectorResolver } from "./stories/selectors";
@@ -217,19 +216,9 @@ function start(graph: GraphCore): void {
     reducedMotion: () => reducedMotion,
   });
 
-  // -- stories + Gaps (shared damage engine) --------------------------------
+  // -- stories ---------------------------------------------------------------
   const damageEngine = createDamageEngine(graph);
   const resolveSelector = createSelectorResolver(graph);
-  // Gaps first: the player switches it off on start (both own the damage buffer).
-  const gaps = createGaps({
-    graph,
-    damage: damageEngine,
-    nodes,
-    edges,
-    picking,
-    requestRender,
-    announce,
-  });
   const storyPlayer = createStoryPlayer({
     graph,
     machine,
@@ -243,7 +232,6 @@ function start(graph: GraphCore): void {
     requestRender,
     announce,
     reducedMotion: () => reducedMotion,
-    onStart: () => gaps.setActive(false),
   });
   const storyPicker = createStoryPicker({ player: storyPlayer });
   void storyPicker;
@@ -505,14 +493,13 @@ function start(graph: GraphCore): void {
       tour,
       // Dual-pose morph driver, for automation (drive setPose, read pose/target).
       pose: { driver: poseDriver },
-      // Stories + Gaps, for automation (start/stop/step a story, mark gaps).
+      // Stories, for automation (start/stop/step a story).
       stories: {
         player: storyPlayer,
         start(id: string): void {
           storyPlayer.start(id);
         },
       },
-      gaps,
       // Scene handles for automated filter/visibility assertions.
       nodes,
       edges,

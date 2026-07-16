@@ -2,7 +2,7 @@
 
 A 3D map of every Common Core math standard from Kindergarten through high school: 480 standards, 757 prerequisite links, and 142 related-standard links, drawn as one navigable constellation. Search for a standard, click it, and watch everything it builds on light up grade by grade back to Kindergarten, along with everything it leads to next.
 
-**Live site:** _coming soon_
+**Live site:** https://coherence-map-explorer.markhpaik.workers.dev
 
 ## Where this comes from
 
