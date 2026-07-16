@@ -12,8 +12,11 @@ import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
 import { createEtches } from "./scene/etches";
-import { createMachine } from "./state/machine";
+import { createMachine, type Machine } from "./state/machine";
 import { createTooltip } from "./ui/tooltip";
+import { createPanel } from "./ui/panel";
+import { createSearch } from "./ui/search";
+import { createFilters } from "./ui/filters";
 import { createPicking } from "./interaction/picking";
 
 const MAX_PIXEL_RATIO = 2;
@@ -75,17 +78,73 @@ function start(graph: GraphCore): void {
 
   const bloom = createBloom(renderer, scene, rig.camera);
 
-  const tooltip = createTooltip(document.body);
-  const machine = createMachine(graph, nodes, edges, tooltip, canvas);
-  const picking = createPicking(canvas, rig.camera, nodes, machine);
-
-  if (reducedMotion) edges.setFlowEnabled(false);
-
-  // -- render-on-demand loop ---------------------------------------------
+  // -- render-on-demand loop (declared before UI so callbacks can request) --
   let needsRender = true;
   const requestRender = (): void => {
     needsRender = true;
   };
+
+  // -- aria-live announcer (polite; canvas stays aria-hidden) --------------
+  const liveEl = document.getElementById("aria-live");
+  const announce = (msg: string): void => {
+    if (liveEl) liveEl.textContent = msg;
+  };
+
+  const tooltip = createTooltip(document.body);
+
+  // Panel ↔ machine are mutually referential: the machine drives the panel,
+  // and the panel's buttons request focus/trace/close back on the machine.
+  // Declare the machine first (definite-assignment), wire the panel to it, then
+  // build the machine with the panel handle.
+  let machine!: Machine;
+  const panel = createPanel(document.body, graph, {
+    focusCode: (code) => machine.focusByCode(code),
+    trace: () => machine.trace(),
+    close: () => machine.clearFocus(),
+  });
+  machine = createMachine(graph, {
+    nodes,
+    edges,
+    tooltip,
+    canvas,
+    rig,
+    panel,
+    announce,
+    reducedMotion,
+    requestRender,
+  });
+
+  const picking = createPicking(canvas, rig.camera, nodes, machine);
+  const search = createSearch({ graph, machine });
+  const filters = createFilters({ graph, nodes, edges, requestRender });
+  void search;
+  void filters;
+
+  if (reducedMotion) edges.setFlowEnabled(false);
+
+  // -- deep-link routing (#/s/<CODE>) -------------------------------------
+  // The machine writes the hash (replaceState — no hashchange), so hashchange
+  // only fires for genuine back/forward or manual edits.
+  const codeFromHash = (): string | null => {
+    const m = /^#\/s\/(.+)$/.exec(location.hash);
+    return m ? decodeURIComponent(m[1]) : null;
+  };
+  const routeFromHash = (instant: boolean): void => {
+    const code = codeFromHash();
+    if (code) {
+      machine.focusByCode(code, { instant });
+    } else if (machine.focusedIndex !== null) {
+      machine.clearFocus();
+    }
+  };
+  window.addEventListener("hashchange", () => routeFromHash(true));
+
+  // -- global Escape: close panel / clear focus (search owns its own Esc) --
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && machine.focusedIndex !== null) {
+      machine.clearFocus();
+    }
+  });
 
   let sceneTime = 0;
   let last = performance.now();
@@ -109,7 +168,8 @@ function start(graph: GraphCore): void {
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;
-    if (rig.update(delta, machine.state === "hover")) render = true;
+    // Suspend idle drift whenever the user is engaged (hover, focus, search).
+    if (rig.update(delta, machine.state !== "idle")) render = true;
 
     if (render) {
       if (debug) renderer.info.reset();
@@ -195,8 +255,21 @@ function start(graph: GraphCore): void {
       stepFrame(deltaSeconds = 1 / 60): void {
         advance(deltaSeconds);
       },
+      // Direct focus driver (bypasses the pointer pipeline) for automation.
+      focusCode(code: string): boolean {
+        return machine.focusByCode(code, { instant: true });
+      },
+      machine,
+      // Scene handles for automated filter/visibility assertions.
+      nodes,
+      edges,
+      graph,
     };
   }
+
+  // Resolve any deep link (#/s/<CODE>) now that the scene is ready — instant
+  // reveal + camera cut, panel open.
+  routeFromHash(true);
 
   requestAnimationFrame(frame);
 }

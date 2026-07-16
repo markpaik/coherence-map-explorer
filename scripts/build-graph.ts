@@ -168,6 +168,16 @@ interface DetailEntry {
   clusterName?: string;
   tasks?: { group: string; name: string; url: string }[];
 }
+/** One lightweight, HTML-free record per standard, for the client search index. */
+interface SearchDoc {
+  id: string;
+  code: string;
+  grade: Grade;
+  strand: Strand;
+  text: string; // plain-text desc (math stripped, tags removed), ~240 chars
+  domainName: string;
+  clusterName: string;
+}
 
 // ---------------------------------------------------------------------------
 // Strand mapping (hard-fails on any unmapped domain ordinal)
@@ -293,12 +303,50 @@ function sanitizeField(html: string | undefined): string {
   return clean.trim();
 }
 
+const HTML_ENTITIES: Record<string, string> = {
+  "&nbsp;": " ",
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&rsquo;": "’",
+  "&lsquo;": "‘",
+  "&mdash;": "—",
+  "&ndash;": "–",
+  "&hellip;": "…",
+  "&times;": "×",
+  "&ge;": "≥",
+  "&le;": "≤",
+};
+
+/**
+ * Plain-text projection of a raw HTML desc for the search index. Math spans are
+ * dropped first (so a stray `<` inside `$a<b$` can't merge with a later real
+ * `>` and swallow prose), then tags are stripped, entities decoded, whitespace
+ * collapsed, and the result truncated at a word boundary near ~240 chars.
+ */
+function toSearchText(html: string | undefined, limit = 240): string {
+  if (!html) return "";
+  let s = html;
+  for (const re of MATH_PATTERNS) s = s.replace(re, " ");
+  s = s.replace(/<[^>]*>/g, " ");
+  s = s.replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)));
+  s = s.replace(/&[a-z]+;/gi, (m) => HTML_ENTITIES[m] ?? " ");
+  s = s.replace(/\s+/g, " ").trim();
+  if (s.length <= limit) return s;
+  const cut = s.slice(0, limit);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "…";
+}
+
 // ---------------------------------------------------------------------------
 // Main build
 // ---------------------------------------------------------------------------
 export interface BuildResult {
   core: GraphCore;
   details: Record<Grade, Record<string, DetailEntry>>;
+  search: SearchDoc[];
   report: {
     standards: number;
     prereqEdges: number;
@@ -801,6 +849,22 @@ export function buildGraph(): BuildResult {
     details[m.grade][s.id] = entry;
   }
 
+  // Flat search index: one HTML-free record per standard, in node (id) order.
+  const search: SearchDoc[] = sortedIds.map((id) => {
+    const m = meta.get(id)!;
+    const c = keptClusters[standards[id].ccmathcluster_id];
+    return {
+      id,
+      code: m.code,
+      grade: m.grade,
+      strand: m.strand,
+      text: toSearchText(standards[id].desc),
+      domainName: m.domainName,
+      clusterName: c.name ?? "",
+    };
+  });
+  assert(search.length === 480, `expected 480 search docs, got ${search.length}`);
+
   // Bounds report
   let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity, zmin = Infinity, zmax = -Infinity;
   for (const n of nodes) {
@@ -816,6 +880,7 @@ export function buildGraph(): BuildResult {
   return {
     core,
     details,
+    search,
     report: {
       standards: nodes.length,
       prereqEdges: prereq.length,
@@ -835,6 +900,8 @@ function writeAll(result: BuildResult): void {
   mkdirSync(DETAILS_DIR, { recursive: true });
   const coreJson = JSON.stringify(result.core);
   writeFileSync(resolve(OUT_DIR, "graph-core.json"), coreJson);
+  const searchJson = JSON.stringify(result.search);
+  writeFileSync(resolve(OUT_DIR, "search.json"), searchJson);
   const shardSizes: { name: string; bytes: number; gzip: number }[] = [];
   for (const g of GRADE_ORDER) {
     const json = JSON.stringify(result.details[g]);
@@ -860,6 +927,7 @@ function writeAll(result: BuildResult): void {
   console.log(`dropped clusters (orphan): ${r.droppedClusters}`);
   console.log("\n-- file sizes (raw / gzip) --");
   console.log(`graph-core.json   ${kb(coreBytes)} / ${kb(coreGzip)}${coreGzip > 120 * 1024 ? "  ⚠ OVER 120kB gzip budget" : ""}`);
+  console.log(`search.json       ${kb(Buffer.byteLength(searchJson))} / ${kb(gzipSync(searchJson).length)}`);
   for (const s of shardSizes) console.log(`${s.name.padEnd(18)}${kb(s.bytes)} / ${kb(s.gzip)}`);
   console.log("\n-- position bounds --");
   console.log(`x: [${r.bounds.x[0]}, ${r.bounds.x[1]}]  y: [${r.bounds.y[0]}, ${r.bounds.y[1]}]  z: [${r.bounds.z[0]}, ${r.bounds.z[1]}]`);

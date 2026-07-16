@@ -156,6 +156,48 @@ describe("HTML sanitization", () => {
   });
 });
 
+describe("search index", () => {
+  interface SearchDoc {
+    id: string;
+    code: string;
+    grade: string;
+    strand: string;
+    text: string;
+    domainName: string;
+    clusterName: string;
+  }
+  const docs: SearchDoc[] = JSON.parse(
+    readFileSync(resolve(DATA, "search.json"), "utf8"),
+  );
+
+  it("has one HTML-free record per standard (480)", () => {
+    expect(docs.length).toBe(480);
+    const ids = new Set(docs.map((d) => d.id));
+    expect(ids.size).toBe(480);
+    for (const d of docs) {
+      // No residual HTML tags in the plain-text field.
+      expect(/<\/?[a-z][^>]*>/i.test(d.text)).toBe(false);
+      expect(d.text.length).toBeLessThanOrEqual(241); // ~240 + ellipsis
+      expect(["number", "algebra", "geometry", "data"]).toContain(d.strand);
+      expect(GRADES).toContain(d.grade);
+    }
+  });
+
+  it("makes a known standard findable by code and text", () => {
+    const nf = docs.find((d) => d.code === "4.NF.B.3");
+    expect(nf).toBeDefined();
+    expect(nf!.grade).toBe("4");
+    expect(nf!.strand).toBe("number");
+    expect(nf!.text.length).toBeGreaterThan(0);
+    // domain + cluster names are carried for the search fields
+    expect(nf!.domainName.length).toBeGreaterThan(0);
+    expect(nf!.clusterName.length).toBeGreaterThan(0);
+    // every graph-core node has a matching search doc
+    const searchIds = new Set(docs.map((d) => d.id));
+    for (const n of core.nodes) expect(searchIds.has(n.id)).toBe(true);
+  });
+});
+
 describe("related edges", () => {
   it("have no duplicate in either orientation", () => {
     const seen = new Set<string>();

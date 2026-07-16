@@ -42,6 +42,10 @@ export interface NodesHandle {
   count: number;
   /** Target emphasis attribute; write via the state machine only. */
   emphasisAttr: THREE.InstancedBufferAttribute;
+  /** Filter-visibility attribute (1 shown / 0 ghosted); write via filters only. */
+  visibleAttr: THREE.InstancedBufferAttribute;
+  /** True unless this instance is filtered out (picking consults this). */
+  isVisible(index: number): boolean;
   /** Advance the shimmer clock (seconds). */
   setTime(t: number): void;
   /** Grow the proxy pick radius for touch pointers (idempotent). */
@@ -66,11 +70,16 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     // Deterministic per-instance phase seeded from index (golden-angle scatter).
     phase[i] = (i * 2.399963) % (Math.PI * 2);
   }
+  // Filter visibility: 1 = shown, 0 = filtered out (ghosted, not hit-tested).
+  const visible = new Float32Array(count).fill(1);
   const emphasisAttr = new THREE.InstancedBufferAttribute(emphasis, 1);
   emphasisAttr.setUsage(THREE.DynamicDrawUsage);
   const phaseAttr = new THREE.InstancedBufferAttribute(phase, 1);
+  const visibleAttr = new THREE.InstancedBufferAttribute(visible, 1);
+  visibleAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aEmphasis", emphasisAttr);
   geometry.setAttribute("aPhase", phaseAttr);
+  geometry.setAttribute("aVisible", visibleAttr);
 
   const uniforms = {
     uTime: { value: 0 },
@@ -88,6 +97,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         #include <common>
         attribute float aEmphasis;
         attribute float aPhase;
+        attribute float aVisible;
         uniform float uTime;
         varying float vColorMul;
         varying float vDim;
@@ -111,7 +121,10 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
           // Idle shimmer: ×1.05–1.15, ~6s period, per-instance phase.
           float shimmer = 1.10 + 0.05 * sin(uTime * ${((Math.PI * 2) / 6).toFixed(6)} + aPhase);
           vColorMul = mul * shimmer;
-          vDim = dim;
+          // Filtered-out instances shrink to a faint background speck (ghost) and
+          // read as dimmed — opaque, so the depth pass and edge occlusion hold.
+          scl *= mix(0.14, 1.0, aVisible);
+          vDim = max(dim, (1.0 - aVisible) * 0.9);
           transformed *= scl;
         }
         `,
@@ -199,6 +212,10 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     proxy,
     count,
     emphasisAttr,
+    visibleAttr,
+    isVisible(index) {
+      return visible[index] !== 0;
+    },
     boundsSphere,
     boundsBox: box,
     setTime(t) {

@@ -53,3 +53,65 @@ export async function loadGraph(url = "/data/graph-core.json"): Promise<GraphCor
   if (!res.ok) throw new Error(`Failed to load graph data: HTTP ${res.status}`);
   return (await res.json()) as GraphCore;
 }
+
+// --- Detail shards (lazy, per grade) --------------------------------------
+// Mirrors the pipeline's DetailEntry shape (public/data/details/{grade}.json).
+// Shards are keyed by node id.
+
+export interface StandardTask {
+  group: string;
+  name: string;
+  url: string;
+}
+
+export interface StandardDetail {
+  desc?: string;
+  example?: string;
+  exampleAttr?: string;
+  exampleUrl?: string;
+  progressions?: string;
+  clusterName?: string;
+  tasks?: StandardTask[];
+}
+
+export type DetailShard = Record<string, StandardDetail>;
+
+const shardCache = new Map<string, Promise<DetailShard>>();
+
+/** Fetch (and cache) the detail shard for a grade ("K" | "1"…"8" | "HS"). */
+export function loadDetails(grade: string): Promise<DetailShard> {
+  let p = shardCache.get(grade);
+  if (!p) {
+    p = fetch(`/data/details/${encodeURIComponent(grade)}.json`).then((res) => {
+      if (!res.ok) throw new Error(`Failed to load details for ${grade}: HTTP ${res.status}`);
+      return res.json() as Promise<DetailShard>;
+    });
+    shardCache.set(grade, p);
+  }
+  return p;
+}
+
+// --- Flat search index (lazy, one file) -----------------------------------
+
+export interface SearchDoc {
+  id: string;
+  code: string;
+  grade: string;
+  strand: StrandId;
+  text: string;
+  domainName: string;
+  clusterName: string;
+}
+
+let searchDocsPromise: Promise<SearchDoc[]> | null = null;
+
+/** Fetch (and cache) the flat search index (public/data/search.json). */
+export function loadSearchDocs(): Promise<SearchDoc[]> {
+  if (!searchDocsPromise) {
+    searchDocsPromise = fetch("/data/search.json").then((res) => {
+      if (!res.ok) throw new Error(`Failed to load search index: HTTP ${res.status}`);
+      return res.json() as Promise<SearchDoc[]>;
+    });
+  }
+  return searchDocsPromise;
+}

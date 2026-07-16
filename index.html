@@ -51,6 +51,10 @@
       <button id="tour-btn" class="ghost-btn" type="button" tabindex="-1">Show me around</button>
     </div>
 
+    <!-- Polite live region: narrates focus changes (the canvas is aria-hidden;
+         the detail panel + this region are the accessible mirror). -->
+    <div id="aria-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+
     <!-- Boot veil: scene fades in from black over 900ms on first render -->
     <div id="veil"></div>
 

@@ -21,26 +21,36 @@ import { STRAND_COLORS } from "./palette";
 
 const SEGMENTS = 24;
 
-// Edge emphasis interpretation (fractional values blend adjacent states):
-//   0 = dimmed, 1 = rest, >=2 = hot (hover/chain — bright, wide, flowing).
+// Edge emphasis is the full 6-state scale (fractional values blend adjacent
+// states, which lets the state machine ease hover in/out on the CPU):
+//   0 dimmed | 1 rest | 2 hover | 3 focus | 4 chain | 5 related
+// Per DESIGN's edge table the two focus looks differ by kind: a CHAIN prereq
+// edge is bright with directional flow comets; a RELATED-to-focus edge is a
+// dashed shimmer with NO flow. Per-state tables (indexed by the emphasis value)
+// carry width / alpha / HDR color multiplier / flow / shimmer, so both looks —
+// and every state in between — fall out of one blend.
+// GLSL ES 3.00 (glslVersion: GLSL3) — the per-state tables below use float[]()
+// array constructors and dynamic indexing, which GLSL 1.00 forbids.
 const VERT = /* glsl */ `
-  attribute float t;
-  attribute float side;
-  attribute vec3 aStart;
-  attribute vec3 aCtrl;
-  attribute vec3 aEnd;
-  attribute vec3 aColorA;
-  attribute vec3 aColorB;
-  attribute float aKind;
-  attribute float aEmphasis;
+  in float t;
+  in float side;
+  in vec3 aStart;
+  in vec3 aCtrl;
+  in vec3 aEnd;
+  in vec3 aColorA;
+  in vec3 aColorB;
+  in float aKind;
+  in float aEmphasis;
+  in float aVisible;
 
   uniform vec2 uViewport;   // drawing-buffer size in device px
   uniform float uPxRatio;   // device px per CSS px (capped at 2)
 
-  varying float vT;
-  varying vec3 vColor;
-  varying float vKind;
-  varying float vEmphasis;
+  out float vT;
+  out vec3 vColor;
+  out float vKind;
+  out float vEmphasis;
+  out float vVisible;
 
   vec3 bezier(float s) {
     float u = 1.0 - s;
@@ -60,10 +70,14 @@ const VERT = /* glsl */ `
     float len = max(length(dir), 1e-6);
     vec2 normalPx = vec2(-dir.y, dir.x) / len;
 
-    // Width in CSS px from kind + emphasis: rest 1.2 prereq / 1.0 related, hot 2.5.
-    float e = clamp(aEmphasis, 0.0, 2.0);
-    float restWidth = mix(1.2, 1.0, aKind);
-    float width = mix(restWidth, 2.5, clamp(e - 1.0, 0.0, 1.0));
+    // Width (CSS px) per state — prereq widens more when hot/chain than related.
+    float e = clamp(aEmphasis, 0.0, 5.0);
+    float wP[6] = float[](1.2, 1.2, 2.5, 2.5, 2.5, 1.4);
+    float wR[6] = float[](1.0, 1.0, 2.0, 2.0, 2.0, 1.3);
+    int i0 = int(floor(e));
+    int i1 = int(min(floor(e) + 1.0, 5.0));
+    float f = fract(e);
+    float width = mix(mix(wP[i0], wP[i1], f), mix(wR[i0], wR[i1], f), aKind);
 
     vec2 offsetNdc = normalPx * (width * uPxRatio * 0.5 * side) / (uViewport * 0.5);
     clip.xy += offsetNdc * clip.w;
@@ -73,6 +87,8 @@ const VERT = /* glsl */ `
     vColor = mix(aColorA, aColorB, t);
     vKind = aKind;
     vEmphasis = e;
+    // Filtered-out edges (either endpoint hidden) fade toward a 0.06 ghost.
+    vVisible = mix(0.06, 1.0, aVisible);
   }
 `;
 
@@ -82,38 +98,49 @@ const FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uFlow; // 1 = animate prereq comets, 0 = frozen (reduced motion)
 
-  varying float vT;
-  varying vec3 vColor;
-  varying float vKind;
-  varying float vEmphasis;
+  in float vT;
+  in vec3 vColor;
+  in float vKind;
+  in float vEmphasis;
+  in float vVisible;
+
+  out vec4 fragColor;
 
   void main() {
     float e = vEmphasis;
-    float toRest = clamp(e, 0.0, 1.0);        // 0 dimmed -> 1 rest
-    float toHot  = clamp(e - 1.0, 0.0, 1.0);  // 0 rest   -> 1 hot
+    int i0 = int(floor(e));
+    int i1 = int(min(floor(e) + 1.0, 5.0));
+    float f = fract(e);
+
+    // Per-state tables indexed by emphasis: dimmed/rest/hover/focus/chain/related.
+    float aP[6]    = float[](0.06, 0.35, 0.9, 0.9, 0.9, 0.40);  // prereq alpha
+    float aR[6]    = float[](0.04, 0.18, 0.7, 0.7, 0.7, 0.90);  // related alpha
+    float mulP[6]  = float[](1.0,  1.0,  2.2, 2.2, 2.2, 1.40);  // prereq HDR mul
+    float mulR[6]  = float[](1.0,  1.0,  1.3, 1.3, 1.3, 1.35);  // related HDR mul
+    float flowP[6] = float[](0.0,  0.0,  1.0, 1.0, 1.0, 0.0);   // comet flow (prereq)
+    float shimR[6] = float[](0.0,  0.0,  1.0, 0.0, 0.0, 1.0);   // shimmer (related)
 
     vec3 col = vColor;
     float alpha;
 
     if (vKind < 0.5) {
-      // Prerequisite: 0.06 dimmed / 0.35 rest / 0.9 hot, color x2.2 HDR when hot.
-      alpha = mix(mix(0.06, 0.35, toRest), 0.9, toHot);
-      col *= mix(1.0, 2.2, toHot);
-      // Flow pulses shaped to soft comets (ramp to a bright head, sharp falloff),
-      // flowing prereq -> dependent; gated to emphasis >= 2 only.
-      float f = fract(vT * 6.0 - uTime * 0.5 * uFlow);
-      float comet = pow(f, 3.0);
-      col += vColor * comet * 2.0 * toHot;
+      // Prerequisite (directed): HDR-bright with directional comets when chain/hot.
+      alpha = mix(aP[i0], aP[i1], f);
+      col *= mix(mulP[i0], mulP[i1], f);
+      float flow = mix(flowP[i0], flowP[i1], f);
+      float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
+      float comet = pow(fr, 3.0);
+      col += vColor * comet * 2.0 * flow;
     } else {
-      // Related: in-shader dash, no directional flow.
+      // Related (undirected): in-shader dash, slow shimmer, NEVER a flow comet.
       float dash = step(0.5, fract(vT * 14.0));
-      alpha = mix(mix(0.04, 0.18, toRest), 0.9, toHot) * dash;
-      // Slow non-directional shimmer when hot.
-      col *= mix(1.0, 1.3 + 0.2 * sin(uTime * 2.0), toHot);
+      alpha = mix(aR[i0], aR[i1], f) * dash;
+      float shim = mix(shimR[i0], shimR[i1], f);
+      col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
     }
 
     // Soft edge across the ribbon is unnecessary at ~1px widths; keep it flat.
-    gl_FragColor = vec4(col, alpha);
+    fragColor = vec4(col, alpha * vVisible);
   }
 `;
 
@@ -122,6 +149,8 @@ export interface EdgesHandle {
   count: number;
   /** Target emphasis attribute; write via the state machine only. */
   emphasisAttr: THREE.InstancedBufferAttribute;
+  /** Filter-visibility attribute (1 shown / 0 ghosted); write via filters only. */
+  visibleAttr: THREE.InstancedBufferAttribute;
   setTime(t: number): void;
   setFlowEnabled(on: boolean): void;
   setViewport(widthPx: number, heightPx: number, pixelRatio: number): void;
@@ -165,6 +194,7 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   const colorB = new Float32Array(count * 3);
   const kind = new Float32Array(count);
   const emphasis = new Float32Array(count).fill(1); // rest
+  const visible = new Float32Array(count).fill(1); // filter visibility
 
   const c = new THREE.Color();
   for (let i = 0; i < count; i++) {
@@ -184,6 +214,9 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
 
   const emphasisAttr = new THREE.InstancedBufferAttribute(emphasis, 1);
   emphasisAttr.setUsage(THREE.DynamicDrawUsage);
+  const visibleAttr = new THREE.InstancedBufferAttribute(visible, 1);
+  visibleAttr.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("aVisible", visibleAttr);
   geometry.setAttribute("aStart", new THREE.InstancedBufferAttribute(start, 3));
   geometry.setAttribute("aCtrl", new THREE.InstancedBufferAttribute(ctrl, 3));
   geometry.setAttribute("aEnd", new THREE.InstancedBufferAttribute(end, 3));
@@ -200,6 +233,7 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   };
 
   const material = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
     vertexShader: VERT,
     fragmentShader: FRAG,
     uniforms,
@@ -219,6 +253,7 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     mesh,
     count,
     emphasisAttr,
+    visibleAttr,
     setTime(t) {
       uniforms.uTime.value = t;
     },

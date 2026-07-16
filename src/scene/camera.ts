@@ -1,13 +1,16 @@
 // Camera + controls: camera-controls with heroic initial framing and a slow
-// idle drift (one revolution ≈ 240s) that pauses on interaction and resumes
-// after 20s idle. Exposes focusOn(sphere) for Phase 3's focus flights.
+// idle drift that pauses on interaction and resumes after 20s idle. The drift
+// is a gentle ±18° azimuth OSCILLATION (sinusoidal, full cycle ≈ 90s) rather
+// than a full orbit, so the left→right K→HS narrative never swings edge-on.
+// Exposes focusOn(sphere) for Phase 3's focus flights.
 
 import * as THREE from "three";
 import CameraControls from "camera-controls";
 
 CameraControls.install({ THREE });
 
-const DRIFT_RAD_PER_SEC = (Math.PI * 2) / 240;
+const DRIFT_AMPLITUDE_RAD = (18 * Math.PI) / 180; // ±18° sway
+const DRIFT_PERIOD_S = 90; // seconds per full oscillation
 const IDLE_RESUME_MS = 20_000;
 
 export interface CameraRig {
@@ -20,8 +23,8 @@ export interface CameraRig {
    * doesn't slide out from under the cursor.
    */
   update(deltaSeconds: number, driftSuspended?: boolean): boolean;
-  /** Phase 3 API: smooth flight to frame a neighborhood. Not wired to clicks yet. */
-  focusOn(sphere: THREE.Sphere): Promise<void>;
+  /** Smooth flight to frame a neighborhood. transition=false cuts instantly. */
+  focusOn(sphere: THREE.Sphere, transition?: boolean): Promise<void>;
   setDriftEnabled(on: boolean): void;
   setAspect(aspect: number): void;
   dispose(): void;
@@ -55,9 +58,16 @@ export function createCameraRig(
   });
   controls.update(0);
 
-  // -- idle drift ------------------------------------------------------
+  // -- idle drift (oscillation) ----------------------------------------
+  // driftClock advances only while drifting, so pausing then resuming picks up
+  // the sway exactly where it left off (no snap). We apply the FRAME DELTA of
+  // the sine, so the oscillation rides on top of wherever the user left the
+  // camera rather than yanking it back to a fixed azimuth.
   let driftEnabled = !opts.reducedMotion;
   let lastInteraction = -Infinity; // drift immediately on load
+  let driftClock = 0;
+  const swayAt = (t: number): number =>
+    DRIFT_AMPLITUDE_RAD * Math.sin((t / DRIFT_PERIOD_S) * Math.PI * 2);
   const onInteract = (): void => {
     lastInteraction = performance.now();
   };
@@ -70,17 +80,19 @@ export function createCameraRig(
     update(delta, driftSuspended = false) {
       let moved = false;
       if (driftSuspended) {
-        lastInteraction = performance.now(); // hover counts as interaction
+        lastInteraction = performance.now(); // hover / focus counts as interaction
       } else if (driftEnabled && performance.now() - lastInteraction > IDLE_RESUME_MS) {
-        controls.azimuthAngle += DRIFT_RAD_PER_SEC * delta;
+        const prev = swayAt(driftClock);
+        driftClock += delta;
+        controls.azimuthAngle += swayAt(driftClock) - prev;
         moved = true;
       }
       const updated = controls.update(delta);
       return moved || updated;
     },
-    async focusOn(sphere) {
+    async focusOn(sphere, transition = true) {
       const target = new THREE.Sphere(sphere.center.clone(), sphere.radius * 1.35);
-      await controls.fitToSphere(target, true);
+      await controls.fitToSphere(target, transition);
     },
     setDriftEnabled(on) {
       driftEnabled = on;
