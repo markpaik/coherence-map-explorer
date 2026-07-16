@@ -1,8 +1,32 @@
+/* Coherence Map Explorer — Phase 2 shell.
+   Tokens are DESIGN.md "Surfaces and ink" verbatim. */
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src:
+    url("/fonts/space-grotesk-latin-600-normal.woff2") format("woff2"),
+    url("/fonts/space-grotesk-latin-600-normal.woff") format("woff");
+}
+
 :root {
   color-scheme: dark;
   --bg: #050510;
-  --fg: #e6e8f0;
-  --muted: #8a8fa8;
+  --surface: rgb(16 16 36 / 0.88);
+  --ink: #eceaf6;
+  --ink-2: #9c98b8;
+  --ink-3: #5d5a78;
+  --line: #2a2848;
+  --display: "Space Grotesk", system-ui, sans-serif;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -16,31 +40,186 @@ body {
   padding: 0;
   height: 100%;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--ink);
+  overflow: hidden;
 }
 
-#app {
+/* -- scene ------------------------------------------------------------- */
+
+#scene,
+#scene canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* -- boot veil (observatory powering up) -------------------------------- */
+
+#veil {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 1;
+  transition: opacity 900ms ease;
+  pointer-events: none;
+  z-index: 30;
+}
+#veil.veil-hidden {
+  opacity: 0;
+}
+
+/* -- title block, top-left ------------------------------------------------ */
+
+.title-block {
+  position: fixed;
+  top: clamp(16px, 3vh, 32px);
+  left: clamp(16px, 3vw, 36px);
+  max-width: min(520px, 60vw);
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+}
+.brand {
+  margin: 0 0 6px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-variant: small-caps;
+  color: var(--ink-2);
+}
+.headline {
+  margin: 0 0 10px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: clamp(22px, 3.2vw, 34px);
+  line-height: 1.18;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.statline {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+}
+
+/* -- search rail, bottom third (placeholder — Phase 3 wires it) ----------- */
+
+.search-rail {
+  position: fixed;
+  left: 50%;
+  bottom: 28vh;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 1rem;
+  gap: 12px;
+  z-index: 10;
+  pointer-events: none; /* inert until Phase 3 */
+}
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(420px, 72vw);
+  padding: 0 14px;
+  height: 46px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink-3);
+}
+.search-icon {
+  flex: none;
+}
+.search-bar input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+}
+.search-bar input::placeholder {
+  color: var(--ink-3);
+}
+.search-hint {
+  flex: none;
+  font-family: var(--display);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 7px;
+}
+.ghost-btn {
+  height: 46px;
+  padding: 0 18px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.stats {
-  font-size: 1.1rem;
+/* -- hover tooltip (glass chip) ------------------------------------------ */
+
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 280px;
+  padding: 8px 12px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  pointer-events: none;
+  user-select: none;
+  will-change: transform;
+}
+.tooltip[hidden] {
+  display: none;
+}
+.tooltip-code {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 14px;
   letter-spacing: 0.02em;
-  color: var(--fg);
+  color: var(--ink);
+}
+.tooltip-detail {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* -- boot failure ---------------------------------------------------------- */
+
+.boot-error {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
   text-align: center;
-}
-
-.stats .muted {
-  color: var(--muted);
-  font-size: 0.85rem;
-  display: block;
-  margin-top: 0.5rem;
-}
-
-.error {
-  color: #ff7a7a;
+  font-size: 15px;
+  color: #ff8a8a;
+  background: var(--bg);
+  z-index: 40;
 }

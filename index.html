@@ -7,6 +7,13 @@
       name="description"
       content="A 3D WebGL explorer of the Common Core math coherence map — 480 standards linked by prerequisite and related connections, arranged by grade and strand."
     />
+    <link
+      rel="preload"
+      href="/fonts/space-grotesk-latin-600-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <title>Coherence Map Explorer</title>
   </head>
   <body>
@@ -14,7 +21,39 @@
       Coherence Map Explorer needs JavaScript and a WebGL-capable browser to
       render the 3D standards graph.
     </noscript>
-    <div id="app"></div>
+
+    <!-- WebGL canvas mounts here (aria-hidden; the DOM UI is the accessible surface) -->
+    <div id="scene"></div>
+
+    <!-- Title block, top-left -->
+    <header class="title-block">
+      <p class="brand">Coherence Map Explorer</p>
+      <h1 class="headline">Every idea in school mathematics, and how they hold together.</h1>
+      <p class="statline">480 standards &middot; 899 connections &middot; K&ndash;High School</p>
+    </header>
+
+    <!-- Search rail, bottom third — visual placeholder; Phase 3 wires it -->
+    <div id="search-rail" class="search-rail" aria-hidden="true">
+      <div id="search-bar" class="search-bar">
+        <svg class="search-icon" viewBox="0 0 20 20" width="16" height="16" fill="none">
+          <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.6" />
+          <path d="M13 13l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+        <input
+          id="search-input"
+          type="text"
+          placeholder="Find a standard, e.g. 4.NF.B.3"
+          readonly
+          tabindex="-1"
+        />
+        <kbd class="search-hint">/</kbd>
+      </div>
+      <button id="tour-btn" class="ghost-btn" type="button" tabindex="-1">Show me around</button>
+    </div>
+
+    <!-- Boot veil: scene fades in from black over 900ms on first render -->
+    <div id="veil"></div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
