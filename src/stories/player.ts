@@ -26,6 +26,7 @@ import { STORIES, type Story, type StoryScene } from "./scripts";
 import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
 
 const LAPSE_MS = 1400; // "lapse" transition length (damage crossfade)
+const DEFAULT_HOLD_MS = 9000; // auto-advance dwell when a scene omits holdMs
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smoothstep = (x: number): number => {
   const t = clamp01(x);
@@ -58,8 +59,17 @@ export interface StoryPlayerHandle {
   next(): void;
   back(): void;
   jump(index: number): void;
-  /** Ease the lapse damage crossfade; returns true while animating. */
+  /** Toggle auto-advance pause/resume (scrubber control + keyboard). */
+  togglePause(): void;
+  /** Ease the lapse crossfade + drive settle/auto-advance; true while active. */
   tick(dt: number): boolean;
+  /**
+   * True while a scene is HOLDING — its transition has settled and it is waiting
+   * on the auto-advance countdown or a manual Next. main.ts lets the idle drift
+   * breathe during a hold (but not mid-transition). Paused holds still count as
+   * holding.
+   */
+  isHolding(): boolean;
   readonly running: boolean;
   readonly sceneIndex: number;
   dispose(): void;
@@ -95,7 +105,10 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     onBack: () => back(),
     onExit: () => stop(),
     onJump: (i) => jump(i),
+    onTogglePause: () => togglePause(),
   });
+
+  const autoAdvanceOn = (): boolean => !reducedMotion();
 
   // --- state --------------------------------------------------------------
   let running = false;
@@ -104,6 +117,16 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   let priorPose: 0 | 1 = 0;
   let deepLink = false;
   let navToken = 0;
+
+  // --- auto-advance / hold state -----------------------------------------
+  // A scene runs through a TRANSITION (pose morph + lapse crossfade + camera
+  // flight) and then a HOLD (settled, counting down holdMs to auto-advance).
+  let transitioning = false; // true from goto() start until the scene settles
+  let settleArmed = false; // becomes true once goto() has applied the scene
+  let settleRemaining = 0; // ms left of the settle window (the lapse length)
+  let holdTotal = 0; // ms of this scene's dwell
+  let holdRemaining = 0; // ms left before auto-advance
+  let paused = false; // user paused auto-advance (persists across scenes)
 
   // Damage crossfade buffers. Typed as the general Float32Array so the damage
   // engine's return (Float32Array<ArrayBufferLike>) assigns cleanly.
@@ -205,6 +228,15 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     const scene = currentStory.scenes[index];
     const cut = !animate || reducedMotion();
 
+    // A fresh scene is transitioning until it settles; disarm the settle timer
+    // and the hold countdown so a mid-flight tick can't advance early. Any
+    // manual action (Next/Back/dot) routes through here, which resets the dwell.
+    transitioning = true;
+    settleArmed = false;
+    settleRemaining = 0;
+    holdRemaining = 0;
+    card.setProgress(0);
+
     // Pose first (all stories live in the Ascent): the FIRST scene triggers the
     // unravel; later same-pose scenes resolve instantly.
     await poseDriver.setPose(scene.camera?.pose ?? 1, { instant: reducedMotion() });
@@ -215,6 +247,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     applySpotlight(scene);
     applyCamera(scene, !cut);
     card.render(scene, index, currentStory.scenes.length);
+
+    // Arm the settle window: once it elapses the scene is "holding" and the
+    // auto-advance countdown (holdMs, default 9s) begins. A cut settles at once.
+    holdTotal = scene.holdMs ?? DEFAULT_HOLD_MS;
+    settleRemaining = cut ? 0 : LAPSE_MS;
+    settleArmed = true;
     requestRender();
   }
 
@@ -233,12 +271,17 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     currentIndex = 0;
     deepLink = opts?.deepLink === true;
     priorPose = poseDriver.target; // the pose to return to on exit
+    paused = false;
 
     machine.setHover(null); // a stale hover must not linger under the backdrop
     machine.setStorying(true);
     document.body.classList.add("storying");
     backdrop.hidden = false;
     card.begin(story);
+    // Reduced motion disables auto-advance entirely (manual stepping only, no
+    // progress animation) — hide the pause control and progress fill then.
+    card.setAutoAdvanceEnabled(autoAdvanceOn());
+    card.setPaused(false);
     void goto(0, !reducedMotion());
   }
 
@@ -248,6 +291,10 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     running = false;
     navToken++;
     easing = false;
+    transitioning = false;
+    settleArmed = false;
+    settleRemaining = 0;
+    holdRemaining = 0;
     damageCur.fill(0);
     nodes.setDamage(null);
     edges.setDamage(null);
@@ -300,6 +347,13 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     void goto(index, !reducedMotion());
   }
 
+  function togglePause(): void {
+    if (!running) return;
+    paused = !paused;
+    card.setPaused(paused);
+    requestRender();
+  }
+
   return {
     start,
     stop() {
@@ -308,21 +362,58 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     next,
     back,
     jump,
+    togglePause,
+    isHolding() {
+      return running && !transitioning;
+    },
     tick(dt) {
-      if (!easing) return false;
-      easeElapsed += dt * 1000;
-      const k = smoothstep(easeElapsed / LAPSE_MS);
-      for (let i = 0; i < N; i++) {
-        damageCur[i] = damageFrom[i] + (damageTo[i] - damageFrom[i]) * k;
-      }
-      pushDamage();
-      if (easeElapsed >= LAPSE_MS) {
-        damageCur.set(damageTo);
-        easing = false;
+      if (!running) return false;
+      const dtMs = dt * 1000;
+      let active = false;
+
+      // 1) Lapse damage crossfade (the 1.4s eased state change).
+      if (easing) {
+        active = true;
+        easeElapsed += dtMs;
+        const k = smoothstep(easeElapsed / LAPSE_MS);
+        for (let i = 0; i < N; i++) {
+          damageCur[i] = damageFrom[i] + (damageTo[i] - damageFrom[i]) * k;
+        }
         pushDamage();
+        if (easeElapsed >= LAPSE_MS) {
+          damageCur.set(damageTo);
+          easing = false;
+          pushDamage();
+        }
       }
-      requestRender();
-      return true;
+
+      // 2) Settle window: once it elapses the scene is holding and the
+      //    auto-advance countdown begins.
+      if (transitioning && settleArmed) {
+        active = true;
+        settleRemaining -= dtMs;
+        if (settleRemaining <= 0) {
+          transitioning = false;
+          settleArmed = false;
+          holdRemaining = holdTotal;
+          card.setProgress(0);
+        }
+      }
+
+      // 3) Hold countdown → auto-advance (disabled under reduced motion; the
+      //    last scene never auto-exits; a paused hold just freezes the fill).
+      if (!transitioning && autoAdvanceOn() && currentStory && !paused && holdTotal > 0) {
+        const isLast = currentIndex >= currentStory.scenes.length - 1;
+        if (!isLast) {
+          active = true;
+          holdRemaining -= dtMs;
+          card.setProgress(clamp01(1 - holdRemaining / holdTotal));
+          if (holdRemaining <= 0) void goto(currentIndex + 1, true);
+        }
+      }
+
+      if (active) requestRender();
+      return active;
     },
     get running() {
       return running;

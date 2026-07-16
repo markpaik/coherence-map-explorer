@@ -19,6 +19,8 @@ export interface StoryCardDeps {
   onBack: () => void;
   onExit: () => void;
   onJump: (index: number) => void;
+  /** Toggle auto-advance pause/resume (owned by the player). */
+  onTogglePause: () => void;
 }
 
 export interface StoryCardHandle {
@@ -26,6 +28,12 @@ export interface StoryCardHandle {
   begin(story: Story): void;
   /** Paint one scene (title/body/cite/year + active dot + control labels). */
   render(scene: StoryScene, index: number, total: number): void;
+  /** Drive the active dot's countdown fill (0..1). No-op when auto-advance off. */
+  setProgress(fraction: number): void;
+  /** Reflect the paused state on the pause/resume control. */
+  setPaused(paused: boolean): void;
+  /** Show/hide the auto-advance affordances (pause control + progress fill). */
+  setAutoAdvanceEnabled(on: boolean): void;
   /** Hide the card + scrubber. */
   end(): void;
   readonly shown: boolean;
@@ -33,7 +41,7 @@ export interface StoryCardHandle {
 }
 
 export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
-  const { announce, onNext, onBack, onExit, onJump } = deps;
+  const { announce, onNext, onBack, onExit, onJump, onTogglePause } = deps;
 
   // --- card ---------------------------------------------------------------
   const card = document.createElement("section");
@@ -97,30 +105,49 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
   year.className = "story-year";
   year.setAttribute("aria-hidden", "true");
 
+  // Pause / resume auto-advance (glass button; keyboard reachable in the trap).
+  const pauseBtn = document.createElement("button");
+  pauseBtn.type = "button";
+  pauseBtn.className = "story-pause";
+  pauseBtn.setAttribute("aria-label", "Pause auto-advance");
+  pauseBtn.textContent = "⏸";
+  pauseBtn.addEventListener("click", onTogglePause);
+
   let dotEls: HTMLButtonElement[] = [];
+  let dotFills: HTMLSpanElement[] = [];
+  let activeIndex = 0;
+  let autoAdvance = true;
 
   document.body.append(card, scrubber);
 
   let shown = false;
 
   function buildDots(count: number): void {
-    scrubber.replaceChildren();
     dotEls = [];
+    dotFills = [];
+    const kids: HTMLElement[] = [pauseBtn];
     for (let i = 0; i < count; i++) {
       const d = document.createElement("button");
       d.type = "button";
       d.className = "story-dot";
       d.setAttribute("aria-label", `Go to scene ${i + 1} of ${count}`);
       d.addEventListener("click", () => onJump(i));
-      scrubber.appendChild(d);
+      const fill = document.createElement("span");
+      fill.className = "story-dot-fill";
+      fill.setAttribute("aria-hidden", "true");
+      d.appendChild(fill);
+      kids.push(d);
       dotEls.push(d);
+      dotFills.push(fill);
     }
+    scrubber.replaceChildren(...kids);
   }
 
   // Everything focusable inside the trap, in tab order.
   function focusables(): HTMLElement[] {
     const els: HTMLElement[] = [backBtn, nextBtn, exitBtn];
     if (!cite.hidden && !citeLink.hidden) els.push(citeLink);
+    if (autoAdvance) els.push(pauseBtn);
     return els.concat(dotEls);
   }
 
@@ -197,10 +224,13 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
       backBtn.classList.toggle("story-btn-inert", index === 0);
       nextBtn.textContent = index === total - 1 ? "Done" : "Next";
 
+      activeIndex = index;
       dotEls.forEach((d, i) => {
         d.classList.toggle("active", i === index);
         d.setAttribute("aria-current", i === index ? "true" : "false");
       });
+      // Reset every countdown fill; the player drives the active one via setProgress.
+      for (const f of dotFills) f.style.transform = "scaleX(0)";
       // Slot the year label right after the active dot.
       year.textContent = scene.year;
       if (year.parentNode) year.parentNode.removeChild(year);
@@ -209,6 +239,20 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
 
       card.setAttribute("aria-label", `Story, scene ${index + 1} of ${total}`);
       announce(`${scene.card.title}. ${scene.card.body}`);
+    },
+    setProgress(fraction) {
+      if (!autoAdvance) return;
+      const f = dotFills[activeIndex];
+      if (f) f.style.transform = `scaleX(${Math.max(0, Math.min(1, fraction))})`;
+    },
+    setPaused(paused) {
+      pauseBtn.textContent = paused ? "▶" : "⏸";
+      pauseBtn.setAttribute("aria-label", paused ? "Resume auto-advance" : "Pause auto-advance");
+      pauseBtn.setAttribute("aria-pressed", String(paused));
+    },
+    setAutoAdvanceEnabled(on) {
+      autoAdvance = on;
+      pauseBtn.hidden = !on;
     },
     end() {
       shown = false;

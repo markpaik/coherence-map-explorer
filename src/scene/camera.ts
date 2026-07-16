@@ -41,6 +41,14 @@ export interface CameraRig {
   /** Clear the panel focal offset (used when the panel closes with no reframe). */
   clearFocalOffset(transition?: boolean): void;
   setDriftEnabled(on: boolean): void;
+  /**
+   * Clear the idle-resume timer so drift may run on the very next unsuspended
+   * frame (skipping the 20s post-interaction grace). Used when a story scene
+   * settles into a hold: the constellation should breathe immediately, not 20s
+   * later. The programmatic scene flights themselves don't count as interaction,
+   * but the suspended transition frames keep the timer warm — this pokes it.
+   */
+  resumeDriftNow(): void;
   setAspect(aspect: number): void;
   dispose(): void;
 }
@@ -156,6 +164,9 @@ export function createCameraRig(
     },
     setDriftEnabled(on) {
       driftEnabled = on;
+    },
+    resumeDriftNow() {
+      lastInteraction = -Infinity;
     },
     setAspect(aspect) {
       camera.aspect = aspect;

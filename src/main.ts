@@ -24,6 +24,7 @@ import { loadGraph, loadSearchDocs, type GraphCore, type GraphNode } from "./dat
 import { BG } from "./scene/palette";
 import { createNodes } from "./scene/nodes";
 import { createEdges } from "./scene/edges";
+import { createFilaments } from "./scene/filaments";
 import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
@@ -112,9 +113,13 @@ function start(graph: GraphCore): void {
   const nodesById = new Map<string, GraphNode>(graph.nodes.map((n) => [n.id, n]));
   const nodes = createNodes(graph.nodes);
   const edges = createEdges(graph.edges, nodesById);
+  // Family filaments: the thin parent→child tether (structural annotation; the
+  // F-IF.C.7 fix). Follows both poses + ghosts with visibility, refreshed once
+  // per rendered frame below (cheap at 116 segments).
+  const filaments = createFilaments(graph, nodes);
   const stars = createStarfield(reducedMotion);
   const nebula = createNebula();
-  scene.add(nodes.mesh, nodes.proxy, edges.mesh, stars.points, nebula.group);
+  scene.add(nodes.mesh, nodes.proxy, edges.mesh, filaments.object, stars.points, nebula.group);
 
   const rig = createCameraRig(canvas, nodes.boundsSphere, nodes.boundsBox, {
     reducedMotion,
@@ -211,7 +216,6 @@ function start(graph: GraphCore): void {
     search,
     reducedMotion: () => reducedMotion,
   });
-  void tour;
 
   // -- stories + Gaps (shared damage engine) --------------------------------
   const damageEngine = createDamageEngine(graph);
@@ -222,7 +226,6 @@ function start(graph: GraphCore): void {
     damage: damageEngine,
     nodes,
     edges,
-    filters,
     picking,
     requestRender,
     announce,
@@ -300,6 +303,7 @@ function start(graph: GraphCore): void {
   let sceneTime = 0;
   let last = performance.now();
   let revealed = false;
+  let wasStoryHolding = false; // rising-edge detector for story-hold drift resume
 
   // Debug instrumentation (?debug=1): draw calls + rough FPS.
   const deltas: number[] = [];
@@ -319,8 +323,10 @@ function start(graph: GraphCore): void {
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;
-    // Story damage crossfade (the 1.4s "lapse") eases on the CPU like emphasis.
+    // Story damage crossfade + settle/auto-advance countdown.
     if (storyPlayer.tick(delta)) render = true;
+    // Guided-tour auto-advance countdown.
+    if (tour.tick(delta)) render = true;
     // Pose morph: CPU-side, so it must keep the frame pump hot while it plays.
     if (poseDriver.tick(delta)) render = true;
     // Keep the toggle's aria-pressed + depth-scale hint in sync with the pose
@@ -329,10 +335,21 @@ function start(graph: GraphCore): void {
       lastReflectedPose = poseDriver.pose;
       viewToggle.reflect(poseDriver.pose, poseDriver.target);
     }
-    // Suspend idle drift whenever the user is engaged (hover, focus, search).
-    if (rig.update(delta, machine.state !== "idle")) render = true;
+    // Idle drift: normally suspended whenever the user is engaged. Stories are
+    // the exception — while a scene HOLDS (settled, awaiting auto-advance/Next)
+    // the constellation is allowed to breathe; it pauses again during a scene
+    // transition. On the transition→hold edge, poke the drift so it resumes
+    // immediately instead of waiting out the 20s post-interaction grace.
+    const storyHolding = machine.state === "storying" && storyPlayer.isHolding();
+    if (storyHolding && !wasStoryHolding) rig.resumeDriftNow();
+    wasStoryHolding = storyHolding;
+    const driftAllowed = machine.state === "idle" || storyHolding;
+    if (rig.update(delta, !driftAllowed)) render = true;
 
     if (render) {
+      // Filaments track node positions + visibility every rendered frame (pose
+      // morphs, filters, story spotlights) — one cheap pass over 116 segments.
+      filaments.update();
       if (debug) renderer.info.reset();
       bloom.render(delta);
       needsRender = false;
@@ -499,6 +516,7 @@ function start(graph: GraphCore): void {
       // Scene handles for automated filter/visibility assertions.
       nodes,
       edges,
+      filaments,
       graph,
     };
   }

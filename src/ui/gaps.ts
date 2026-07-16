@@ -1,9 +1,15 @@
 // Gaps — the interactive impact simulator (STORIES.md). It shares the stories'
-// damage engine, but the input is you: turn the mode on, click standards to mark
-// them missed, and watch the structural damage recompute live across everything
-// that stands on them. It is a MODE, not a filter lens, so its chip sits on its
-// own after the single-select lens group; grade chips keep filtering normally
-// underneath it.
+// damage engine but runs Mark's DECAY model, not the ancestry-share model: the
+// input is you. Turn the mode on, click standards to mark them missed, and
+// watch the structural damage recompute live — hitting immediate dependents
+// hard and FADING with distance, because students patch over far-off gaps
+// superficially.
+//
+// Gaps is a TOOL, not a filter lens, so it does NOT live in the filters rail.
+// Its pill sits in the bottom-right tools corner, stacked directly above the
+// Constellation/Ascent view toggle (glass, 44px target, aria-pressed). The live
+// status, Clear, and the one-line decay explainer sit above the pill while the
+// mode is on.
 //
 // While the mode is on, a node click MARKS the standard (via the picking click
 // guard) instead of opening the panel — hover tooltips still work, so you can
@@ -13,7 +19,6 @@
 import type { GraphCore } from "../data";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
-import type { FiltersHandle } from "./filters";
 import type { PickingHandle } from "../interaction/picking";
 import type { DamageEngine } from "../stories/damage";
 
@@ -22,7 +27,6 @@ export interface GapsDeps {
   damage: DamageEngine;
   nodes: NodesHandle;
   edges: EdgesHandle;
-  filters: FiltersHandle;
   picking: PickingHandle;
   requestRender: () => void;
   announce: (msg: string) => void;
@@ -37,26 +41,27 @@ export interface GapsHandle {
 }
 
 export function createGaps(deps: GapsDeps): GapsHandle {
-  const { graph, damage, nodes, edges, filters, picking, requestRender, announce } = deps;
+  const { graph, damage, nodes, edges, picking, requestRender, announce } = deps;
 
   const missed = new Set<number>(); // node indices marked missed
   let active = false;
 
-  // --- chip (own group after the lens group) ------------------------------
-  const chip = document.createElement("button");
-  chip.type = "button";
-  chip.className = "filter-chip filter-toggle gaps-chip";
-  chip.textContent = "Gaps";
-  chip.title = "Mark standards missed and watch the structural damage spread.";
-  chip.setAttribute("aria-pressed", "false");
-  chip.addEventListener("click", () => setActive(!active));
-  filters.appendModeChip(chip);
+  // --- tools corner (bottom-right, stacked above the view toggle) ---------
+  const tool = document.createElement("div");
+  tool.className = "gaps-tool";
 
-  // --- status chip (above the rail) ---------------------------------------
+  // Status + explainer panel (shown only while the mode is on), above the pill.
+  const panel = document.createElement("div");
+  panel.className = "gaps-panel";
+  panel.hidden = true;
+
+  const explainer = document.createElement("p");
+  explainer.className = "gaps-explainer";
+  explainer.textContent = "Impact fades with distance: students patch over far-off gaps, thinly.";
+
   const status = document.createElement("div");
   status.className = "gaps-status";
   status.setAttribute("role", "status");
-  status.hidden = true;
   const statusText = document.createElement("span");
   statusText.className = "gaps-status-text";
   const clearBtn = document.createElement("button");
@@ -65,7 +70,20 @@ export function createGaps(deps: GapsDeps): GapsHandle {
   clearBtn.textContent = "Clear";
   clearBtn.addEventListener("click", () => clear());
   status.append(statusText, clearBtn);
-  document.body.appendChild(status);
+
+  panel.append(explainer, status);
+
+  // The pill itself — glass, styled like the view-toggle segment.
+  const pill = document.createElement("button");
+  pill.type = "button";
+  pill.className = "gaps-pill";
+  pill.textContent = "Gaps";
+  pill.title = "Mark standards missed and watch the structural damage spread.";
+  pill.setAttribute("aria-pressed", "false");
+  pill.addEventListener("click", () => setActive(!active));
+
+  tool.append(panel, pill);
+  document.body.appendChild(tool);
 
   function renderStatus(): void {
     const n = missed.size;
@@ -74,16 +92,6 @@ export function createGaps(deps: GapsDeps): GapsHandle {
     clearBtn.disabled = n === 0;
   }
 
-  // Sit clear of the filters rail — it wraps to two rows on narrow viewports, so
-  // measure it rather than guess a fixed offset. (Rail is anchored bottom: 16px.)
-  function positionStatus(): void {
-    const rail = document.querySelector<HTMLElement>(".filters-rail");
-    if (rail) status.style.bottom = `${Math.round(16 + rail.getBoundingClientRect().height + 10)}px`;
-  }
-  window.addEventListener("resize", () => {
-    if (active) positionStatus();
-  });
-
   function recomputeDamage(): void {
     if (missed.size === 0) {
       nodes.setDamage(null);
@@ -91,7 +99,7 @@ export function createGaps(deps: GapsDeps): GapsHandle {
     } else {
       const ids = new Set<string>();
       for (const i of missed) ids.add(graph.nodes[i].id);
-      const nodeDamage = damage.compute(ids);
+      const nodeDamage = damage.computeDecay(ids);
       nodes.setDamage(nodeDamage);
       edges.setDamage(damage.edgeDamage(nodeDamage));
     }
@@ -119,10 +127,9 @@ export function createGaps(deps: GapsDeps): GapsHandle {
   function setActive(on: boolean): void {
     if (on === active) return;
     active = on;
-    chip.setAttribute("aria-pressed", String(on));
+    pill.setAttribute("aria-pressed", String(on));
     if (on) {
-      status.hidden = false;
-      positionStatus();
+      panel.hidden = false;
       renderStatus();
       recomputeDamage(); // no marks yet → clears any stray damage
       announce("Gaps mode on. Click standards to mark them missed.");
@@ -130,7 +137,7 @@ export function createGaps(deps: GapsDeps): GapsHandle {
       missed.clear();
       nodes.setDamage(null);
       edges.setDamage(null);
-      status.hidden = true;
+      panel.hidden = true;
       requestRender();
       announce("Gaps mode off");
     }
@@ -151,8 +158,7 @@ export function createGaps(deps: GapsDeps): GapsHandle {
     setActive,
     dispose() {
       picking.setClickGuard(null);
-      chip.remove();
-      status.remove();
+      tool.remove();
     },
   };
 }

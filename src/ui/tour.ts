@@ -31,8 +31,12 @@ interface Stop {
   leave?(): void;
 }
 
+const TOUR_HOLD_MS = 8000; // auto-advance dwell per stop
+
 export interface TourHandle {
   start(): void;
+  /** Drive the auto-advance countdown; true while the tour is actively dwelling. */
+  tick(dt: number): boolean;
   readonly running: boolean;
   dispose(): void;
 }
@@ -42,6 +46,7 @@ export function createTour(deps: TourDeps): TourHandle {
   const btn = document.getElementById("tour-btn") as HTMLButtonElement | null;
 
   const transition = (): boolean => !reducedMotion();
+  const autoAdvanceOn = (): boolean => !reducedMotion();
 
   // --- the six stops (captions are DESIGN copy, verbatim) ----------------
   const stops: Stop[] = [
@@ -128,9 +133,14 @@ export function createTour(deps: TourDeps): TourHandle {
   const dots = document.createElement("div");
   dots.className = "tour-dots";
   dots.setAttribute("aria-hidden", "true");
+  const dotFills: HTMLSpanElement[] = [];
   const dotEls: HTMLSpanElement[] = stops.map(() => {
     const d = document.createElement("span");
     d.className = "tour-dot";
+    const fill = document.createElement("span");
+    fill.className = "tour-dot-fill";
+    d.appendChild(fill);
+    dotFills.push(fill);
     dots.appendChild(d);
     return d;
   });
@@ -141,6 +151,12 @@ export function createTour(deps: TourDeps): TourHandle {
   backBtn.type = "button";
   backBtn.className = "tour-btn-back";
   backBtn.textContent = "Back";
+  // Pause / resume auto-advance (glass; keyboard reachable in the trap).
+  const pauseBtn = document.createElement("button");
+  pauseBtn.type = "button";
+  pauseBtn.className = "tour-btn-pause";
+  pauseBtn.setAttribute("aria-label", "Pause auto-advance");
+  pauseBtn.textContent = "⏸";
   const skipBtn = document.createElement("button");
   skipBtn.type = "button";
   skipBtn.className = "tour-btn-skip";
@@ -150,7 +166,7 @@ export function createTour(deps: TourDeps): TourHandle {
   nextBtn.className = "tour-btn-next";
   nextBtn.textContent = "Next";
 
-  controls.append(backBtn, skipBtn, nextBtn);
+  controls.append(backBtn, pauseBtn, skipBtn, nextBtn);
   card.append(titleEl, captionEl, dots, controls);
   document.body.append(backdrop, card);
 
@@ -158,6 +174,15 @@ export function createTour(deps: TourDeps): TourHandle {
   let running = false;
   let index = 0;
   let returnFocus: HTMLElement | null = null;
+  let paused = false; // user paused auto-advance (persists across stops)
+  let holdRemaining = 0; // ms left before this stop auto-advances
+
+  function setPaused(on: boolean): void {
+    paused = on;
+    pauseBtn.textContent = on ? "▶" : "⏸";
+    pauseBtn.setAttribute("aria-label", on ? "Resume auto-advance" : "Pause auto-advance");
+    pauseBtn.setAttribute("aria-pressed", String(on));
+  }
 
   function render(): void {
     const stop = stops[index];
@@ -165,12 +190,16 @@ export function createTour(deps: TourDeps): TourHandle {
     captionEl.textContent = stop.caption;
     card.setAttribute("aria-label", `Guided tour, step ${index + 1} of ${stops.length}`);
     dotEls.forEach((d, i) => d.classList.toggle("active", i === index));
+    for (const f of dotFills) f.style.transform = "scaleX(0)";
     // aria-disabled, not the disabled attribute: a truly disabled button drops
     // keyboard focus to <body> when activated on stop 1, escaping the trap.
     // Back stays focusable; goTo(-1) is already a guarded no-op.
     backBtn.setAttribute("aria-disabled", String(index === 0));
     backBtn.classList.toggle("tour-btn-inert", index === 0);
     nextBtn.textContent = index === stops.length - 1 ? "Done" : "Next";
+    // Reduced motion: no auto-advance, no progress, no pause affordance.
+    pauseBtn.hidden = !autoAdvanceOn();
+    holdRemaining = TOUR_HOLD_MS; // reset the dwell for the new stop
   }
 
   function goTo(next: number): void {
@@ -186,6 +215,7 @@ export function createTour(deps: TourDeps): TourHandle {
     running = true;
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     index = 0;
+    setPaused(false);
     machine.setHover(null); // a stale pre-tour hover must not linger under the card
     machine.setTouring(true);
     document.body.classList.add("touring");
@@ -223,11 +253,12 @@ export function createTour(deps: TourDeps): TourHandle {
   nextBtn.addEventListener("click", onNext);
   backBtn.addEventListener("click", () => goTo(index - 1));
   skipBtn.addEventListener("click", stop);
+  pauseBtn.addEventListener("click", () => setPaused(!paused));
   backdrop.addEventListener("pointerdown", (e) => e.preventDefault()); // click-through-proof
 
   // Keyboard: arrows navigate, Esc skips, Tab is trapped inside the card.
   const focusables = (): HTMLButtonElement[] =>
-    [backBtn, skipBtn, nextBtn].filter((b) => !b.disabled);
+    [backBtn, pauseBtn, skipBtn, nextBtn].filter((b) => !b.disabled && !b.hidden);
   function onKeydown(e: KeyboardEvent): void {
     if (!running) return;
     switch (e.key) {
@@ -276,6 +307,15 @@ export function createTour(deps: TourDeps): TourHandle {
 
   return {
     start,
+    tick(dt) {
+      if (!running || paused || !autoAdvanceOn()) return false;
+      if (index >= stops.length - 1) return false; // last stop never auto-exits
+      holdRemaining -= dt * 1000;
+      const fill = dotFills[index];
+      if (fill) fill.style.transform = `scaleX(${Math.max(0, Math.min(1, 1 - holdRemaining / TOUR_HOLD_MS))})`;
+      if (holdRemaining <= 0) goTo(index + 1);
+      return true;
+    },
     get running() {
       return running;
     },

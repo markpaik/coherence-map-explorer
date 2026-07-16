@@ -198,28 +198,39 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         #include <color_fragment>
         diffuseColor.rgb = mix(diffuseColor.rgb * vColorMul, uDimColor, vDim);
         // --- structural damage (composited AFTER emphasis) --------------------
-        // 0 = untouched; 1 = ember husk. Brightness AND saturation lerp toward a
-        // deep red-amber ember by damage; the ember pulses slowly (~2.5s) and a
-        // faint irregular per-node flicker (amplitude ∝ damage) reads as
-        // "struggling, not dead". The husk tops out near #7a3520 (< 1.0 in every
-        // channel), so damage NEVER crosses the bloom threshold — glow stays for
-        // healthy emphasis only.
+        // 0 = untouched; 1 = ember husk. Damage distinguishes OUTAGE from
+        // STRUGGLE: a fully-dead node (d >= 0.95) is a steady dark ember with
+        // only the slow ~2.5s pulse — no flicker; a half-damaged node visibly
+        // wavers; a lightly-touched one barely trembles. The flicker amplitude
+        // follows a struggle curve 4·d·(1−d) that peaks at d = 0.5 and vanishes
+        // at both ends. Brightness AND saturation lerp toward a deep red-amber
+        // ember, with a mid-range-boosted desaturation so struggle reads even at
+        // d ≈ 0.3. The husk tops out near #7a3520 (< 1.0 in every channel), so
+        // damage NEVER crosses the bloom threshold — glow stays for healthy
+        // emphasis only.
         if (vDamage > 0.0001) {
           float d = vDamage;
           float pulse = 0.5 + 0.5 * sin(uTime * 2.5132741 + vPhase);       // ~2.5s
           vec3 emberLo = vec3(0.2902, 0.1216, 0.0784);                     // #4a1f14
           vec3 emberHi = vec3(0.4784, 0.2078, 0.1255);                     // #7a3520
           vec3 husk = mix(emberLo, emberHi, pulse);
+          // Mid-range-boosted desaturation: the struggle band (d ~ 0.3–0.6)
+          // visibly drains of strand color before it goes ember.
+          float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(lum), clamp(d * 1.35, 0.0, 1.0) * 0.6);
+          // Struggle flicker: amplitude peaks at d = 0.5, zero at both ends, and
+          // hard-cut to 0 for a fully-dead ember (d >= 0.95) so it sits steady.
+          float struggle = 4.0 * d * (1.0 - d) * (1.0 - step(0.95, d));
           float flick = sin(uTime * 6.7 + vPhase * 3.1) * 0.6
                       + sin(uTime * 11.3 + vPhase * 1.7) * 0.4;            // irregular
-          float flickMul = 1.0 - 0.16 * d * (0.5 + 0.5 * flick);
+          float flickMul = 1.0 - 0.16 * struggle * (0.5 + 0.5 * flick);
           diffuseColor.rgb = mix(diffuseColor.rgb, husk, d) * flickMul;
         }
         `,
       );
   };
   // Distinct cache key so the patched program never collides with a stock basic material.
-  material.customProgramCacheKey = () => "coherence-nodes-v2-damage";
+  material.customProgramCacheKey = () => "coherence-nodes-v3-struggle";
 
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.frustumCulled = false;

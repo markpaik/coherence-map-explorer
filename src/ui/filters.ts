@@ -17,12 +17,6 @@ import type { EdgesHandle } from "../scene/edges";
 import { STRAND_COLORS, STRAND_ORDER } from "../scene/palette";
 
 const GRADES = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
-const STRAND_SHORT: Record<StrandId, string> = {
-  number: "Number",
-  algebra: "Algebra",
-  geometry: "Geometry",
-  data: "Data",
-};
 
 interface FiltersDeps {
   graph: GraphCore;
@@ -46,9 +40,6 @@ export interface FiltersHandle {
   /** Recompute node/edge visibility from the current filter state — used to
    * reclaim the visibility buffers after a story's spotlight override releases. */
   recompute(): void;
-  /** Mount an extra chip (its own group) after the lens group — the Gaps MODE
-   * chip lives here, deliberately outside the single-select lens group. */
-  appendModeChip(chip: HTMLElement): void;
   dispose(): void;
 }
 
@@ -167,15 +158,25 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     gradeGroup.appendChild(chip);
   }
 
-  // Strand chips (colored dot + name).
+  // The member domains of a strand (distinct domainName values), for the chip
+  // tooltip — so "Number & Quantity" spells out what rolls up into it.
+  const strandMembers = (s: StrandId): string => {
+    const seen = new Set<string>();
+    for (const n of graph.nodes) if (n.strand === s) seen.add(n.domainName);
+    return [...seen].join(", ");
+  };
+
+  // Strand chips (colored dot + the full family label from graph.strands, with
+  // a tooltip listing the member domains it rolls up).
   const strandGroup = document.createElement("div");
   strandGroup.className = "filter-group";
   strandGroup.setAttribute("aria-label", "Strands");
   for (const s of STRAND_ORDER) {
-    const chip = makeChip(STRAND_SHORT[s], true, (on) =>
+    const chip = makeChip(graph.strands[s].label, true, (on) =>
       on ? strandActive.add(s) : strandActive.delete(s),
     );
     chip.classList.add("strand-chip");
+    chip.title = strandMembers(s);
     chip.style.setProperty("--dot", hexColor(STRAND_COLORS[s]));
     chip.insertAdjacentHTML("afterbegin", '<span class="chip-dot"></span>');
     strandChips.set(s, chip);
@@ -248,13 +249,6 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     },
     recompute() {
       recompute();
-    },
-    appendModeChip(chip) {
-      const group = document.createElement("div");
-      group.className = "filter-group filter-group-mode";
-      group.setAttribute("aria-label", "Mode");
-      group.appendChild(chip);
-      groups.appendChild(group); // after grade / strand / lens groups
     },
     dispose() {
       rail.remove();

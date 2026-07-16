@@ -1126,6 +1126,7 @@ body {
   margin-bottom: 16px;
 }
 .tour-dot {
+  position: relative;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -1136,6 +1137,21 @@ body {
 .tour-dot.active {
   background: var(--ink);
   opacity: 1;
+}
+/* Countdown fill beneath the active tour dot (subtle scaleX bar; JS drives it). */
+.tour-dot-fill {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 14px;
+  margin-left: -7px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  opacity: 0.5;
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
 }
 .tour-controls {
   display: flex;
@@ -1150,10 +1166,17 @@ body {
   border-radius: 10px;
   cursor: pointer;
 }
-.tour-btn-back {
+.tour-btn-back,
+.tour-btn-pause {
   background: none;
   border: 1px solid var(--line);
   color: var(--ink-2);
+}
+.tour-btn-pause:hover {
+  color: var(--ink);
+}
+.tour-btn-pause[hidden] {
+  display: none;
 }
 .tour-btn-back:disabled,
 .tour-btn-inert {
@@ -1378,6 +1401,40 @@ body.touring #scene {
   white-space: nowrap;
   color: var(--ink);
 }
+/* Pause / resume auto-advance, at the head of the scrubber. */
+.story-pause {
+  min-width: 30px;
+  height: 44px;
+  margin-right: 2px;
+  padding: 0 6px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink-2);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.story-pause:hover {
+  color: var(--ink);
+}
+.story-pause[hidden] {
+  display: none;
+}
+/* Countdown fill under the active dot (subtle scaleX bar; JS drives transform). */
+.story-dot-fill {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 11px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  opacity: 0.55;
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+}
 
 /* Story picker (glass modal from the "Stories" button). */
 .story-picker-backdrop {
@@ -1480,19 +1537,51 @@ body.storying .search-rail,
 body.storying .filters-rail,
 body.storying .view-toggle,
 body.storying .nav-hints,
-body.storying .gaps-status {
+body.storying .gaps-tool {
   opacity: 0;
   pointer-events: none;
 }
 
-/* -- Gaps mode: chip + live status --------------------------------------- */
+/* -- Gaps mode: a TOOL in the bottom-right corner, stacked above the view
+   toggle (it is NOT a filter — it does not live in the filters rail). ------- */
 
-.gaps-status {
+.gaps-tool {
   position: fixed;
-  left: 50%;
-  bottom: 92px; /* clears the filters rail (bottom: 16px), even when it wraps to two rows */
-  transform: translateX(-50%);
-  z-index: 12;
+  right: clamp(16px, 2.5vw, 28px);
+  /* Sit directly above the Constellation/Ascent toggle (bottom clamp(46px,
+     7vh,62px), ~52px tall) — clear it plus a small gap. */
+  bottom: calc(clamp(46px, 7vh, 62px) + 58px);
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none; /* only the interactive children take pointer events */
+}
+.gaps-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 32px));
+}
+.gaps-panel[hidden] {
+  display: none;
+}
+.gaps-explainer {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+  color: var(--ink-2);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.gaps-status {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -1504,9 +1593,7 @@ body.storying .gaps-status {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 999px;
-}
-.gaps-status[hidden] {
-  display: none;
+  pointer-events: auto;
 }
 .gaps-clear {
   font: inherit;
@@ -1521,6 +1608,31 @@ body.storying .gaps-status {
 .gaps-clear:disabled {
   opacity: 0.4;
   cursor: default;
+}
+/* The pill — glass, styled like a view-toggle segment; 44px touch target. */
+.gaps-pill {
+  min-height: 44px;
+  padding: 0 18px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  pointer-events: auto;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+.gaps-pill[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--ink-2);
+  background: rgb(255 255 255 / 0.1);
+}
+.gaps-pill:hover:not([aria-pressed="true"]) {
+  color: var(--ink);
 }
 
 /* -- no-WebGL fallback list ------------------------------------------------ */
@@ -1660,7 +1772,7 @@ body.og .story-scrubber,
 body.og .story-backdrop,
 body.og .story-picker,
 body.og .story-picker-backdrop,
-body.og .gaps-status,
+body.og .gaps-tool,
 body.og #veil {
   display: none !important;
 }

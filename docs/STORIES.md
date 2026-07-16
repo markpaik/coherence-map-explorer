@@ -37,12 +37,23 @@ A story is a JSON script (src/stories/*.json) of scenes:
 
 Engine (src/stories/player.ts): drives the state machine (new state
 `storying`), one scene at a time. Timeline scrubber bottom-center: year ticks,
-play/pause, ArrowLeft/Right stepping, progress dots, Esc exits. Cards render
+pause/resume, ArrowLeft/Right stepping, progress dots, Esc exits. Cards render
 bottom-left (glass, kicker + title + 2-3 sentence body + small citation
 line), never covering the focused region; card text is the aria-live source.
-Reduced motion: no lapse animation; each scene is a cut, user steps manually.
-"lapse" transition = 1.4s eased crossfade of graph state + camera drift; the
-year label rolls like an odometer.
+
+Pacing: scenes AUTO-ADVANCE after their holdMs (scripts.ts) once the
+transition settles, with the active dot filling to show the countdown; Next
+skips ahead instantly, Back returns, pause stops the clock. The tour uses the
+same mechanism (8s per stop). Reduced motion: no auto-advance, manual
+stepping only, each scene a cut.
+
+Atmosphere: during a scene hold the idle ethereal drift breathes (the same
+±18° oscillation as the untouched landing); it pauses during transitions and
+resumes on settle, so the map never feels frozen mid-story.
+
+Every story follows the cinematic arc: zoom into the world before, the
+event, pan across the immediate spread, the compounding, the long-term wide
+shot, and a coda that hands agency back to the viewer (5-7 scenes each).
 
 ## Visual vocabulary (shader additions)
 
@@ -66,14 +77,26 @@ Structural exposure, not a learning model, and one card per story says so
 plainly ("The map shows what the work stands on, not what any child can or
 cannot do").
 
-- missed set M (selected standards/grades)
-- for any standard v with ancestor set A(v):
-  damage(v) = |A(v) ∩ M| / |A(v)| if A(v) nonempty, else 0
-- missed standards: damage 1. Fully-blocked flag when every direct
-  prerequisite is missed.
-- computed client-side (BFS over the 757-edge DAG, trivial at 480 nodes),
-  shared by stories AND the interactive Gap simulator ("Gaps" mode: click to
-  toggle missed standards/grades yourself; same shading live).
+Two models, deliberately different, both honest:
+
+- **Stories (structural exposure)**: for standard v with ancestor set A(v),
+  damage(v) = |A(v) ∩ M| / |A(v)|; missed = 1. Cards quantify this model
+  (271 damaged, and so on): how much of a standard's foundation is gone.
+- **Gaps mode (Mark's decay model)**: marking a standard hits its immediate
+  dependents hard and FADES with distance, because students patch over
+  far-off gaps superficially: damage(v) = max over missed ancestors m of
+  0.62^hopdist(m, v). The Gaps UI says so in one line ("Impact fades with
+  distance: students patch over far-off gaps, thinly").
+
+Both computed client-side over the 757-edge DAG. Stories drive the first;
+the interactive Gaps tool (bottom-right tools corner, beside the pose
+toggle, NOT in the filter rail: it is a tool, not a filter) drives the
+second.
+
+Damage look distinguishes outage from struggle: a dead node (damage ≈ 1) is
+a steady dark ember with a slow pulse; a half-damaged node visibly wavers
+(flicker amplitude peaks at damage 0.5 and vanishes at both ends); a
+lightly-touched node barely trembles.
 
 ## The stories
 
