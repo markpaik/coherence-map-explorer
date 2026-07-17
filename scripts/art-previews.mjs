@@ -37,6 +37,12 @@ const hash = (s) => {
   return (h % 1000) / 1000;
 };
 const pick = (arr, t) => arr[Math.min(arr.length - 1, Math.floor(t * arr.length))];
+const mixHex = (h1, h2, t) => {
+  const a = parseInt(h1.slice(1), 16);
+  const b = parseInt(h2.slice(1), 16);
+  const ch = (sh) => Math.round(((a >> sh) & 255) + (((b >> sh) & 255) - ((a >> sh) & 255)) * t);
+  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, "0")}`;
+};
 
 function fitter(pts, W, H, pad) {
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -202,21 +208,33 @@ function fidenza(oblique) {
   // Anamorphic geometry: the flat composition is the CANONICAL PROJECTION of
   // the real 3D constellation (head-on drops z orthographically). Oblique
   // rotates the actual cloud — every node and ribbon control point keeps its
-  // constellation z — with weak perspective, so ribbons that overlapped
-  // head-on fan apart in every direction, installation-style.
-  const AZ = oblique ? 0.6 : 0;   // ~34° orbit
-  const TILT = oblique ? 0.16 : 0;
-  const D = 1400; // camera distance for the weak perspective (cloud z ≈ ±480 after the orbit)
+  // constellation z, EXAGGERATED ×1.9 so the slab opens into deep space —
+  // with real perspective. No drop shadows anywhere (a shadow is a
+  // ground-plane cue that reads as a raised print); depth is carried by
+  // perspective scale and by far elements hazing toward the teal field,
+  // constellation-in-atmosphere, not bas-relief.
+  const AZ = oblique ? 0.66 : 0;  // ~38° orbit
+  const TILT = oblique ? 0.2 : 0;
+  const ZX = oblique ? 1.9 : 1;   // depth exaggeration
+  const D = 1150; // camera distance: near ribbons swell, far ones recede hard
   const ca = Math.cos(AZ), sa = Math.sin(AZ);
   const ct = Math.cos(TILT), st = Math.sin(TILT);
   const proj = ([x, y, z]) => {
-    const rx = x * ca + z * sa;
-    const rz0 = z * ca - x * sa;
+    const zx = z * ZX;
+    const rx = x * ca + zx * sa;
+    const rz0 = zx * ca - x * sa;
     const ry = y * ct - rz0 * st;
     const rz = rz0 * ct + y * st;
     const s = oblique ? D / (D - rz) : 1; // head-on stays flat orthographic
     return [rx * s, ry * s, s, rz];
   };
+  // Atmospheric haze: how far toward the field color an element fades at its
+  // depth. 0 for everything head-on (the flat print shows true color).
+  const fogOf = (rz) => (oblique ? Math.min(0.62, Math.max(0, -rz / 550) * 0.62) : 0);
+  // Flat ribbons foreshorten when seen at an angle — the print's chunky
+  // strokes become slim strands in space. This is what keeps the turned view
+  // airy and constellation-like instead of a solid raised tangle.
+  const WF = oblique ? 0.5 : 1;
   // Fit over EVERYTHING that gets drawn (nodes + ribbon control points), so
   // rotated bows never leave the canvas.
   const fitPts = g.nodes.map((n) => proj(n.pos));
@@ -244,20 +262,18 @@ function fidenza(oblique) {
     const c = P(e.c);
     const b = P(t.pos);
     const ps = c[2]; // perspective scale at the ribbon's middle
+    const fog = fogOf(c[3]);
     const seed = hash(e.s + "→" + e.t);
-    const col = pick(F_PALETTE, seed);
+    const col = mixHex(pick(F_PALETTE, seed), F_BG, fog);
     // Ribbon width, wide variance; scaled by perspective so near ribbons
     // thicken and far ones thin — same physical ribbon, different distance.
-    const w = (3 + seed * 7 + (s.deg + t.deg) * 0.5) * ps;
+    const w = (3 + seed * 7 + (s.deg + t.deg) * 0.5) * ps * WF;
     // Clean ribbon runs the middle of the path only — the striped caps own
     // the first and last stretch (Fidenza's segmented ends).
     const t0 = 0.14, t1 = 0.86;
     const p0 = qPoint(a, c, b, t0), p1 = qPoint(a, c, b, t1);
     const cm = qPoint(a, c, b, 0.5);
     const d = `M${p0[0].toFixed(1)},${p0[1].toFixed(1)} Q${(2 * cm[0] - (p0[0] + p1[0]) / 2).toFixed(1)},${(2 * cm[1] - (p0[1] + p1[1]) / 2).toFixed(1)} ${p1[0].toFixed(1)},${p1[1].toFixed(1)}`;
-    if (oblique) {
-      el.push(`<path d="${d}" fill="none" stroke="#1c2e24" stroke-opacity="0.45" stroke-width="${(w + 2).toFixed(1)}" stroke-linecap="butt" transform="translate(${(2.5 * ps).toFixed(1)},${(4 * ps).toFixed(1)})"/>`);
-    }
     el.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${w.toFixed(1)}" stroke-linecap="butt"/>`);
 
     // Striped caps: short perpendicular bars marching along both cap runs,
@@ -270,8 +286,8 @@ function fidenza(oblique) {
         const Dg = qTangent(a, c, b, tt);
         const nx = -Dg[1], ny = Dg[0];
         const half = (w * 0.72) + 1.2 * ps;
-        const sw = (1.6 + hash(anchor + k) * 2.6) * ps; // stripe thickness
-        const sc = pick(F_PALETTE, hash(anchor + "s" + k));
+        const sw = (1.6 + hash(anchor + k) * 2.6) * ps * WF; // stripe thickness
+        const sc = mixHex(pick(F_PALETTE, hash(anchor + "s" + k)), F_BG, fog);
         el.push(`<line x1="${(Q[0] - nx * half).toFixed(1)}" y1="${(Q[1] - ny * half).toFixed(1)}" x2="${(Q[0] + nx * half).toFixed(1)}" y2="${(Q[1] + ny * half).toFixed(1)}" stroke="${sc}" stroke-width="${sw.toFixed(1)}"/>`);
       }
     }
@@ -279,23 +295,21 @@ function fidenza(oblique) {
 
   // Nodes: cubes in the artwork palette (strand-mapped), slight rotation; the
   // striped caps trail out of them into the ribbons. Oblique paints far
-  // cubes first and scales them by the same perspective as the ribbons.
+  // cubes first, scales them by the same perspective as the ribbons, and
+  // hazes them by the same depth fog — no shadows.
   const nodesDrawn = [...g.nodes];
   if (oblique) nodesDrawn.sort((a, b) => proj(a.pos)[3] - proj(b.pos)[3]);
   for (const n of nodesDrawn) {
     const p = P(n.pos);
     const r = (3.4 + Math.sqrt(n.deg) * 1.9) * p[2];
     const rot = (hash(n.id) - 0.5) * 34;
-    const fill = F_NODE[n.strand];
-    if (oblique) {
-      el.push(`<rect x="${(p[0] - r).toFixed(1)}" y="${(p[1] - r).toFixed(1)}" width="${(r * 2).toFixed(1)}" height="${(r * 2).toFixed(1)}" fill="#1c2e24" opacity="0.45" transform="rotate(${rot.toFixed(0)} ${p[0].toFixed(1)} ${p[1].toFixed(1)}) translate(${(2.5 * p[2]).toFixed(1)},${(4 * p[2]).toFixed(1)})"/>`);
-    }
+    const fill = mixHex(F_NODE[n.strand], F_BG, fogOf(p[3]));
     el.push(`<rect x="${(p[0] - r).toFixed(1)}" y="${(p[1] - r).toFixed(1)}" width="${(r * 2).toFixed(1)}" height="${(r * 2).toFixed(1)}" fill="${fill}" transform="rotate(${rot.toFixed(0)} ${p[0].toFixed(1)} ${p[1].toFixed(1)})"/>`);
   }
 
   const label = oblique
-    ? "FIDENZA v3 · OBLIQUE — the same cloud orbited ~34°: ribbons fan apart along their real constellation depths"
-    : "FIDENZA v3 · HEAD-ON — the canonical angle where the composition resolves flat";
+    ? "FIDENZA v4 · OBLIQUE — orbited ~38°, depth ×1.9, no shadows: near ribbons swell, far ones haze into the field"
+    : "FIDENZA v4 · HEAD-ON — the canonical angle where the composition resolves flat";
   return svg(W, H, el, label, F_BG, "#1e3a6e");
 }
 
