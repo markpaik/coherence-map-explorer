@@ -34,6 +34,7 @@ const FRAG = /* glsl */ `
   uniform vec3 uColA;    // base
   uniform vec3 uColB;    // band / mottle
   uniform vec3 uColC;    // accent band / rim
+  uniform vec3 uLightDir; // view-space; z < 0 = lit from behind (crescent)
 
   varying vec3 vNrm;
   varying vec3 vViewPos;
@@ -64,11 +65,12 @@ const FRAG = /* glsl */ `
     vec3 V = normalize(vViewPos);
     float facing = max(dot(n, V), 0.0);
     float limb = pow(1.0 - facing, 1.8);
-    vec3 L = normalize(vec3(-0.42, 0.5, 0.72));
+    vec3 L = normalize(uLightDir);
     float nl = dot(n, L);
-    // Soft terminator: day side lit, night side falls to a deep shadow that
-    // still reads (these are faint background bodies, not black discs).
-    float day = smoothstep(-0.25, 0.45, nl);
+    // Eclipse light: the sun sits mostly BEHIND each body, so only a waxing/
+    // waning sliver catches it; the rest of the disc is a shadowed silhouette
+    // that barely separates from the sky. Sharp terminator, deep night.
+    float day = smoothstep(-0.03, 0.22, nl);
 
     vec3 col;
     if (uType == 0) {
@@ -93,9 +95,12 @@ const FRAG = /* glsl */ `
       col = mix(uColA, uColB, frost + wisp);
     }
 
-    col *= (0.42 + 0.58 * day);       // terminator
-    col *= 1.0 - 0.5 * limb;          // limb darkening
-    col += uColC * pow(1.0 - facing, 3.2) * 0.35 * day; // thin atmosphere rim
+    col *= (0.055 + 0.945 * day);     // shadowed body, lit sliver
+    col *= 1.0 - 0.45 * limb;         // limb darkening on the lit sliver
+    // Rim: a brighter arc where the sliver meets the limb, plus the faintest
+    // full-circumference corona hint so the eclipsed disc still whispers.
+    col += uColC * pow(1.0 - facing, 3.2) * 0.5 * day;
+    col += uColC * pow(1.0 - facing, 4.5) * 0.1;
 
     gl_FragColor = vec4(col, uAlpha * uFade);
     if (gl_FragColor.a < 0.003) discard;
@@ -118,14 +123,24 @@ interface BodySpec {
   colA: number;
   colB: number;
   colC: number;
+  /** View-space sun direction; z < 0 lights from behind → crescent phase. */
+  light: [number, number, number];
 }
 
 // Palette stays in the scene's family: deep indigo/teal giant with a muted
-// warm accent band, a gray-lavender moon, a pale teal dwarf.
+// warm accent band, a gray-lavender moon, a pale teal dwarf — and one
+// MEGAPLANET: far, far back yet still huge on screen and barely-there faint,
+// the size/contrast mismatch that reads as "colossal". Each body gets its own
+// eclipse phase: the giant a waxing sliver, the moon a waning one from the
+// other side, the dwarf almost fully dark, the megaplanet a hairline arc.
+// Larger + farther + fainter throughout: presence, not decoration.
 const BODIES: BodySpec[] = [
-  { type: 0, pos: [640, 195, -585], radius: 60, alpha: 0.5, colA: 0x232a56, colB: 0x2e5763, colC: 0x8a7550 },
-  { type: 1, pos: [498, 132, -534], radius: 13, alpha: 0.46, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8 },
-  { type: 2, pos: [-702, -34, -438], radius: 21, alpha: 0.4, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0 },
+  { type: 0, pos: [900, 275, -830], radius: 95, alpha: 0.3, colA: 0x232a56, colB: 0x2e5763, colC: 0x8a7550, light: [-0.55, 0.3, -0.72] },
+  { type: 1, pos: [705, 185, -762], radius: 17, alpha: 0.27, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, light: [0.6, 0.25, -0.68] },
+  { type: 2, pos: [-985, -52, -625], radius: 30, alpha: 0.22, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, light: [0.2, 0.42, -0.88] },
+  // The megaplanet: ~2700 world units out, radius 700 — a quarter of the sky,
+  // at one-tenth opacity, lit by a hairline crescent along its upper limb.
+  { type: 0, pos: [460, -700, -2550], radius: 700, alpha: 0.11, colA: 0x1e2748, colB: 0x28454f, colC: 0x6f6a9a, light: [0.12, 0.52, -0.85] },
 ];
 
 export function createPlanets(): PlanetsHandle {
@@ -147,6 +162,7 @@ export function createPlanets(): PlanetsHandle {
         uColA: { value: new THREE.Color(b.colA) },
         uColB: { value: new THREE.Color(b.colB) },
         uColC: { value: new THREE.Color(b.colC) },
+        uLightDir: { value: new THREE.Vector3(...b.light) },
       },
       transparent: true,
       depthWrite: false,
