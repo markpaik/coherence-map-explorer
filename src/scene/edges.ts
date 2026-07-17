@@ -138,7 +138,7 @@ const FRAG = /* glsl */ `
     // lit set stays a dark filament, no glow, no comets. max(), not ×, so an
     // already-chain-lit edge never double-brightens.
     float story = uStory
-      * (1.0 - clamp(vDamage * 1.45, 0.0, 1.0))
+      * (1.0 - clamp(vDamage * 3.0, 0.0, 1.0))
       * clamp((vVisible - 0.06) / 0.94, 0.0, 1.0);
 
     if (vKind < 0.5) {

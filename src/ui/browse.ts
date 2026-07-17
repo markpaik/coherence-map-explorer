@@ -30,6 +30,8 @@ export interface BrowseDeps {
 
 export interface BrowseHandle {
   open(): void;
+  /** Open Browse directly at a standard's view (the sheet's swipe-up handoff). */
+  openStandard(code: string): void;
   /** Hide the overlay and hand the frame to the 3D scene. */
   enterMap(): void;
   readonly isOpen: boolean;
@@ -973,6 +975,21 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     deps.onEnterMap();
   }
 
+  // The sheet's swipe-up handoff: land straight on the standard's Browse view
+  // (pushed onto the stack so Back walks to wherever the user was before).
+  function openStandard(code: string): void {
+    if (nodeByCode.has(code)) {
+      const top = stack[stack.length - 1];
+      if (!(top && top.t === "standard" && top.code === code)) {
+        stack.push({ t: "standard", code });
+      }
+    }
+    overlay.hidden = false;
+    pill.hidden = true;
+    document.body.classList.add("browsing");
+    renderTop(true);
+  }
+
   // --- boot --------------------------------------------------------------
   // A story deep link at boot owns the scene — leave Browse closed (the pill,
   // hidden by CSS while a story runs, brings it back when the story exits).
@@ -994,6 +1011,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
 
   return {
     open,
+    openStandard,
     enterMap,
     get isOpen() {
       return !overlay.hidden;

@@ -1845,6 +1845,52 @@ body.og #veil {
 }
 
 /* ========================================================================== */
+/* While the detail sheet is up, the Browse pill is redundant (swipe the
+   sheet up to return to Browse) and floated awkwardly over it — hide it. */
+body:has(.panel.panel-open) .browse-pill {
+  display: none;
+}
+
+/* -- "Lose a year" interactive story: grade chips inside the card --------- */
+.story-extra {
+  display: contents; /* collapses fully when empty */
+}
+.lose-year {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 10px;
+}
+.lose-year-chip {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+.lose-year-chip[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--ink-2);
+  background: rgb(255 255 255 / 0.1);
+}
+.lose-year-chip:hover:not([aria-pressed="true"]) {
+  color: var(--ink);
+}
+
+/* App shell: the page itself NEVER scrolls sideways. `clip` (not `hidden`)
+   because iOS Safari honors it — a single overflowing element (wide KaTeX
+   line, long unbroken code) was letting the whole page pan by ~an inch. */
+html,
+body {
+  overflow-x: clip;
+}
+
 /* Browse mode — phone-first drill-down overlay (src/ui/browse.ts).            */
 /* One appended block; reuses the DESIGN tokens + the shared .badge classes.   */
 /* Body 16px, paddings 12-16px, 44px touch targets, --line hairline rows.      */
@@ -1868,6 +1914,7 @@ body.og #veil {
   background: var(--bg);
   color: var(--ink);
   overflow-y: auto;
+  overflow-x: clip; /* one wide equation must not pan the whole drill-down */
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
@@ -2282,7 +2329,12 @@ body.og #veil {
   gap: 6px;
   margin-bottom: 16px;
 }
+.browse-desc .katex-display {
+  overflow-x: auto; /* a long equation scrolls in place, never the page */
+  max-width: 100%;
+}
 .browse-desc {
+  overflow-wrap: break-word;
   font-size: 16px;
   line-height: 1.55;
   color: var(--ink);

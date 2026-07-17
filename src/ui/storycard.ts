@@ -34,6 +34,12 @@ export interface StoryCardHandle {
   setPaused(paused: boolean): void;
   /** Show/hide the auto-advance affordances (pause control + progress fill). */
   setAutoAdvanceEnabled(on: boolean): void;
+  /**
+   * Mount an interactive element between the body and the controls (the
+   * lose-a-year grade chips). null unmounts. The card owns nothing about it —
+   * the caller wires all behavior.
+   */
+  setExtra(el: HTMLElement | null): void;
   /** Hide the card + scrubber. */
   end(): void;
   readonly shown: boolean;
@@ -93,7 +99,12 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
   exitBtn.addEventListener("click", onExit);
   controls.append(backBtn, nextBtn, exitBtn);
 
-  card.append(kicker, title, bodyEl, cite, controls);
+  // Slot for an interactive element (see setExtra) — sits between the body
+  // copy and the controls row; empty (and thus collapsed) for normal stories.
+  const extraSlot = document.createElement("div");
+  extraSlot.className = "story-extra";
+
+  card.append(kicker, title, bodyEl, cite, extraSlot, controls);
 
   // --- scrubber -----------------------------------------------------------
   const scrubber = document.createElement("div");
@@ -192,6 +203,9 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
   return {
     get shown() {
       return shown;
+    },
+    setExtra(el) {
+      extraSlot.replaceChildren(...(el ? [el] : []));
     },
     begin(story) {
       kicker.textContent = story.kicker;

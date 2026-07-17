@@ -230,11 +230,12 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         #include <color_fragment>
         // Story lift: while a story plays, HEALTHY nodes rise to at least
         // chain-level brightness (shimmer preserved), so the lit strands cross
-        // the bloom threshold and halo; damage kills the lift (gone by d≈0.7)
-        // and the ember pass below takes over. max(), not ×, so a focus/chain
-        // node never stacks the lift on top of its own emphasis. Applied BEFORE
-        // the dim mix, so spotlight-ghosted nodes stay ghosted.
-        float lift = mix(uStoryLift, 1.0, clamp(vDamage * 1.45, 0.0, 1.0));
+        // the bloom threshold and halo. Damage kills the lift FAST (gone by
+        // d≈0.33): even a lightly-touched standard must read dimmer than its
+        // healthy neighbors, never lifted back to bright — the ripple of
+        // superficial learning stays visibly a ripple. max(), not ×, so a
+        // focus/chain node never stacks the lift on top of its own emphasis.
+        float lift = mix(uStoryLift, 1.0, clamp(vDamage * 3.0, 0.0, 1.0));
         float mulTotal = max(vColorMul, lift * vShim);
         diffuseColor.rgb = mix(diffuseColor.rgb * mulTotal, uDimColor, vDim);
         // --- sphere shading: limb darkening + a soft key light ----------------
@@ -271,6 +272,10 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         // emphasis only.
         if (vDamage > 0.0001) {
           float d = vDamage;
+          // Monotone dimming floor: brightness falls with damage from the very
+          // first touch, so a d≈0.2 standard is unmistakably dimmer than a
+          // healthy one and the wound stays visible across every later scene.
+          diffuseColor.rgb *= 1.0 - 0.5 * smoothstep(0.03, 0.7, d);
           float pulse = 0.5 + 0.5 * sin(uTime * 2.5132741 + vPhase);       // ~2.5s
           // Near-black embers: a fully-missed standard reads as OFF — a dark
           // body holding its place — not as a glowing coal. The faint warm

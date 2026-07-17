@@ -32,6 +32,12 @@ export interface PanelRequests {
 export interface PanelHandle {
   show(focusIndex: number, connections: Connections): void;
   hide(): void;
+  /**
+   * When set, swiping the phone bottom sheet UP from its peek expands into
+   * Browse's standard view (Browse owns full detail on phones) instead of the
+   * full-height sheet. null restores the classic full-sheet snap.
+   */
+  setExpandToBrowse(cb: ((code: string) => void) | null): void;
   readonly isOpen: boolean;
   dispose(): void;
 }
@@ -199,6 +205,8 @@ export function createPanel(
   const peekY = (): number => sheetHeight() - 0.4 * vh(); // top of the 40% peek
 
   let sheetY = 0; // current snap offset (px from the 90% position)
+  let expandToBrowse: ((code: string) => void) | null = null;
+  let currentCode: string | null = null;
   function setSheetY(y: number, animate: boolean): void {
     sheetY = y;
     panel.classList.toggle("panel-dragging", !animate);
@@ -239,15 +247,25 @@ export function createPanel(
       return;
     }
     const target = sheetY > peekY() / 2 ? peekY() : 0;
+    // Swiping UP past the peek hands the standard to Browse when Browse owns
+    // navigation — full detail lives there; the sheet is the map's caption.
+    if (target === 0 && expandToBrowse && currentCode) {
+      setSheetY(peekY(), true); // leave the sheet parked at peek behind Browse
+      expandToBrowse(currentCode);
+      return;
+    }
     setSheetY(target, true);
   }
   // Keyboard/switch equivalent of the drag gesture (fleet a11y finding):
-  // Enter/Space toggles between the full sheet and the 40% peek.
+  // Enter/Space toggles peek ↔ expanded (Browse's standard view when Browse
+  // owns navigation, else the full-height sheet).
   handle.addEventListener("keydown", (e) => {
     if (!isSheet()) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      setSheetY(sheetY === 0 ? peekY() : 0, true);
+      if (sheetY === 0) setSheetY(peekY(), true);
+      else if (expandToBrowse && currentCode) expandToBrowse(currentCode);
+      else setSheetY(0, true);
     }
   });
   handle.addEventListener("pointerdown", onHandleDown);
@@ -597,9 +615,13 @@ export function createPanel(
       progressions.replaceChildren();
       hidePopover();
 
+      currentCode = n.code;
       panel.hidden = false;
       panel.classList.add("panel-open");
-      setSheetY(0, true); // slide up to fully expanded (mobile sheet)
+      // Phones open at the PEEK snap — code, crumb, badges, and the first
+      // lines of the description show as a caption over a still-touchable
+      // map. Swipe up to expand; desktop keeps the full side panel.
+      setSheetY(isSheet() ? peekY() : 0, true);
       body.scrollTop = 0;
 
       // Move focus to the heading so keyboard/AT land inside the panel. Defer a
@@ -615,10 +637,15 @@ export function createPanel(
       void fillAsync(focusIndex, conn, token);
     },
 
+    setExpandToBrowse(cb) {
+      expandToBrowse = cb;
+    },
+
     hide() {
       openToken++;
       const wasOpen = open;
       open = false;
+      currentCode = null;
       panel.classList.remove("panel-open", "panel-dragging");
       hidePopover();
 

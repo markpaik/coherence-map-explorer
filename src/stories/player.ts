@@ -152,6 +152,22 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   let damageTo: Float32Array = new Float32Array(N);
   let easing = false;
   let easeElapsed = 0;
+  // Staggered damage crossfade (the healing codas): per-node start offsets so
+  // holes relight one by one instead of all at once. All zeros = simultaneous.
+  const damageDelay = new Float32Array(N);
+  let damageDuration = LAPSE_MS;
+
+  // Deterministic per-node scatter order, hashed from the node id — "teachers
+  // everywhere at once", not a sweep.
+  const scatterOrder = new Float32Array(N);
+  {
+    for (let i = 0; i < N; i++) {
+      const id = graph.nodes[i].id;
+      let h = 0;
+      for (let k = 0; k < id.length; k++) h = (h * 31 + id.charCodeAt(k)) >>> 0;
+      scatterOrder[i] = (h % 997) / 997;
+    }
+  }
 
   // Lit-set buffers (the dark-baseline grammar). litCur is each node's current
   // on-amount (0 = ghost, 1 = lit); a scene change animates litCur toward
@@ -212,18 +228,126 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     return husks;
   }
 
-  function applyDamage(scene: StoryScene, ease: boolean): void {
+  // Returns the crossfade duration so goto() can size the settle window.
+  function applyDamage(scene: StoryScene, ease: boolean): number {
     const target = damageTargetFor(scene);
     damageTo = target;
-    if (ease) {
-      damageFrom = new Float32Array(damageCur);
-      easeElapsed = 0;
-      easing = true;
-    } else {
+    if (!ease) {
       damageCur.set(target);
       easing = false;
       pushDamage();
+      return 0;
     }
+    damageFrom = new Float32Array(damageCur);
+    const heal = scene.heal;
+    if (heal) {
+      setDamageDelays(heal.order);
+      damageDuration = heal.ms ?? 4200;
+    } else {
+      damageDelay.fill(0);
+      damageDuration = LAPSE_MS;
+    }
+    easeElapsed = 0;
+    easing = true;
+    return damageDuration;
+  }
+
+  // Normalize per-node stagger delays over the CHANGING nodes (0..1); unchanged
+  // nodes get no window and simply hold their value.
+  function setDamageDelays(order: "scatter" | "ltr"): void {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < N; i++) {
+      if (damageFrom[i] === damageTo[i]) {
+        damageDelay[i] = 0;
+        continue;
+      }
+      const r = order === "ltr" ? rankOf(i) : scatterOrder[i];
+      damageDelay[i] = r;
+      if (r < lo) lo = r;
+      if (r > hi) hi = r;
+    }
+    const span = hi > lo ? hi - lo : 1;
+    for (let i = 0; i < N; i++) {
+      if (damageFrom[i] !== damageTo[i]) damageDelay[i] = (damageDelay[i] - lo) / span;
+    }
+  }
+
+  // --- "Lose a year" (the interactive story) ------------------------------
+  // The player owns the behavior: a grade-chip row mounts into the card, and
+  // choosing a grade recomputes structural damage live, crossfading node by
+  // node (scatter) like a time-lapse. Copy on the card restates the numbers
+  // for the chosen year, computed from the same engine the stories use.
+  let loseYearSel: string | null = null;
+  const LOSE_YEAR_MS = 2200;
+
+  function armYearDamage(g: string, ease: boolean): number {
+    const missedIdx = resolve(`grade:${g}`);
+    const target = damage.compute(idsFromIndices(missedIdx));
+    const gRank = gradeRank.get(g) ?? 0;
+    let missedCount = 0;
+    let ahead = 0;
+    let touched = 0;
+    for (let i = 0; i < N; i++) {
+      if (graph.nodes[i].grade === g) {
+        missedCount++;
+        continue;
+      }
+      if (rankOf(i) > gRank) {
+        ahead++;
+        if (target[i] > 0.0001) touched++;
+      }
+    }
+    const clear = ahead - touched;
+    const yearName = g === "K" ? "kindergarten" : `grade ${g}`;
+    const sc = currentStory!.scenes[0];
+    sc.card.title = `Losing ${yearName}`;
+    sc.card.body =
+      `${missedCount} standards go dark. Of the ${ahead} standards ahead, ` +
+      `${touched} now stand on something missing and dim; ${clear} stay bright. ` +
+      `Switch years to compare how far each loss reaches.`;
+    card.render(sc, 0, 1);
+
+    damageTo = target;
+    if (!ease) {
+      damageCur.set(target);
+      easing = false;
+      pushDamage();
+      return 0;
+    }
+    damageFrom = new Float32Array(damageCur);
+    setDamageDelays("scatter");
+    damageDuration = LOSE_YEAR_MS;
+    easeElapsed = 0;
+    easing = true;
+    requestRender();
+    return LOSE_YEAR_MS;
+  }
+
+  function mountLoseAYear(): void {
+    const wrap = document.createElement("div");
+    wrap.className = "lose-year";
+    wrap.setAttribute("role", "group");
+    wrap.setAttribute("aria-label", "Choose the missing grade");
+    const chips = new Map<string, HTMLButtonElement>();
+    const select = (g: string): void => {
+      loseYearSel = g;
+      for (const [k, b] of chips) b.setAttribute("aria-pressed", String(k === g));
+      armYearDamage(g, true);
+    };
+    for (const g of ["K", "1", "2", "3", "4", "5", "6", "7", "8"]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "lose-year-chip";
+      b.textContent = g;
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", () => select(g));
+      chips.set(g, b);
+      wrap.appendChild(b);
+    }
+    loseYearSel = "3"; // the pandemic story's anchor year, preselected
+    chips.get("3")!.setAttribute("aria-pressed", "true");
+    card.setExtra(wrap);
   }
 
   // Arm the lit-set transition for a scene. Everything outside scene.state.lit
@@ -308,15 +432,19 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     if (token !== navToken || !running) return; // superseded or stopped mid-morph
 
     applyFocus(scene, cut); // emphasis (silent) — camera below overrides framing
-    applyDamage(scene, !cut);
+    // Interactive story: the chosen year drives damage, not the scene state.
+    const damageMs =
+      currentStory.interactive === "lose-a-year"
+        ? armYearDamage(loseYearSel ?? "3", !cut)
+        : applyDamage(scene, !cut);
     const revealMs = armLit(scene, cut);
     applyCamera(scene, !cut);
     card.render(scene, index, currentStory.scenes.length);
 
-    // Arm the settle window: the scene holds only after BOTH the damage lapse
-    // and the lit reveal have finished. A cut settles at once.
+    // Arm the settle window: the scene holds only after the damage crossfade
+    // (which a healing coda stretches) AND the lit reveal have finished.
     holdTotal = scene.holdMs ?? DEFAULT_HOLD_MS;
-    settleRemaining = cut ? 0 : Math.max(LAPSE_MS, revealMs);
+    settleRemaining = cut ? 0 : Math.max(damageMs, revealMs);
     settleArmed = true;
     requestRender();
   }
@@ -350,6 +478,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     card.begin(story);
     card.setAutoAdvanceEnabled(autoAdvanceOn());
     card.setPaused(false);
+    if (story.interactive === "lose-a-year") mountLoseAYear();
     void goto(0, !reducedMotion());
   }
 
@@ -371,6 +500,8 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     edges.setStory(0);
     nodes.setVisibleMask(null);
     edges.setVisibleMask(null);
+    card.setExtra(null);
+    loseYearSel = null;
     filters.recompute(); // reclaim the visibility buffers for the live filters
     machine.clearFocus({ silent: true });
     card.end();
@@ -442,16 +573,20 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       const dtMs = dt * 1000;
       let active = false;
 
-      // 1) Lapse damage crossfade (the eased state change).
+      // 1) Damage crossfade — simultaneous (the lapse) or per-node staggered
+      //    (a healing coda: each node fades within its own window, so the
+      //    lights come back one by one).
       if (easing) {
         active = true;
         easeElapsed += dtMs;
-        const k = smoothstep(easeElapsed / LAPSE_MS);
+        const T = easeElapsed / damageDuration;
         for (let i = 0; i < N; i++) {
+          const startAt = damageDelay[i] * (1 - REVEAL_WINDOW);
+          const k = smoothstep((T - startAt) / REVEAL_WINDOW);
           damageCur[i] = damageFrom[i] + (damageTo[i] - damageFrom[i]) * k;
         }
         pushDamage();
-        if (easeElapsed >= LAPSE_MS) {
+        if (easeElapsed >= damageDuration) {
           damageCur.set(damageTo);
           easing = false;
           pushDamage();

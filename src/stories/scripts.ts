@@ -26,6 +26,13 @@ export interface StoryScene {
   };
   /** Directional turn-on sweep for this scene's lit change. */
   reveal?: { dir: "ltr" | "rtl"; ms?: number };
+  /**
+   * Stagger this scene's damage crossfade node by node instead of all at once —
+   * the healing codas use it so the holes visibly relight one by one
+   * ("scatter", hashed order, teachers everywhere at once) or year by year
+   * ("ltr"). Applies to whichever nodes CHANGE damage this scene.
+   */
+  heal?: { order: "scatter" | "ltr"; ms?: number };
   camera?: { fit: "all" | string[]; pose?: 0 | 1 | 2 };
   card: { title: string; body: string; cite?: string; citeUrl?: string };
   /** Auto-advance dwell (ms) once the scene has settled; Next skips ahead. */
@@ -38,6 +45,8 @@ export interface Story {
   kicker: string;
   title: string;
   hook: string;
+  /** Interactive stories mount extra controls (player.ts owns the behavior). */
+  interactive?: "lose-a-year";
   scenes: StoryScene[];
 }
 
@@ -134,13 +143,13 @@ export const STORIES: Story[] = [
       {
         year: "",
         state: { lit: ["all"] },
-        reveal: { dir: "ltr", ms: 2800 },
+        heal: { order: "scatter", ms: 4800 },
         camera: { fit: "all", pose: 1 },
         card: {
           title: "Why this is hard, and not hopeless",
-          body: "Teachers rebuild these floors every day, one student at a time, and the map turns back on. It shows what the mathematics stands on. It never says what a child can or cannot do.",
+          body: "Teachers rebuild these floors every day, one student at a time. Watch the lights come back the way the work actually happens: one standard, one child, one small win at a time. The map shows what the mathematics stands on. It never says what a child can or cannot do.",
         },
-        holdMs: 11000,
+        holdMs: 12000,
         transition: "lapse",
       },
     ],
@@ -193,6 +202,7 @@ export const STORIES: Story[] = [
       {
         year: "Student B",
         state: { lit: ["grade:K", "grade:1", "grade:2", "grade:3"] },
+        heal: { order: "scatter", ms: 2400 },
         reveal: { dir: "rtl", ms: 2600 },
         camera: { fit: ["grade:2", "grade:3"], pose: 1 },
         card: {
@@ -313,6 +323,7 @@ export const STORIES: Story[] = [
           lit: ["code:3.OA.A.2", "code:4.NF.B.4", "code:6.RP.A.2", "code:7.RP.A.2"],
           damage: false,
         },
+        heal: { order: "ltr", ms: 3600 },
         camera: { fit: ["code:3.OA.A.2", "code:4.NF.B.4", "code:6.RP.A.2", "code:7.RP.A.2"], pose: 1 },
         card: {
           title: "Find three holes, not three years",
@@ -412,6 +423,7 @@ export const STORIES: Story[] = [
           missed: ["code:4.NF.B.4", "code:4.NBT.B.5"],
           damage: true,
         },
+        heal: { order: "scatter", ms: 3200 },
         camera: { fit: ["grade:4", "grade:5"], pose: 1 },
         card: {
           title: "The alternative fits on one screen",
@@ -557,6 +569,29 @@ export const STORIES: Story[] = [
           body: "Close this story, search for any standard your students struggle with, and follow Builds on backward until you find solid ground. The map is the diagnostic. You are the treatment.",
         },
         holdMs: 10500,
+        transition: "lapse",
+      },
+    ],
+  },
+  {
+    id: "lose-a-year",
+    kicker: "Interactive",
+    title: "Lose a year, any year",
+    hook: "Pick the grade a student misses and watch what the structure does with it.",
+    interactive: "lose-a-year",
+    scenes: [
+      {
+        year: "You choose",
+        state: { lit: ["all"] },
+        reveal: { dir: "ltr", ms: 2600 },
+        camera: { fit: "all", pose: 1 },
+        card: {
+          // Placeholder copy only: the player rewrites title + body live with
+          // the chosen year's computed numbers (see armYearDamage).
+          title: "Choose the missing year",
+          body: "Every light is a standard taught and learned. Pick a grade below to take it away; the map recomputes what stands on it.",
+        },
+        holdMs: 0, // interactive: never auto-advances
         transition: "lapse",
       },
     ],

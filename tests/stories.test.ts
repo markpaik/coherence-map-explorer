@@ -160,8 +160,8 @@ describe("story scripts validate against the graph", () => {
     expect(citeNoUrl).toBe(2);
   });
 
-  it("there are six stories, each with at least one scene", () => {
-    expect(STORIES.length).toBe(6);
+  it("there are seven stories (six narratives + the interactive lose-a-year), each with at least one scene", () => {
+    expect(STORIES.length).toBe(7);
     for (const story of STORIES) {
       expect(story.scenes.length).toBeGreaterThan(0);
       expect(story.id).toBeTruthy();

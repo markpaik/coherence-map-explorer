@@ -250,7 +250,13 @@ function start(graph: GraphCore): void {
     ? false
     : params.has("browse") || isPhoneDefault;
   if (browseActive) {
-    createBrowse({ graph, machine, storyPicker, onEnterMap: requestRender });
+    const browse = createBrowse({ graph, machine, storyPicker, onEnterMap: requestRender });
+    // Swiping the detail sheet UP from its peek hands the standard to Browse
+    // (full detail lives there on phones); the map focus clears underneath.
+    panel.setExpandToBrowse((code) => {
+      machine.clearFocus();
+      browse.openStandard(code);
+    });
   }
 
   // -- reduced motion (single control point; also the __cme debug hook) -----
