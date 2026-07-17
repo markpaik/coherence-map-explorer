@@ -1,15 +1,20 @@
-// Art-style previews v2 (design exploration, NOT a build step) — Mark's
+// Art-style previews v3 (design exploration, NOT a build step) — Mark's
 // direction, 2026-07-17:
 //
 //  RINGERS: paste/cream-white board; pegs in white/red/yellow/blue/green with
 //  BOLD black outlines; strings are pure color (no outline), TAUT, leaving a
 //  peg at its outer-edge tangent point and wrapping the destination peg —
-//  string-art geometry, not center-to-center curves.
+//  string-art geometry, not center-to-center curves. v3: the board is TALLER
+//  and the axes fit independently, so the pegs breathe vertically.
 //
 //  FIDENZA: the provided artwork's colorway (teal field; navy, brown-black,
 //  cream, yellow, red, mint ribbons); nodes are CUBES that trail short
 //  striped segments — Fidenza's signature striped end-caps — before the
-//  ribbon runs clean to the next node.
+//  ribbon runs clean to the next node. v3: the oblique view is a TRUE 3D
+//  rotation of the constellation cloud (each node and control point keeps its
+//  real z), anamorphic-installation style: the composition resolves flat only
+//  from the canonical head-on angle; orbit and the ribbons fan apart in
+//  every direction along their constellation depths.
 //
 // Deterministic: no randomness; variation is hashed from ids. Reads
 // public/data/graph-core.json; writes docs/previews/. Nothing imports this.
@@ -43,6 +48,20 @@ function fitter(pts, W, H, pad) {
   return ([x, y]) => [pad + (x - x0) * s, H - pad - (y - y0) * s];
 }
 
+// Independent per-axis fit: fills BOTH dimensions of the canvas, stretching
+// the sparser axis. The Ringers board uses it to air out the pegs vertically
+// (the blueprint pose is ~2:1 wide; a uniform fit leaves the rows cramped).
+function fitterXY(pts, W, H, pad) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) {
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  const sx = (W - 2 * pad) / (x1 - x0);
+  const sy = (H - 2 * pad) / (y1 - y0);
+  return ([x, y]) => [pad + (x - x0) * sx, H - pad - (y - y0) * sy];
+}
+
 // ===========================================================================
 // RINGERS v2 — cream board, bold-outlined pegs, taut tangent strings.
 const R_BG = "#f0ece0"; // paste white
@@ -51,14 +70,28 @@ const R_PEG = { number: "#e2a72e", algebra: "#2b5ba8", geometry: "#2e7d52", data
 const R_WHITE = "#faf8f2"; // isolated pegs
 
 function ringers(oblique) {
-  const W = 1680, H = 945;
-  const fit = fitter(g.nodes.map((n) => n.pos3), W, H, 80);
+  // Taller board + independent axis fit: the columns keep their width while
+  // the rows stretch to fill the extra height — pegs breathe vertically.
+  const W = 1680, H = 1240;
+  const fit = fitterXY(g.nodes.map((n) => n.pos3), W, H, 80);
   const squash = oblique ? 0.74 : 1;
   const T = ([x, y]) => [x, H / 2 + (y - H / 2) * squash];
   const el = [];
+  const elFront = []; // string segments on the viewer's side of a peg — painted LAST
 
   const pegR = (n) => 4.2 + Math.sqrt(n.deg) * 2.3;
+  const pegH = (n) => 6 + Math.sqrt(n.deg) * 2.4;
   const pegPos = new Map(g.nodes.map((n) => [n.id, T(fit(n.pos3))]));
+
+  // Oblique pegs are cylinders whose faces are ellipses foreshortened by E.
+  // The tangent/wrap math runs in an UNFORESHORTENED space (screen y
+  // re-inflated by 1/E about the board midline) where those faces are true
+  // circles; scaling the results back by E preserves tangency exactly, so
+  // strings ATTACH to the drawn faces instead of floating where a full
+  // circle's edge would have been. Head-on E = 1 and this is a no-op.
+  const E = oblique ? 0.45 : 1;
+  const up = (y) => H / 2 + (y - H / 2) / E;
+  const dn = (y) => H / 2 + (y - H / 2) * E;
 
   // Strings: external tangent from source circle to target circle, then a
   // wrap arc continuing around the target — taut string-art geometry.
@@ -67,7 +100,9 @@ function ringers(oblique) {
     const s = byId.get(e.s), t = byId.get(e.t);
     const A = pegPos.get(e.s), B = pegPos.get(e.t);
     const ra = pegR(s), rb = pegR(t);
-    const dx = B[0] - A[0], dy = B[1] - A[1];
+    const ax0 = A[0], ay0 = up(A[1]);
+    const bx0 = B[0], by0 = up(B[1]);
+    const dx = bx0 - ax0, dy = by0 - ay0;
     const d = Math.hypot(dx, dy);
     if (d < ra + rb + 2) continue; // overlapping pegs: skip the string
     const th = Math.atan2(dy, dx);
@@ -75,19 +110,44 @@ function ringers(oblique) {
     // by the same angle phi from the center line. Side hashed per edge.
     const side = hash(e.s + "|" + e.t) < 0.5 ? 1 : -1;
     const phi = Math.acos((ra - rb) / d);
-    const ax = A[0] + ra * Math.cos(th + side * phi);
-    const ay = A[1] + ra * Math.sin(th + side * phi);
-    const bx = B[0] + rb * Math.cos(th + side * phi);
-    const by = B[1] + rb * Math.sin(th + side * phi);
+    // Strings ride DOWN the peg cylinders by a hashed amount bounded by the
+    // shorter peg's height — wrapped string art, never lifted off the face.
+    const hgt = oblique ? hash(e.t + e.s) * Math.min(pegH(s), pegH(t)) * 0.75 : 0;
+    const ax = ax0 + ra * Math.cos(th + side * phi);
+    const ay = dn(ay0 + ra * Math.sin(th + side * phi)) + hgt;
+    const bx = bx0 + rb * Math.cos(th + side * phi);
+    const by = dn(by0 + rb * Math.sin(th + side * phi)) + hgt;
     const col = R_PEG[s.strand];
-    const hgt = oblique ? (hash(e.t + e.s) - 0.5) * 8 : 0;
-    el.push(`<line x1="${ax.toFixed(1)}" y1="${(ay + hgt).toFixed(1)}" x2="${bx.toFixed(1)}" y2="${(by + hgt).toFixed(1)}" stroke="${col}" stroke-width="1.7" stroke-opacity="0.85"/>`);
-    // Wrap: a partial arc continuing around the target from the landing point.
+    el.push(`<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="${col}" stroke-width="1.7" stroke-opacity="0.85"/>`);
+    // Wrap: a partial arc continuing around the target from the landing point
+    // — a circular arc in the inflated space, so on screen it traces exactly
+    // the rb × rb·E ellipse of the drawn peg face. Sampled as a polyline and
+    // split at the silhouette: the back half stays under the peg (occluded
+    // when the peg paints over it), the front half repaints on top of the peg
+    // so the string visibly wraps the cylinder instead of vanishing behind it.
     const a0 = th + side * phi;
-    const a1 = a0 + side * 2.6; // ~150° of wrap
-    const large = 0;
-    const wx = B[0] + rb * Math.cos(a1), wy = B[1] + rb * Math.sin(a1);
-    el.push(`<path d="M${bx.toFixed(1)},${(by + hgt).toFixed(1)} A${rb.toFixed(1)},${(rb * squash).toFixed(1)} 0 ${large} ${side === 1 ? 1 : 0} ${wx.toFixed(1)},${(wy + hgt).toFixed(1)}" fill="none" stroke="${col}" stroke-width="1.7" stroke-opacity="0.85"/>`);
+    const N = 22;
+    let run = [];
+    let runFront = false;
+    const flush = () => {
+      if (run.length >= 2) {
+        const dPath = "M" + run.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" L");
+        (oblique && runFront ? elFront : el).push(`<path d="${dPath}" fill="none" stroke="${col}" stroke-width="1.7" stroke-opacity="0.85"/>`);
+      }
+      run = [];
+    };
+    for (let k = 0; k <= N; k++) {
+      const a = a0 + (side * 2.6 * k) / N; // ~150° of wrap
+      const front = Math.sin(a) > 0; // screen-y grows downward: below center = viewer side
+      const pt = [bx0 + rb * Math.cos(a), dn(by0 + rb * Math.sin(a)) + hgt];
+      if (run.length && front !== runFront) {
+        run.push(pt);
+        flush();
+      }
+      run.push(pt);
+      runFront = front;
+    }
+    flush();
   }
 
   // Pegs on top: bold black outlines; white for edgeless standards.
@@ -96,10 +156,10 @@ function ringers(oblique) {
     const r = pegR(n);
     const fill = n.deg === 0 ? R_WHITE : R_PEG[n.strand];
     if (oblique) {
-      const h = 6 + Math.sqrt(n.deg) * 2.4;
+      const h = pegH(n);
       el.push(`<rect x="${(p[0] - r).toFixed(1)}" y="${p[1].toFixed(1)}" width="${(r * 2).toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" stroke="${R_INK}" stroke-width="2.2"/>`);
-      el.push(`<ellipse cx="${p[0].toFixed(1)}" cy="${(p[1] + h).toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * 0.4).toFixed(1)}" fill="${fill}" stroke="${R_INK}" stroke-width="2.2"/>`);
-      el.push(`<ellipse cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * 0.4).toFixed(1)}" fill="${fill}" stroke="${R_INK}" stroke-width="2.6"/>`);
+      el.push(`<ellipse cx="${p[0].toFixed(1)}" cy="${(p[1] + h).toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * E).toFixed(1)}" fill="${fill}" stroke="${R_INK}" stroke-width="2.2"/>`);
+      el.push(`<ellipse cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * E).toFixed(1)}" fill="${fill}" stroke="${R_INK}" stroke-width="2.6"/>`);
     } else {
       el.push(`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${r.toFixed(1)}" fill="${fill}" stroke="${R_INK}" stroke-width="2.6"/>`);
       if (n.deg > 6) {
@@ -108,9 +168,11 @@ function ringers(oblique) {
     }
   }
 
+  el.push(...elFront); // front wrap halves paint over the pegs
+
   const label = oblique
-    ? "RINGERS v2 · OBLIQUE — pegs with height on the cream board; strings ride the pegs"
-    : "RINGERS v2 · HEAD-ON — taut strings leave the outer edge and wrap the next peg";
+    ? "RINGERS v3 · OBLIQUE — pegs with height on the taller board; strings wrap the faces and ride down the pegs"
+    : "RINGERS v3 · HEAD-ON — taut strings leave the outer edge and wrap the next peg; columns aired out vertically";
   return svg(W, H, el, label, R_BG, "#8a8272");
 }
 
@@ -137,24 +199,56 @@ const qTangent = (a, c, b, t) => {
 
 function fidenza(oblique) {
   const W = 1680, H = 945;
-  const fit = fitter(g.nodes.map((n) => n.pos), W, H, 70);
-  const squash = oblique ? 0.8 : 1;
-  const shear = oblique ? 0.14 : 0;
-  const T = ([x, y]) => [x + (H / 2 - y) * shear, H / 2 + (y - H / 2) * squash];
+  // Anamorphic geometry: the flat composition is the CANONICAL PROJECTION of
+  // the real 3D constellation (head-on drops z orthographically). Oblique
+  // rotates the actual cloud — every node and ribbon control point keeps its
+  // constellation z — with weak perspective, so ribbons that overlapped
+  // head-on fan apart in every direction, installation-style.
+  const AZ = oblique ? 0.6 : 0;   // ~34° orbit
+  const TILT = oblique ? 0.16 : 0;
+  const D = 1400; // camera distance for the weak perspective (cloud z ≈ ±480 after the orbit)
+  const ca = Math.cos(AZ), sa = Math.sin(AZ);
+  const ct = Math.cos(TILT), st = Math.sin(TILT);
+  const proj = ([x, y, z]) => {
+    const rx = x * ca + z * sa;
+    const rz0 = z * ca - x * sa;
+    const ry = y * ct - rz0 * st;
+    const rz = rz0 * ct + y * st;
+    const s = oblique ? D / (D - rz) : 1; // head-on stays flat orthographic
+    return [rx * s, ry * s, s, rz];
+  };
+  // Fit over EVERYTHING that gets drawn (nodes + ribbon control points), so
+  // rotated bows never leave the canvas.
+  const fitPts = g.nodes.map((n) => proj(n.pos));
+  for (const e of g.edges) if (e.k === 0) fitPts.push(proj(e.c));
+  const fit = fitter(fitPts, W, H, 70);
+  const P = (p3) => {
+    const q = proj(p3);
+    const [X, Y] = fit(q);
+    return [X, Y, q[2], q[3]]; // screen x, screen y, perspective scale, depth
+  };
   const el = [];
 
   const edges = [...g.edges].filter((e) => e.k === 0);
-  // Depth-sort by hashed layer so overlaps vary; thick ribbons paint later.
-  edges.sort((a, b) => hash(a.s + a.t) - hash(b.s + b.t));
+  // Painter's order: head-on keeps the hashed layering (overlaps vary);
+  // oblique paints far-to-near by real depth so near ribbons cross OVER far
+  // ones — the depth cue that sells the rotation.
+  const edgeDepth = new Map(edges.map((e) => [e, proj(e.c)[3]]));
+  edges.sort(oblique
+    ? (a, b) => edgeDepth.get(a) - edgeDepth.get(b)
+    : (a, b) => hash(a.s + a.t) - hash(b.s + b.t));
 
   for (const e of edges) {
     const s = byId.get(e.s), t = byId.get(e.t);
-    const a = T(fit(s.pos));
-    const c = T(fit([e.c[0], e.c[1]]));
-    const b = T(fit(t.pos));
+    const a = P(s.pos);
+    const c = P(e.c);
+    const b = P(t.pos);
+    const ps = c[2]; // perspective scale at the ribbon's middle
     const seed = hash(e.s + "→" + e.t);
     const col = pick(F_PALETTE, seed);
-    const w = 3 + seed * 7 + (s.deg + t.deg) * 0.5; // ribbon width, wide variance
+    // Ribbon width, wide variance; scaled by perspective so near ribbons
+    // thicken and far ones thin — same physical ribbon, different distance.
+    const w = (3 + seed * 7 + (s.deg + t.deg) * 0.5) * ps;
     // Clean ribbon runs the middle of the path only — the striped caps own
     // the first and last stretch (Fidenza's segmented ends).
     const t0 = 0.14, t1 = 0.86;
@@ -162,7 +256,7 @@ function fidenza(oblique) {
     const cm = qPoint(a, c, b, 0.5);
     const d = `M${p0[0].toFixed(1)},${p0[1].toFixed(1)} Q${(2 * cm[0] - (p0[0] + p1[0]) / 2).toFixed(1)},${(2 * cm[1] - (p0[1] + p1[1]) / 2).toFixed(1)} ${p1[0].toFixed(1)},${p1[1].toFixed(1)}`;
     if (oblique) {
-      el.push(`<path d="${d}" fill="none" stroke="#1c2e24" stroke-opacity="0.45" stroke-width="${(w + 2).toFixed(1)}" stroke-linecap="butt" transform="translate(2.5,4)"/>`);
+      el.push(`<path d="${d}" fill="none" stroke="#1c2e24" stroke-opacity="0.45" stroke-width="${(w + 2).toFixed(1)}" stroke-linecap="butt" transform="translate(${(2.5 * ps).toFixed(1)},${(4 * ps).toFixed(1)})"/>`);
     }
     el.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${w.toFixed(1)}" stroke-linecap="butt"/>`);
 
@@ -172,33 +266,36 @@ function fidenza(oblique) {
       const nSeg = 3 + Math.floor(hash(anchor + e.s + e.t) * 3);
       for (let k = 0; k < nSeg; k++) {
         const tt = lo + ((k + 0.5) / nSeg) * (hi - lo);
-        const P = qPoint(a, c, b, tt);
-        const D = qTangent(a, c, b, tt);
-        const nx = -D[1], ny = D[0];
-        const half = (w * 0.72) + 1.2;
-        const sw = 1.6 + hash(anchor + k) * 2.6; // stripe thickness
+        const Q = qPoint(a, c, b, tt);
+        const Dg = qTangent(a, c, b, tt);
+        const nx = -Dg[1], ny = Dg[0];
+        const half = (w * 0.72) + 1.2 * ps;
+        const sw = (1.6 + hash(anchor + k) * 2.6) * ps; // stripe thickness
         const sc = pick(F_PALETTE, hash(anchor + "s" + k));
-        el.push(`<line x1="${(P[0] - nx * half).toFixed(1)}" y1="${(P[1] - ny * half).toFixed(1)}" x2="${(P[0] + nx * half).toFixed(1)}" y2="${(P[1] + ny * half).toFixed(1)}" stroke="${sc}" stroke-width="${sw.toFixed(1)}"/>`);
+        el.push(`<line x1="${(Q[0] - nx * half).toFixed(1)}" y1="${(Q[1] - ny * half).toFixed(1)}" x2="${(Q[0] + nx * half).toFixed(1)}" y2="${(Q[1] + ny * half).toFixed(1)}" stroke="${sc}" stroke-width="${sw.toFixed(1)}"/>`);
       }
     }
   }
 
   // Nodes: cubes in the artwork palette (strand-mapped), slight rotation; the
-  // striped caps trail out of them into the ribbons.
-  for (const n of g.nodes) {
-    const p = T(fit(n.pos));
-    const r = 3.4 + Math.sqrt(n.deg) * 1.9;
+  // striped caps trail out of them into the ribbons. Oblique paints far
+  // cubes first and scales them by the same perspective as the ribbons.
+  const nodesDrawn = [...g.nodes];
+  if (oblique) nodesDrawn.sort((a, b) => proj(a.pos)[3] - proj(b.pos)[3]);
+  for (const n of nodesDrawn) {
+    const p = P(n.pos);
+    const r = (3.4 + Math.sqrt(n.deg) * 1.9) * p[2];
     const rot = (hash(n.id) - 0.5) * 34;
     const fill = F_NODE[n.strand];
     if (oblique) {
-      el.push(`<rect x="${(p[0] - r).toFixed(1)}" y="${(p[1] - r).toFixed(1)}" width="${(r * 2).toFixed(1)}" height="${(r * 2).toFixed(1)}" fill="#1c2e24" opacity="0.45" transform="rotate(${rot.toFixed(0)} ${p[0].toFixed(1)} ${p[1].toFixed(1)}) translate(2.5,4)"/>`);
+      el.push(`<rect x="${(p[0] - r).toFixed(1)}" y="${(p[1] - r).toFixed(1)}" width="${(r * 2).toFixed(1)}" height="${(r * 2).toFixed(1)}" fill="#1c2e24" opacity="0.45" transform="rotate(${rot.toFixed(0)} ${p[0].toFixed(1)} ${p[1].toFixed(1)}) translate(${(2.5 * p[2]).toFixed(1)},${(4 * p[2]).toFixed(1)})"/>`);
     }
     el.push(`<rect x="${(p[0] - r).toFixed(1)}" y="${(p[1] - r).toFixed(1)}" width="${(r * 2).toFixed(1)}" height="${(r * 2).toFixed(1)}" fill="${fill}" transform="rotate(${rot.toFixed(0)} ${p[0].toFixed(1)} ${p[1].toFixed(1)})"/>`);
   }
 
   const label = oblique
-    ? "FIDENZA v2 · OBLIQUE — the ribbons and cubes lifted with thickness"
-    : "FIDENZA v2 · HEAD-ON — the provided colorway; cubes trail striped caps into clean ribbons";
+    ? "FIDENZA v3 · OBLIQUE — the same cloud orbited ~34°: ribbons fan apart along their real constellation depths"
+    : "FIDENZA v3 · HEAD-ON — the canonical angle where the composition resolves flat";
   return svg(W, H, el, label, F_BG, "#1e3a6e");
 }
 
@@ -214,4 +311,4 @@ writeFileSync(resolve(OUT, "ringers-head-on.svg"), ringers(false));
 writeFileSync(resolve(OUT, "ringers-oblique.svg"), ringers(true));
 writeFileSync(resolve(OUT, "fidenza-head-on.svg"), fidenza(false));
 writeFileSync(resolve(OUT, "fidenza-oblique.svg"), fidenza(true));
-console.log("v2 previews written to docs/previews/");
+console.log("v3 previews written to docs/previews/");
