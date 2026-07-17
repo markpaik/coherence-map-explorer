@@ -467,6 +467,13 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
 
     machine.setHover(null); // a stale hover must not linger under the backdrop
     machine.setStorying(true);
+    // Phones: the story card covers the lower ~40% of the screen — every scene
+    // fit rides the model up clear of it. Desktop card sits bottom-left; no lift.
+    rig.setFrameLiftPx(
+      window.matchMedia("(max-width: 720px)").matches
+        ? Math.round(window.innerHeight * 0.17)
+        : 0,
+    );
     // Narrative luminance: LIT nodes rise to chain-level brightness and lit
     // prereq edges glow and FLOW; everything outside the lit set is a dark
     // ghost, and damage darkens within the light. Contrast carries the story.
@@ -502,6 +509,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     edges.setVisibleMask(null);
     card.setExtra(null);
     loseYearSel = null;
+    rig.setFrameLiftPx(0);
     filters.recompute(); // reclaim the visibility buffers for the live filters
     machine.clearFocus({ silent: true });
     card.end();

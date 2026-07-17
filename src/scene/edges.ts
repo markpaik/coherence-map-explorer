@@ -78,8 +78,11 @@ const VERT = /* glsl */ `
 
     // Width (CSS px) per state — prereq widens more when hot/chain than related.
     float e = clamp(aEmphasis, 0.0, 5.0);
+    // wR[5] (related-to-focus) widened 1.3 → 1.9: the 2026-07 audit found 37%
+    // of focuses light a related standard whose only visible link is this
+    // dash — it must read as an explanation, not a subtlety.
     float wP[6] = float[](1.2, 1.2, 2.5, 2.5, 2.5, 1.4);
-    float wR[6] = float[](1.0, 1.0, 2.0, 2.0, 2.0, 1.3);
+    float wR[6] = float[](1.0, 1.0, 2.0, 2.0, 2.0, 1.9);
     int i0 = int(floor(e));
     int i1 = int(min(floor(e) + 1.0, 5.0));
     float f = fract(e);
@@ -125,7 +128,7 @@ const FRAG = /* glsl */ `
     float aP[6]    = float[](0.06, 0.35, 0.9, 0.9, 0.9, 0.40);  // prereq alpha
     float aR[6]    = float[](0.04, 0.18, 0.7, 0.7, 0.7, 0.90);  // related alpha
     float mulP[6]  = float[](1.0,  1.0,  2.2, 2.2, 2.2, 1.40);  // prereq HDR mul
-    float mulR[6]  = float[](1.0,  1.0,  1.3, 1.3, 1.3, 1.35);  // related HDR mul
+    float mulR[6]  = float[](1.0,  1.0,  1.3, 1.3, 1.3, 1.6);   // related HDR mul (5: audit)
     float flowP[6] = float[](0.0,  0.0,  1.0, 1.0, 1.0, 0.0);   // comet flow (prereq)
     float shimR[6] = float[](0.0,  0.0,  1.0, 0.0, 0.0, 1.0);   // shimmer (related)
 

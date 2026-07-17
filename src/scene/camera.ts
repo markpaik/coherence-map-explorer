@@ -53,6 +53,12 @@ export interface CameraRig {
    */
   setDriftScale(scale: number): void;
   /**
+   * Persistent vertical frame bias in CSS px: the framed content rides UP by
+   * this much on every subsequent fit. Stories on phones set ~17% of the
+   * viewport so the card doesn't cover the model; 0 restores.
+   */
+  setFrameLiftPx(px: number): void;
+  /**
    * Clear the idle-resume timer so drift may run on the very next unsuspended
    * frame (skipping the 20s post-interaction grace). Used when a story scene
    * settles into a hold: the constellation should breathe immediately, not 20s
@@ -92,7 +98,7 @@ export function createCameraRig(
   // (fitToSphere over-shoots badly on this wide flat layout: the sphere is
   // dominated by the x-extent, leaving the cloud small in frame).
   function frameHome(transition = false): void {
-    void controls.setFocalOffset(0, 0, 0, transition);
+    applyPanelOffset(0, transition);
     void controls.rotateTo(0.42, Math.PI / 2 - 0.22, transition);
     void controls.fitToBox(homeBox, transition, {
       paddingTop: 30,
@@ -104,7 +110,7 @@ export function createCameraRig(
   // Head-on framing for the flat Blueprint pose: reset azimuth/polar to look
   // straight down the +z axis at the plane, then fit its box from that angle.
   function frameHomeFrontOn(transition = false): void {
-    void controls.setFocalOffset(0, 0, 0, transition);
+    applyPanelOffset(0, transition);
     void controls.rotateTo(0, Math.PI / 2, transition);
     void controls.fitToBox(homeBox, transition, {
       paddingTop: 30,
@@ -114,15 +120,16 @@ export function createCameraRig(
     });
   }
 
-  frameHome(false);
-  controls.update(0);
-
   // Convert a screen-space nudge (CSS px) at the current fitted distance into
   // world units, then push the framed target LEFT of center via focalOffset.
   const _pos = new THREE.Vector3();
   const _tgt = new THREE.Vector3();
+  // A persistent vertical bias (CSS px): during stories on phones the card
+  // covers the lower ~40% of the screen, so the framed content rides UP by
+  // this much. 0 everywhere else. Applied by every fit (focusOn + frameHome).
+  let frameLiftPx = 0;
   function applyPanelOffset(panelOffsetPx: number, transition: boolean): void {
-    if (!panelOffsetPx) {
+    if (!panelOffsetPx && !frameLiftPx) {
       void controls.setFocalOffset(0, 0, 0, transition);
       return;
     }
@@ -132,8 +139,17 @@ export function createCameraRig(
     const worldPerPx =
       (2 * distance * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(window.innerHeight, 1);
     // +x focalOffset pans the camera right → the target rides to the LEFT.
-    void controls.setFocalOffset(panelOffsetPx * worldPerPx, 0, 0, transition);
+    // -y pans the camera down → the target rides UP (clear of the story card).
+    void controls.setFocalOffset(
+      panelOffsetPx * worldPerPx,
+      -frameLiftPx * worldPerPx,
+      0,
+      transition,
+    );
   }
+
+  frameHome(false);
+  controls.update(0);
 
   // -- idle drift (oscillation) ----------------------------------------
   // driftClock advances only while drifting, so pausing then resuming picks up
@@ -195,6 +211,9 @@ export function createCameraRig(
     },
     setDriftScale(scale) {
       driftScale = scale;
+    },
+    setFrameLiftPx(px) {
+      frameLiftPx = px;
     },
     resumeDriftNow() {
       lastInteraction = -Infinity;

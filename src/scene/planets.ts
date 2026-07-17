@@ -14,10 +14,10 @@
 import * as THREE from "three";
 
 const VERT = /* glsl */ `
-  varying vec3 vNrm;
-  varying vec3 vViewPos;
+  varying vec3 vNrm;      // WORLD-space normal: phases live in the world,
+  varying vec3 vViewPos;  // not on the camera — orbiting changes what you see
   void main() {
-    vNrm = normalize(normalMatrix * normal);
+    vNrm = normalize(mat3(modelMatrix) * normal);
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     vViewPos = -mv.xyz;
     gl_Position = projectionMatrix * mv;
@@ -34,7 +34,7 @@ const FRAG = /* glsl */ `
   uniform vec3 uColA;    // base
   uniform vec3 uColB;    // band / mottle
   uniform vec3 uColC;    // accent band / rim
-  uniform vec3 uLightDir; // view-space; z < 0 = lit from behind (crescent)
+  uniform vec3 uLightDir; // WORLD-space sun direction (rotates with the clock)
 
   varying vec3 vNrm;
   varying vec3 vViewPos;
@@ -123,25 +123,33 @@ interface BodySpec {
   colA: number;
   colB: number;
   colC: number;
-  /** View-space sun direction; z < 0 lights from behind → crescent phase. */
-  light: [number, number, number];
+  /** Phase offset (radians) added to the shared, clock-driven sun azimuth. */
+  phase: number;
+  /** Sun elevation for this body (y component before normalization). */
+  sunY: number;
 }
 
-// Palette stays in the scene's family: deep indigo/teal giant with a muted
-// warm accent band, a gray-lavender moon, a pale teal dwarf — and one
-// MEGAPLANET: far, far back yet still huge on screen and barely-there faint,
-// the size/contrast mismatch that reads as "colossal". Each body gets its own
-// eclipse phase: the giant a waxing sliver, the moon a waning one from the
-// other side, the dwarf almost fully dark, the megaplanet a hairline arc.
-// Larger + farther + fainter throughout: presence, not decoration.
+// Palette stays in the scene's family. Bodies surround the map on ALL sides
+// (orbit 180° and the sky is still inhabited), larger + farther + fainter:
+// presence, not decoration. Phases are WORLD-anchored and clock-driven — the
+// shared sun azimuth comes from the local time of day (one lap per 24h), so
+// a morning visit and an evening visit see different crescents, and orbiting
+// the map swings you around each eclipse like a real body in space. The
+// MEGAPLANET sits far south-low: a quarter of the sky at one-tenth opacity.
 const BODIES: BodySpec[] = [
-  { type: 0, pos: [900, 275, -830], radius: 95, alpha: 0.3, colA: 0x232a56, colB: 0x2e5763, colC: 0x8a7550, light: [-0.55, 0.3, -0.72] },
-  { type: 1, pos: [705, 185, -762], radius: 17, alpha: 0.27, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, light: [0.6, 0.25, -0.68] },
-  { type: 2, pos: [-985, -52, -625], radius: 30, alpha: 0.22, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, light: [0.2, 0.42, -0.88] },
-  // The megaplanet: ~2700 world units out, radius 700 — a quarter of the sky,
-  // at one-tenth opacity, lit by a hairline crescent along its upper limb.
-  { type: 0, pos: [460, -700, -2550], radius: 700, alpha: 0.11, colA: 0x1e2748, colB: 0x28454f, colC: 0x6f6a9a, light: [0.12, 0.52, -0.85] },
+  { type: 0, pos: [900, 275, -830], radius: 95, alpha: 0.3, colA: 0x232a56, colB: 0x2e5763, colC: 0x8a7550, phase: 0.4, sunY: 0.3 },
+  { type: 1, pos: [705, 185, -762], radius: 17, alpha: 0.27, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, phase: 3.3, sunY: 0.25 },
+  { type: 2, pos: [-985, -52, -625], radius: 30, alpha: 0.22, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, phase: 1.9, sunY: 0.42 },
+  // Behind the default camera, so a 180° orbit finds sky, not void.
+  { type: 0, pos: [880, -40, 760], radius: 66, alpha: 0.24, colA: 0x2e2a4e, colB: 0x4a3d55, colC: 0x8a7550, phase: 5.1, sunY: 0.2 },
+  { type: 2, pos: [-780, 140, 820], radius: 24, alpha: 0.2, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, phase: 2.6, sunY: 0.5 },
+  { type: 1, pos: [70, 360, 940], radius: 13, alpha: 0.22, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, phase: 4.2, sunY: 0.35 },
+  // The megaplanet: ~2700 world units out, radius 700 — a quarter of the sky.
+  { type: 0, pos: [460, -700, -2550], radius: 700, alpha: 0.11, colA: 0x1e2748, colB: 0x28454f, colC: 0x6f6a9a, phase: 0.9, sunY: 0.55 },
 ];
+
+// One lap of the sun per real day, seeded from the visitor's local clock.
+const DAY_SECONDS = 86400;
 
 export function createPlanets(): PlanetsHandle {
   const group = new THREE.Group();
@@ -149,6 +157,8 @@ export function createPlanets(): PlanetsHandle {
 
   const mats: THREE.ShaderMaterial[] = [];
   const geos: THREE.SphereGeometry[] = [];
+  const phases: number[] = [];
+  const sunYs: number[] = [];
   for (const b of BODIES) {
     const geo = new THREE.SphereGeometry(b.radius, 48, 32);
     const mat = new THREE.ShaderMaterial({
@@ -162,7 +172,7 @@ export function createPlanets(): PlanetsHandle {
         uColA: { value: new THREE.Color(b.colA) },
         uColB: { value: new THREE.Color(b.colB) },
         uColC: { value: new THREE.Color(b.colC) },
-        uLightDir: { value: new THREE.Vector3(...b.light) },
+        uLightDir: { value: new THREE.Vector3(0, 0.3, -1) },
       },
       transparent: true,
       depthWrite: false,
@@ -174,13 +184,34 @@ export function createPlanets(): PlanetsHandle {
     group.add(mesh);
     mats.push(mat);
     geos.push(geo);
+    phases.push(b.phase);
+    sunYs.push(b.sunY);
   }
+
+  // Seed the sun's azimuth from the visitor's local clock (runtime only — the
+  // build pipeline stays Date-free) and let scene time carry it onward at
+  // real-day rate. Reduced motion freezes scene time → a still, correct phase.
+  const now = new Date();
+  const dayFrac =
+    (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / DAY_SECONDS;
+  const bootAngle = dayFrac * Math.PI * 2;
+  const applySun = (t: number): void => {
+    const az = bootAngle + (t / DAY_SECONDS) * Math.PI * 2;
+    for (let i = 0; i < mats.length; i++) {
+      const a = az + phases[i];
+      (mats[i].uniforms.uLightDir.value as THREE.Vector3)
+        .set(Math.cos(a), sunYs[i], Math.sin(a))
+        .normalize();
+    }
+  };
+  applySun(0);
 
   let lastAmount = 1;
   return {
     group,
     setTime(t) {
       for (const m of mats) m.uniforms.uTime.value = t;
+      applySun(t);
     },
     setVisibleAmount(a) {
       if (a === lastAmount) return;

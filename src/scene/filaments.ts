@@ -7,26 +7,32 @@
 // ONE THREE.LineSegments (single draw call) over the 116 parent→child links.
 // Style is deliberately unlike a prereq ribbon: a plain straight hairline, no
 // bow, no flow comet, low-opacity cool violet-grey. Filaments are annotation,
-// not data: they render in BOTH poses always and never take structural damage
-// dimming (they are constant). They DO follow the geometry — endpoints are read
-// from the nodes' live instance positions, so they glide through a pose morph —
-// and they ghost with visibility: if either endpoint is filtered out or outside
-// a story spotlight (aVisible = 0), the segment collapses to nothing.
+// not data — but they BRIGHTEN when both of their endpoints are emphasized
+// (focus/chain/related/hover): the 2026-07 legibility audit found that every
+// rolled-up parent focus (all 13 edgeless parents, e.g. 4.NF.B.3, 3.MD.C.7)
+// lit a neighborhood whose ONLY geometric link to the clicked dot was an
+// unlit filament, so the lit region read as unexplained. The lit filament is
+// that missing visual hand-off. They still never take structural damage.
+// Endpoints are read from the nodes' live instance positions, so they glide
+// through a pose morph — and they ghost with visibility: if either endpoint
+// is filtered out or outside a story's lit set (aVisible = 0), the segment
+// collapses to nothing.
 
 import * as THREE from "three";
 import type { GraphCore } from "../data";
 import type { NodesHandle } from "./nodes";
 
-const FILAMENT_COLOR = 0x34315e; // cool violet-grey; unmistakably not a strand hue
+const DIM = new THREE.Color(0x34315e).multiplyScalar(0.22); // baked hairline
+const LIT = new THREE.Color(0x9a94d8).multiplyScalar(0.85); // both ends lit
 
 export interface FilamentsHandle {
   /** The single LineSegments draw call — add it to the scene. */
   object: THREE.LineSegments;
   /**
-   * Recompute every segment's endpoints (from the nodes' current positions) and
-   * ghost state (from aVisible) in one pass. Cheap at 116 segments; call it each
-   * frame the scene renders so filaments track pose morphs, filters, and story
-   * spotlights without threading a callback through every mutation site.
+   * Recompute every segment's endpoints (from the nodes' current positions),
+   * ghost state (from aVisible), and lit state (from aEmphasis — a filament
+   * brightens when BOTH its endpoints are emphasized) in one pass. Cheap at
+   * 116 segments; call it each frame the scene renders.
    */
   update(): void;
   dispose(): void;
@@ -48,16 +54,23 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
 
   const segCount = pairs.length;
   const positions = new Float32Array(segCount * 6); // 2 verts × xyz per segment
+  const colors = new Float32Array(segCount * 6); // 2 verts × rgb per segment
   const geometry = new THREE.BufferGeometry();
   const posAttr = new THREE.BufferAttribute(positions, 3);
   posAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", posAttr);
+  const colAttr = new THREE.BufferAttribute(colors, 3);
+  colAttr.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("color", colAttr);
 
+  // Additive + vertex colors: the dim state stays the familiar hairline; the
+  // lit state glows like a soft lavender thread without needing opacity swaps.
   const material = new THREE.LineBasicMaterial({
-    color: FILAMENT_COLOR,
+    vertexColors: true,
     transparent: true,
-    opacity: 0.22,
+    opacity: 1,
     depthWrite: false,
+    blending: THREE.AdditiveBlending,
   });
 
   const object = new THREE.LineSegments(geometry, material);
@@ -67,6 +80,7 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
 
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
+  const emphasis = nodes.emphasisAttr.array as Float32Array;
 
   function update(): void {
     for (let s = 0; s < segCount; s++) {
@@ -86,8 +100,22 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
       positions[off + 3] = b.x;
       positions[off + 4] = b.y;
       positions[off + 5] = b.z;
+      // Lit when BOTH endpoints are emphasized (≥ 2 = hover/focus/chain/related;
+      // fractional eases blend the color with them).
+      const e = Math.min(emphasis[pi], emphasis[ci]);
+      const k = Math.min(1, Math.max(0, e - 1));
+      const r = DIM.r + (LIT.r - DIM.r) * k;
+      const g = DIM.g + (LIT.g - DIM.g) * k;
+      const bl = DIM.b + (LIT.b - DIM.b) * k;
+      colors[off] = r;
+      colors[off + 1] = g;
+      colors[off + 2] = bl;
+      colors[off + 3] = r;
+      colors[off + 4] = g;
+      colors[off + 5] = bl;
     }
     posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
   }
 
   update();
