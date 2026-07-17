@@ -108,7 +108,7 @@ describe("story scripts validate against the graph", () => {
   const sceneSelectors = (scene: (typeof STORIES)[number]["scenes"][number]): string[] => {
     const sels: string[] = [];
     if (scene.state?.missed) sels.push(...scene.state.missed);
-    if (scene.state?.spotlight) sels.push(...scene.state.spotlight);
+    if (scene.state?.lit) sels.push(...scene.state.lit);
     if (scene.camera && Array.isArray(scene.camera.fit)) sels.push(...scene.camera.fit);
     return sels;
   };

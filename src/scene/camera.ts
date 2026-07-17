@@ -33,6 +33,11 @@ export interface CameraRig {
   /** Return to the heroic landing framing and clear any panel focal offset. */
   frameHome(transition?: boolean): void;
   /**
+   * Frame the current home bounds head-on: azimuth 0, polar π/2, so a flat plane
+   * (the Blueprint pose, z=0) faces the camera squarely. Orbit stays enabled.
+   */
+  frameHomeFrontOn(transition?: boolean): void;
+  /**
    * Swap the "home" cloud bounds (called after a pose morph) so frameHome and
    * the tour's wide shots refit to whichever pose is now on screen. Also rescales
    * the dolly min/max distance to the new cloud radius.
@@ -41,6 +46,12 @@ export interface CameraRig {
   /** Clear the panel focal offset (used when the panel closes with no reframe). */
   clearFocalOffset(transition?: boolean): void;
   setDriftEnabled(on: boolean): void;
+  /**
+   * Scale the idle-drift amplitude (1 = the full ±18° sway). The flat
+   * Blueprint pose sets ~0.2 so the plane breathes without leaning away from
+   * its front-on reading; the other poses restore 1.
+   */
+  setDriftScale(scale: number): void;
   /**
    * Clear the idle-resume timer so drift may run on the very next unsuspended
    * frame (skipping the 20s post-interaction grace). Used when a story scene
@@ -90,6 +101,19 @@ export function createCameraRig(
       paddingRight: 40,
     });
   }
+  // Head-on framing for the flat Blueprint pose: reset azimuth/polar to look
+  // straight down the +z axis at the plane, then fit its box from that angle.
+  function frameHomeFrontOn(transition = false): void {
+    void controls.setFocalOffset(0, 0, 0, transition);
+    void controls.rotateTo(0, Math.PI / 2, transition);
+    void controls.fitToBox(homeBox, transition, {
+      paddingTop: 30,
+      paddingBottom: 80,
+      paddingLeft: 40,
+      paddingRight: 40,
+    });
+  }
+
   frameHome(false);
   controls.update(0);
 
@@ -117,10 +141,11 @@ export function createCameraRig(
   // the sine, so the oscillation rides on top of wherever the user left the
   // camera rather than yanking it back to a fixed azimuth.
   let driftEnabled = !opts.reducedMotion;
+  let driftScale = 1; // Blueprint quiets the sway to ~0.2 (see setDriftScale)
   let lastInteraction = -Infinity; // drift immediately on load
   let driftClock = 0;
   const swayAt = (t: number): number =>
-    DRIFT_AMPLITUDE_RAD * Math.sin((t / DRIFT_PERIOD_S) * Math.PI * 2);
+    DRIFT_AMPLITUDE_RAD * driftScale * Math.sin((t / DRIFT_PERIOD_S) * Math.PI * 2);
   const onInteract = (): void => {
     lastInteraction = performance.now();
   };
@@ -154,6 +179,9 @@ export function createCameraRig(
     frameHome(transition = true) {
       frameHome(transition);
     },
+    frameHomeFrontOn(transition = true) {
+      frameHomeFrontOn(transition);
+    },
     setHomeBounds(box, sphere) {
       homeBox = box.clone();
       homeSphere = sphere.clone();
@@ -164,6 +192,9 @@ export function createCameraRig(
     },
     setDriftEnabled(on) {
       driftEnabled = on;
+    },
+    setDriftScale(scale) {
+      driftScale = scale;
     },
     resumeDriftNow() {
       lastInteraction = -Infinity;

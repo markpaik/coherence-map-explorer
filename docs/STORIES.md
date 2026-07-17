@@ -24,12 +24,13 @@ A story is a JSON script (src/stories/*.json) of scenes:
   scenes: [{
     year,               // timeline label: "2019", "Grade 3", etc.
     state: {            // graph state, all optional
-      strong: [sel],    // selectors: codes, grades ("grade:3"), strands,
-      missed: [sel],    //   domain ("domain:3.NF"), ancestry("code")/
-      damage: true,     //   descendants("code")
-      spotlight: [sel]  // aVisible ghosting for everything else
+      lit: [sel],       // the ON set; everything else ghosts dark
+      missed: [sel],    // selectors: codes, grades ("grade:3"), strands,
+      damage: true,     //   domain ("domain:3.NF"), ancestry("code")/
+      focus: code       //   descendants("code")
     },
-    camera: { fit: sel | "all", offset?: bool },
+    reveal: { dir: "ltr" | "rtl", ms? },  // directional turn-on sweep
+    camera: { fit: sel | "all", pose?: 0 | 1 | 2 },
     card: { title, body, cite? },
     holdMs, transition: "lapse" | "cut"
   }] }
@@ -60,19 +61,24 @@ shot, and a coda that hands agency back to the viewer (5-7 scenes each).
 Extends the emphasis system with a per-node damage scalar (new instanced
 float `aDamage` on nodes; edges inherit max of endpoints):
 
+**Dark baseline (grammar v3).** While a story runs, every node and edge
+defaults to the ghost state the filters use (dark shrunken speck, 0.06-alpha
+filament). Each scene declares an explicit `lit` set — those turn ON — and an
+optional `reveal` sweeps the turn-on across grade columns (`ltr` lights early
+grades first, `rtl` lights late grades first) instead of landing all at once.
+Off, dim, and on are the whole vocabulary; contrast carries the story.
+
 | State | Look |
 |---|---|
-| strong / learned | story lift: raised to chain-level brightness (×1.9 floor under the shimmer, `max()` so emphasis never stacks); the brighter strand tones cross the bloom threshold and halo |
-| missed (damage = 1) | near-dark husk: 0.25 brightness, desaturated 80%, slow ember pulse in deep red-amber `#4a1f14` -> `#7a3520` |
-| challenged (0 < damage < 1) | brightness and saturation lerp toward husk by damage; a faint irregular flicker (per-node phase, amplitude ∝ damage) reads as "struggling, not dead"; the story lift dies by damage ≈ 0.7 |
-| unaffected | story-lifted like strong/learned; in contrast with damage around it, it reads as hopeful |
+| lit / learned | story lift: chain-level brightness (×1.9 floor under the shimmer, `max()` so emphasis never stacks); bright strand tones cross the bloom threshold and halo; prereq edges between lit nodes glow with directional flow comets |
+| unlit (outside the scene's `lit` set) | ghost: dark speck, 0.06-alpha edge filament, no glow, no comets |
+| missed (damage = 1) | OFF: a near-black body holding its place (`#1c0b07` -> `#38180e` slow pulse, only bright enough to find the wound), full size, never blooms |
+| challenged (0 < damage < 1) | dims toward the husk by damage, with a faint irregular flicker (per-node phase, peaks at damage 0.5) that reads as "struggling, not dead"; the story lift dies by damage ≈ 0.7 |
 
-Edges carry the same narrative: while a story plays, HEALTHY prerequisite
-edges rise toward the chain look (0.65 alpha, ×1.8 HDR, directional flow
-comets) and related pairs shimmer — the constellation is visibly alive with
-learning. Damage attenuates the edge lift on the same curve as nodes, so a
-broken lineage's rivers stop flowing and cool to ember while everything
-around them still streams.
+Damage composes WITHIN the lit set: a scene lights the years that happened,
+and the missed standards inside them go dark against that light. Both the
+node lift and the edge glow are gated by the lit mask, so nothing outside
+the story's frame competes for the eye.
 
 Damage never uses the strand hues for the ember (colorblind-safe: ember is a
 luminance+shape change, not only a hue change; flicker is the secondary

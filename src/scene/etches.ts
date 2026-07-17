@@ -40,10 +40,13 @@ export interface EtchesHandle {
   /** Resolves when fonts have loaded and every marker is built. */
   ready: Promise<void>;
   /**
-   * Slide every marker between its two poses: 0 = constellation (marker),
-   * 1 = the Ascent (marker2). The pose driver calls this with the global eased
-   * progress every morph frame (no per-marker stagger). Markers built later
-   * (async font load) adopt the current pose so they never pop in at pose A.
+   * Slide every marker along the pose axis p ∈ [0,2]: 0 = constellation (marker),
+   * 1 = the Ascent (marker2), 2 = the Blueprint (marker3). Positions lerp between
+   * the two bracketing poses; facing stays at the camera's home azimuth through
+   * poses 0↔1 (both stand along the ground line) and rotates head-on (yaw → 0) as
+   * it crosses into the flat Blueprint. The pose driver calls this with the global
+   * eased progress every morph frame. Markers built later (async font load) adopt
+   * the current pose so they never pop in at the wrong place.
    */
   setPose(p: number): void;
   dispose(): void;
@@ -62,15 +65,43 @@ export function createEtches(
   const sideMat = new THREE.MeshBasicMaterial({ color: SIDE_COLOR });
   const loader = new FontLoader();
 
-  // Each marker remembers both pose positions so setPose can lerp it. The z of
-  // both poses is 0, so the outward-facing yaw is pose-invariant (fixed once).
+  // Each marker remembers all three pose positions so setPose can lerp it.
   interface Marker {
     mesh: THREE.Mesh;
-    a: [number, number, number];
-    b: [number, number, number];
+    a: [number, number, number]; // constellation
+    b: [number, number, number]; // the Ascent
+    c: [number, number, number]; // the Blueprint
   }
   const markers: Marker[] = [];
-  let pose = 0; // 0 = constellation, 1 = the Ascent
+  let pose = 0; // 0 = constellation, 1 = the Ascent, 2 = the Blueprint
+
+  // Place one marker at the current pose value (positions lerp between the two
+  // bracketing poses; facing holds at the home azimuth through 0↔1, then rotates
+  // to head-on — yaw 0 — as it crosses into the flat Blueprint at pose 2).
+  function placeMarker(mk: Marker): void {
+    const p = pose;
+    let from: [number, number, number];
+    let to: [number, number, number];
+    let t: number;
+    let yaw: number;
+    if (p <= 1) {
+      from = mk.a;
+      to = mk.b;
+      t = p;
+      yaw = cameraAzimuth;
+    } else {
+      from = mk.b;
+      to = mk.c;
+      t = p - 1;
+      yaw = cameraAzimuth * (2 - p); // cameraAzimuth at pose 1 → 0 at pose 2
+    }
+    mk.mesh.position.set(
+      from[0] + (to[0] - from[0]) * t,
+      from[1] + (to[1] - from[1]) * t,
+      from[2] + (to[2] - from[2]) * t,
+    );
+    mk.mesh.rotation.y = yaw;
+  }
 
   function addMarker(
     font: Font,
@@ -78,6 +109,7 @@ export function createEtches(
     size: number,
     marker: [number, number, number],
     marker2: [number, number, number] | undefined,
+    marker3: [number, number, number] | undefined,
   ): void {
     const geometry = new TextGeometry(text, {
       font,
@@ -96,27 +128,20 @@ export function createEtches(
     const mesh = new THREE.Mesh(geometry, [faceMat, sideMat]);
     const a = marker;
     const b = marker2 ?? marker; // no pose-B target ⇒ stays put
+    const c = marker3 ?? b; // no pose-C target ⇒ holds the Ascent placement
+    const mk: Marker = { mesh, a, b, c };
     // Adopt the current pose immediately (markers may load mid-morph or while
-    // already in the Ascent) so nothing pops in at the wrong place.
-    mesh.position.set(
-      a[0] + (b[0] - a[0]) * pose,
-      a[1] + (b[1] - a[1]) * pose,
-      a[2] + (b[2] - a[2]) * pose,
-    );
-    // Stand upright, reading face turned to the camera's home azimuth. The
-    // markers line the ground plane in both poses, so one fixed facing keeps
-    // every label legible; per-marker radial "face outward" logic mirrored
-    // the text on the far side (a spiral-era leftover caught at the art gate).
-    mesh.rotation.y = cameraAzimuth;
+    // already in the Ascent / Blueprint) so nothing pops in at the wrong place.
+    placeMarker(mk);
     group.add(mesh);
-    markers.push({ mesh, a, b });
+    markers.push(mk);
   }
 
   const ready = (async () => {
     try {
       const gradeFont = await loader.loadAsync(GRADE_FONT_URL);
       for (const g of grades) {
-        if (g.marker) addMarker(gradeFont, g.id, GRADE_SIZE, g.marker, g.marker2);
+        if (g.marker) addMarker(gradeFont, g.id, GRADE_SIZE, g.marker, g.marker2, g.marker3);
       }
       // Course labels need A,B,D,E,G,I,L,M,N,O,R,T,V,Y + space — a separate
       // subset face. If it is missing (older build), fall back to initials
@@ -124,11 +149,11 @@ export function createEtches(
       try {
         const courseFont = await loader.loadAsync(COURSE_FONT_URL);
         for (const c of courses)
-          addMarker(courseFont, COURSE_TEXT[c.id] ?? c.label.toUpperCase(), COURSE_SIZE, c.marker, c.marker2);
+          addMarker(courseFont, COURSE_TEXT[c.id] ?? c.label.toUpperCase(), COURSE_SIZE, c.marker, c.marker2, c.marker3);
       } catch {
         console.warn("[cme] course typeface missing; falling back to short marks");
         for (const c of courses)
-          addMarker(gradeFont, c.id.replace(/[^A-Z0-9]/g, ""), COURSE_SIZE, c.marker, c.marker2);
+          addMarker(gradeFont, c.id.replace(/[^A-Z0-9]/g, ""), COURSE_SIZE, c.marker, c.marker2, c.marker3);
       }
     } catch (err) {
       // Markers are ornament — a font failure must never take down the scene.
@@ -141,13 +166,7 @@ export function createEtches(
     ready,
     setPose(p) {
       pose = p;
-      for (const { mesh, a, b } of markers) {
-        mesh.position.set(
-          a[0] + (b[0] - a[0]) * p,
-          a[1] + (b[1] - a[1]) * p,
-          a[2] + (b[2] - a[2]) * p,
-        );
-      }
+      for (const mk of markers) placeMarker(mk);
     },
     dispose() {
       for (const g of geometries) g.dispose();

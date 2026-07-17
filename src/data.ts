@@ -20,6 +20,8 @@ export interface GraphGrade {
   marker?: [number, number, number];
   /** Etch position in pose B / the Ascent (K-8 only; along the massif ground line). */
   marker2?: [number, number, number];
+  /** Etch position in pose C / the Blueprint (K-8 only; under the grade column). */
+  marker3?: [number, number, number];
 }
 
 export interface GraphNode {
@@ -38,6 +40,9 @@ export interface GraphNode {
   /** Pose B / "the Ascent" position: x = same K→HS timeline, y = dependency
    *  depth * 13 - 90, z = compressed cross-section. */
   pos2: [number, number, number];
+  /** Pose C / "the Blueprint" position: flat grade-column circuit board. x = one
+   *  of 13 column centers (K,1..8,A1,G,A2,ADV), y = row within the column, z = 0. */
+  pos3: [number, number, number];
   /** Dependency-chain depth (0 = foundation … up to 30 = deepest chain). */
   depth: number;
   /** High-school course memberships (e.g. ["A1","A2"]); K-8 nodes omit it. */
@@ -53,6 +58,7 @@ export interface GraphCourse {
   label: string; // "Algebra I" …
   marker: [number, number, number]; // etch position in pose A / constellation
   marker2: [number, number, number]; // etch position in pose B / the Ascent
+  marker3: [number, number, number]; // etch position in pose C / the Blueprint
 }
 
 export interface GraphEdge {
@@ -61,6 +67,7 @@ export interface GraphEdge {
   k: 0 | 1; // 0 = prerequisite (directed), 1 = related (undirected)
   c: [number, number, number]; // baked quadratic-bezier control point (pose A)
   c2: [number, number, number]; // baked quadratic-bezier control point (pose B)
+  c3: [number, number, number]; // baked quadratic-bezier control point (pose C)
 }
 
 export interface GraphCore {

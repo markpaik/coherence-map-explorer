@@ -140,6 +140,7 @@ interface OutNode {
   deg: number;
   pos: [number, number, number]; // pose A: the constellation
   pos2: [number, number, number]; // pose B: the Ascent (y = dependency depth)
+  pos3: [number, number, number]; // pose C: the Blueprint (flat grade-column circuit board)
   /** Longest prerequisite chain beneath this standard (0 = foundation). */
   depth: number;
   /** Sub-standard ids (e.g. 4.NF.B.3 -> its .a-.d), code-derived; omitted when none. */
@@ -155,6 +156,7 @@ interface OutEdge {
   k: 0 | 1;
   c: [number, number, number]; // bezier control, constellation pose
   c2: [number, number, number]; // bezier control, ascent pose
+  c3: [number, number, number]; // bezier control, blueprint pose
 }
 interface GraphCore {
   meta: {
@@ -171,6 +173,7 @@ interface GraphCore {
     x1: number;
     marker?: [number, number, number]; // constellation pose etch
     marker2?: [number, number, number]; // ascent pose etch
+    marker3?: [number, number, number]; // blueprint pose etch (under the grade column)
   }[];
   /** HS course arc labels (Appendix A traditional pathway), markers per pose. */
   courses: {
@@ -178,6 +181,7 @@ interface GraphCore {
     label: string;
     marker: [number, number, number];
     marker2: [number, number, number];
+    marker3: [number, number, number]; // blueprint pose etch (under the course column)
   }[];
   strands: Record<Strand, { label: string }>;
   nodes: OutNode[];
@@ -527,6 +531,17 @@ interface Params {
   velocityDecay: number;
   ctrl: { push: number; jitter: number; nearAxisEpsilon: number };
   ascent: { yStep: number; yBase: number; zScale: number };
+  blueprint: {
+    columnWidth: number;
+    rowGapMax: number;
+    targetColumnHeight: number;
+    isolatedGap: number;
+    barycenterSweeps: number;
+    blockGapFactor: number;
+    sameColumnBow: number;
+    crossColumnSourceBias: number;
+    labelDrop: number;
+  };
 }
 
 interface SimNode {
@@ -978,14 +993,289 @@ export function buildGraph(): BuildResult {
     pos2.set(id, [p[0], A.yBase + depthById.get(id)! * A.yStep, p[2] * A.zScale]);
   }
 
-  // Markers, both poses: constellation etches stand below the bands (as
-  // before); ascent etches stand along the ground line of the massif.
-  const gradeMarkers = new Map<Grade, { a: [number, number, number]; b: [number, number, number] }>();
+  // Clean upward motion (the Ascent leans structured): standards align ABOVE
+  // their prerequisites, so edges run near-vertical and the climb reads at a
+  // glance. Each node's x pulls toward the weighted mean x of its prereq
+  // neighbors on other layers (weight 1 / depth-span), blended over 6
+  // alternating bottom-up / top-down sweeps, clamped to its grade band (HS:
+  // its course sub-column) so the K–HS timeline and the course projection
+  // both hold exactly. A small deterministic per-node fan (±5, hashed from
+  // the id) keeps sibling stacks organic instead of fused, and a per-layer
+  // 1D relax enforces a minimum horizontal gap. Fully deterministic.
+  {
+    const clampRange = new Map<string, [number, number]>();
+    for (const n of simNodes) {
+      let lo: number, hi: number;
+      if (n.grade === "HS") [lo, hi] = subColInterval(n.band, n.subCol);
+      else {
+        lo = n.band.x0;
+        hi = n.band.x1;
+      }
+      clampRange.set(n.id, [lo + margin, hi - margin]);
+    }
+    const nbr2 = new Map<string, string[]>();
+    for (const id of validIds) nbr2.set(id, []);
+    for (const e of prereq) {
+      nbr2.get(e.s)!.push(e.t);
+      nbr2.get(e.t)!.push(e.s);
+    }
+    const layers = new Map<number, string[]>();
+    for (const id of validIds) {
+      const d = depthById.get(id)!;
+      if (!layers.has(d)) layers.set(d, []);
+      layers.get(d)!.push(id);
+    }
+    for (const arr of layers.values()) arr.sort(numAsc);
+    const layerKeys = [...layers.keys()].sort((a, b) => a - b);
+    for (let sweep = 0; sweep < 6; sweep++) {
+      const order = sweep % 2 === 0 ? layerKeys : [...layerKeys].reverse();
+      for (const d of order) {
+        for (const id of layers.get(d)!) {
+          const range = clampRange.get(id);
+          if (!range) continue; // halo/isolated nodes sit outside the sim bands
+          let sum = 0;
+          let wsum = 0;
+          for (const nb of nbr2.get(id)!) {
+            const span = Math.abs(depthById.get(nb)! - d);
+            if (span === 0) continue;
+            const w = 1 / span;
+            sum += pos2.get(nb)![0] * w;
+            wsum += w;
+          }
+          if (wsum === 0) continue;
+          const p = pos2.get(id)!;
+          p[0] = Math.min(range[1], Math.max(range[0], p[0] * 0.4 + (sum / wsum) * 0.6));
+        }
+      }
+    }
+    // Deterministic sibling fan (id hash → ±5), then per-layer min-gap relax.
+    const fan = (id: string): number => {
+      let h = 0;
+      for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+      return ((h % 1000) / 1000 - 0.5) * 10;
+    };
+    const MIN_GAP = 7;
+    for (const d of layerKeys) {
+      const banded = layers.get(d)!.filter((id) => clampRange.has(id));
+      for (const id of banded) {
+        const p = pos2.get(id)!;
+        const [lo, hi] = clampRange.get(id)!;
+        p[0] = Math.min(hi, Math.max(lo, p[0] + fan(id)));
+      }
+      const arr = [...banded].sort(
+        (a, b) => pos2.get(a)![0] - pos2.get(b)![0] || numAsc(a, b),
+      );
+      for (let i = 1; i < arr.length; i++) {
+        const prev = pos2.get(arr[i - 1])!;
+        const cur = pos2.get(arr[i])!;
+        if (cur[0] - prev[0] < MIN_GAP) cur[0] = prev[0] + MIN_GAP;
+      }
+      for (const id of arr) {
+        const p = pos2.get(id)!;
+        const [lo, hi] = clampRange.get(id)!;
+        if (p[0] < lo) p[0] = lo;
+        else if (p[0] > hi) p[0] = hi;
+      }
+    }
+  }
+
+  // --- 7c. Pose C: the Blueprint -------------------------------------------
+  // A flat 2D circuit board echoing Achieve the Core's original coherence map:
+  // 13 grade/course columns left to right, standards stacked vertically inside
+  // each, edges flowing between columns on the z=0 plane. Columns are K, 1..8,
+  // then the four Appendix A courses (Algebra I, Geometry, Algebra II, Advanced)
+  // — the 23 dual Algebra I & II standards live in the Algebra I column only
+  // (courses[0]). Within a column, nodes seed in domain-then-code order, then a
+  // barycenter heuristic (4 alternating sweeps) reorders rows to reduce edge
+  // crossings, after which rows are re-spaced uniformly and centered on y=0.
+  // The 74 edgeless standards drop to the bottom of their column past a fixed
+  // gap, like the unconnected boxes in the original map. Everything is a pure
+  // function of the graph + params — no randomness, byte-identical every build.
+  const B = params.blueprint;
+  const BP_COURSE_ORDER = COURSE_ORDER; // ["A1","G","A2","ADV"] → columns 9..12
+  const N_COLS = 9 + BP_COURSE_ORDER.length; // K,1..8 (0..8) + 4 courses (9..12)
+  function blueprintColumn(id: string): number {
+    const m = meta.get(id)!;
+    if (m.grade !== "HS") return GRADE_ORDER.indexOf(m.grade); // 0..8
+    const primary = hsCoursesOf(m.code)[0];
+    return 9 + BP_COURSE_ORDER.indexOf(primary as (typeof BP_COURSE_ORDER)[number]);
+  }
+  // Whole row of columns centered on x=0; each column columnWidth apart.
+  function colCenterX(c: number): number {
+    return (c - (N_COLS - 1) / 2) * B.columnWidth;
+  }
+
+  // Partition every standard into its column, split connected (participates in
+  // the barycenter ordering) from edgeless (stacks at the bottom). Both seed in
+  // code order — within one column all codes share a grade, so code order IS
+  // domain-then-code order (domain is the code's leading distinguishing part).
+  const byCode = (a: string, b: string): number =>
+    codeById.get(a)!.localeCompare(codeById.get(b)!);
+  const colConnected: string[][] = Array.from({ length: N_COLS }, () => []);
+  const colIsolated: string[][] = Array.from({ length: N_COLS }, () => []);
+  const bpColOf = new Map<string, number>();
+  for (const id of sortedIds) {
+    const c = blueprintColumn(id);
+    bpColOf.set(id, c);
+    (deg.get(id) === 0 ? colIsolated : colConnected)[c].push(id);
+  }
+  for (const arr of colConnected) arr.sort(byCode);
+  for (const arr of colIsolated) arr.sort(byCode);
+
+  // Within-column order is STRUCTURED, then optimized — two layers of intent:
+  //
+  // 1. DOMAIN BLOCKS (the structure): each column groups its standards by
+  //    domain in canonical code order (OA before NBT before NF …), exactly how
+  //    the original coherence map lists a grade's standards. Vertical position
+  //    therefore MEANS something: which domain band you are in.
+  // 2. BARYCENTER WITHIN BLOCKS (the optimization): inside each domain block,
+  //    rows sort toward the weighted mean row of their prerequisite neighbors —
+  //    every neighbor counts, weighted 1/column-distance (an edge to the next
+  //    column pulls hardest, a grade-3→grade-7 edge pulls at 1/4), same-column
+  //    neighbors at 0.5 — so edges straighten as far as the domain structure
+  //    allows. Sweeps alternate L→R / R→L; ties break by code. Deterministic.
+  const bpDomainOf = (id: string): string => {
+    const code = codeById.get(id)!;
+    const dot = code.indexOf(".");
+    const head = code.slice(0, dot);
+    return head.includes("-") ? head : code.split(".")[1]; // HS "F-IF" | K-8 "OA"
+  };
+  const prereqNbr = new Map<string, string[]>();
+  for (const id of validIds) prereqNbr.set(id, []);
+  for (const e of prereq) {
+    prereqNbr.get(e.s)!.push(e.t);
+    prereqNbr.get(e.t)!.push(e.s);
+  }
+  // Domain blocks per column, in canonical (code-sorted) order of appearance.
+  const colBlocks: string[][][] = colConnected.map((arr) => {
+    const blocks: string[][] = [];
+    const byDomain = new Map<string, string[]>();
+    for (const id of arr) {
+      const d = bpDomainOf(id);
+      if (!byDomain.has(d)) {
+        const block: string[] = [];
+        byDomain.set(d, block);
+        blocks.push(block);
+      }
+      byDomain.get(d)!.push(id);
+    }
+    return blocks;
+  });
+  const rowOf = new Map<string, number>();
+  const commitRows = (c: number): void => {
+    let r = 0;
+    for (const block of colBlocks[c]) for (const id of block) rowOf.set(id, r++);
+  };
+  for (let c = 0; c < N_COLS; c++) commitRows(c);
+  for (let sweep = 0; sweep < B.barycenterSweeps; sweep++) {
+    const cols =
+      sweep % 2 === 0
+        ? Array.from({ length: N_COLS }, (_, i) => i)
+        : Array.from({ length: N_COLS }, (_, i) => N_COLS - 1 - i);
+    for (const c of cols) {
+      const key = new Map<string, number>();
+      for (const block of colBlocks[c]) {
+        for (const id of block) {
+          let sum = 0;
+          let wsum = 0;
+          for (const nb of prereqNbr.get(id)!) {
+            const nc = bpColOf.get(nb);
+            if (nc === undefined || rowOf.get(nb) === undefined) continue;
+            const span = Math.abs(nc - c);
+            const w = span === 0 ? 0.5 : 1 / span;
+            sum += rowOf.get(nb)! * w;
+            wsum += w;
+          }
+          key.set(id, wsum > 0 ? sum / wsum : rowOf.get(id)!);
+        }
+        block.sort((a, b) => key.get(a)! - key.get(b)! || byCode(a, b));
+      }
+      commitRows(c);
+    }
+  }
+  // Flatten the final block order back into the column lists.
+  for (let c = 0; c < N_COLS; c++) colConnected[c] = colBlocks[c].flat();
+
+  // Re-space rows uniformly: rowGap sized so the tallest column's connected
+  // stack spans ~targetColumnHeight, capped at rowGapMax. Each column's stack
+  // is centered on y=0. Edgeless nodes sit in a dim SIDE GUTTER inside the
+  // column (offset right, stacked from the column top) — the original map
+  // lists its unconnected standards alongside the column the same way — so
+  // every column's bottom is its connected body and the grade-label rail can
+  // sit tight beneath all of them on one line.
+  let maxColumnCount = 0;
+  for (const arr of colConnected) maxColumnCount = Math.max(maxColumnCount, arr.length);
+  const rowGap = Math.min(B.rowGapMax, B.targetColumnHeight / Math.max(1, maxColumnCount));
+  // A visible breath between domain blocks, so the bands read as bands.
+  const blockGap = rowGap * B.blockGapFactor;
+  const gutterX = 18; // gutter lane offset from the column center (band is ±40)
+  const pos3 = new Map<string, [number, number, number]>();
+  const colMinY = new Array<number>(N_COLS).fill(0);
+  for (let c = 0; c < N_COLS; c++) {
+    const arr = colConnected[c];
+    const k = arr.length;
+    const cx = colCenterX(c);
+    const nBlocks = colBlocks[c].length;
+    const totalH = k > 0 ? (k - 1) * rowGap + Math.max(0, nBlocks - 1) * blockGap : 0;
+    const topY = totalH / 2; // centered on 0
+    let minY = k > 0 ? -topY : 0;
+    {
+      let r = 0;
+      colBlocks[c].forEach((block, bi) => {
+        for (const id of block) {
+          pos3.set(id, [cx, topY - (r * rowGap + bi * blockGap), 0]);
+          r++;
+        }
+      });
+    }
+    // Gutter lane: half-step offset so gutter dots interleave beside rows
+    // rather than pairing with them. Gutter counts are always smaller than
+    // the connected stack, so the gutter never deepens the column.
+    colIsolated[c].forEach((id, j) => {
+      const y = topY - (j + 0.5) * rowGap;
+      pos3.set(id, [cx + gutterX, y, 0]);
+      if (y < minY) minY = y;
+    });
+    colMinY[c] = minY;
+  }
+
+  // Blueprint sanity: every node's x is exactly its column center, z is flat,
+  // and no two nodes in a column share a (rounded, i.e. emitted) lane+y slot
+  // (connected stack and isolated gutter are separate lanes at distinct x).
+  for (let c = 0; c < N_COLS; c++) {
+    const cx = round2(colCenterX(c));
+    const gx = round2(colCenterX(c) + gutterX);
+    const slots = new Set<string>();
+    for (const id of [...colConnected[c], ...colIsolated[c]]) {
+      const p = pos3.get(id)!;
+      const isolated = colIsolated[c].includes(id);
+      assert(p[2] === 0, `blueprint: pos3 z must be 0 on ${id}`);
+      assert(
+        round2(p[0]) === (isolated ? gx : cx),
+        `blueprint: pos3 x ${p[0]} off-lane in column ${c} on ${id}`,
+      );
+      const slot = `${round2(p[0])}:${round2(p[1])}`;
+      assert(!slots.has(slot), `blueprint: two nodes share slot ${slot} in column ${c}`);
+      slots.add(slot);
+    }
+  }
+
+  // Markers, all three poses: constellation etches stand below the bands (as
+  // before); ascent etches stand along the ground line of the massif; blueprint
+  // etches sit on ONE shared baseline below the deepest column — aligned
+  // headers, like the original map's grade rail — facing the camera front-on.
+  const bpBaselineY = round2(Math.min(...colMinY) - B.labelDrop);
+  const gradeMarkers = new Map<
+    Grade,
+    { a: [number, number, number]; b: [number, number, number]; c: [number, number, number] }
+  >();
   for (const [g, b] of bands) {
     if (g === "HS") continue; // labeled by courses instead
+    const bpCol = GRADE_ORDER.indexOf(g); // 0..8
     gradeMarkers.set(g, {
       a: [round2(b.center), -240, 0],
       b: [round2(b.center), A.yBase - 34, 0],
+      c: [round2(colCenterX(bpCol)), bpBaselineY, 0],
     });
   }
   const courseMarkers: {
@@ -993,6 +1283,7 @@ export function buildGraph(): BuildResult {
     label: string;
     marker: [number, number, number];
     marker2: [number, number, number];
+    marker3: [number, number, number];
   }[] = [];
   {
     const hsBand = bands.get("HS")!;
@@ -1006,26 +1297,32 @@ export function buildGraph(): BuildResult {
       const rank = i % 2;
       const zOff = rank * -56;
       const yOff = rank * -14;
+      // Blueprint: each course is its own wide column, so labels sit centered
+      // and flat under it — no rank stagger needed (columns are far apart).
+      const bpCol = 9 + i;
       courseMarkers.push({
         id: c,
         label: COURSE_LABELS[c],
         marker: [cx, -240 + yOff, zOff],
         marker2: [cx, A.yBase - 34 + yOff, zOff],
+        marker3: [round2(colCenterX(bpCol)), bpBaselineY, 0],
       });
     });
   }
 
-  // --- 8. Edge control points, both poses -------------------------------------
+  // --- 8. Edge control points, all three poses --------------------------------
   // Pose A (constellation): bow radially outward from the grade axis, exactly
   // the field the original art gate approved. Pose B (ascent): bow gently
   // upward and forward so arcs read as load paths climbing the structure.
-  // One seeded jitter value per edge is shared by both poses so the morph
-  // between them never changes an arc's character, only its frame.
+  // Pose C (blueprint): flat on the z=0 plane — same-column edges bow sideways
+  // clear of the stack, cross-column edges gently S-curve rightward. One seeded
+  // jitter value per edge is shared by A and B so the morph never changes an
+  // arc's character, only its frame (the flat pose uses no jitter).
   function controlPoints(
     s: string,
     t: string,
     srcStrand: Strand,
-  ): { c: [number, number, number]; c2: [number, number, number] } {
+  ): { c: [number, number, number]; c2: [number, number, number]; c3: [number, number, number] } {
     const jitterU = rng() * 2 - 1; // one draw per edge — POSES MUST SHARE IT
     // Pose A
     const a = pos.get(s)!;
@@ -1071,7 +1368,25 @@ export function buildGraph(): BuildResult {
       round2(m2y + pushB),
       round2(m2z + jitB),
     ];
-    return { c, c2 };
+    // Pose C: flat circuit board. Same-column edges (equal x) ALL bow left —
+    // one consistent rail on the side away from the isolated gutter, arcs
+    // nested deeper for longer hops, like a bus bar on a circuit board. The
+    // side is a fixed drawing convention (not data); depth encodes hop span.
+    // Cross-column edges keep the x-midpoint but bias the control's y toward
+    // the SOURCE, so the quadratic reads as a gentle rightward S-curve from
+    // source into target. z stays 0.
+    const a3 = pos3.get(s)!;
+    const b3 = pos3.get(t)!;
+    let c3: [number, number, number];
+    if (a3[0] === b3[0]) {
+      const dy = Math.abs(a3[1] - b3[1]);
+      const bow = -(B.sameColumnBow * (0.45 + Math.min(0.55, dy / 120)));
+      c3 = [round2(a3[0] + bow), round2((a3[1] + b3[1]) / 2), 0];
+    } else {
+      const bias = B.crossColumnSourceBias;
+      c3 = [round2((a3[0] + b3[0]) / 2), round2(a3[1] * bias + b3[1] * (1 - bias)), 0];
+    }
+    return { c, c2, c3 };
   }
 
   // Display degree: an edgeless parent (deg 0) sizes to the count of distinct
@@ -1120,6 +1435,11 @@ export function buildGraph(): BuildResult {
         for (const v of q) assert(Number.isFinite(v), `non-finite ascent position on ${id}`);
         return [round2(q[0]), round2(q[1]), round2(q[2])] as [number, number, number];
       })(),
+      pos3: (() => {
+        const q = pos3.get(id)!;
+        for (const v of q) assert(Number.isFinite(v), `non-finite blueprint position on ${id}`);
+        return [round2(q[0]), round2(q[1]), round2(q[2])] as [number, number, number];
+      })(),
       depth: depthById.get(id)!,
     };
     const kids = childrenOf.get(id);
@@ -1158,6 +1478,7 @@ export function buildGraph(): BuildResult {
       if (m) {
         out.marker = m.a;
         out.marker2 = m.b;
+        out.marker3 = m.c;
       }
       return out;
     }),

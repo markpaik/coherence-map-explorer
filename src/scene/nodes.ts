@@ -93,7 +93,9 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   const count = nodes.length;
 
   // -- visible mesh -----------------------------------------------------
-  const geometry = new THREE.IcosahedronGeometry(1, 1); // 80 tris, plenty round under bloom
+  // Detail 2 (320 tris): the limb-darkening shading below exposes the
+  // silhouette, so detail 1's faceting would read as polygons, not orbs.
+  const geometry = new THREE.IcosahedronGeometry(1, 2);
   const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
   const emphasis = new Float32Array(count).fill(EMPHASIS.REST);
@@ -154,6 +156,8 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         varying float vDim;
         varying float vDamage;
         varying float vPhase;
+        varying vec3 vNrm;
+        varying vec3 vViewPos;
         `,
       )
       .replace(
@@ -186,6 +190,12 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
           vDamage = clamp(aDamage, 0.0, 1.0);
           vPhase = aPhase;
           transformed *= scl;
+          // Sphere shading inputs: view-space normal + view vector. The
+          // instance matrices are uniform-scale + translation (no rotation),
+          // so normalize(normalMatrix * normal) is exact.
+          vNrm = normalize(normalMatrix * normal);
+          vec4 mvp = modelViewMatrix * instanceMatrix * vec4(transformed, 1.0);
+          vViewPos = -mvp.xyz;
         }
         `,
       );
@@ -203,6 +213,8 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         varying float vDim;
         varying float vDamage;
         varying float vPhase;
+        varying vec3 vNrm;
+        varying vec3 vViewPos;
         `,
       )
       .replace(
@@ -218,6 +230,27 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         float lift = mix(uStoryLift, 1.0, clamp(vDamage * 1.45, 0.0, 1.0));
         float mulTotal = max(vColorMul, lift * vShim);
         diffuseColor.rgb = mix(diffuseColor.rgb * mulTotal, uDimColor, vDim);
+        // --- sphere shading: limb darkening + a soft key light ----------------
+        // Bright core, darkened silhouette: each orb reads as a self-luminous
+        // sphere, and an orb in front separates visibly from one behind it
+        // (the dark rim outlines it against the brighter neighbor). The HDR
+        // core still crosses the bloom threshold; the rim drops below it, so
+        // the halo hugs the center instead of flattening the whole disc.
+        {
+          vec3 nrm = normalize(vNrm);
+          vec3 vdir = normalize(vViewPos);
+          float facing = max(dot(nrm, vdir), 0.0);
+          float limb = pow(1.0 - facing, 2.2);
+          // Assumed key light, upper-left-front (view space). Half-Lambert
+          // wrap keeps the shadow side luminous (these are glowing bodies,
+          // not matte rock) while giving each orb a frank lit hemisphere and
+          // shaded hemisphere — the modeling cue that reads "sphere" at a
+          // glance and separates near orbs from far ones.
+          vec3 keyDir = normalize(vec3(-0.4, 0.55, 0.73));
+          float nl = dot(nrm, keyDir) * 0.5 + 0.5;
+          float key = 0.5 + 0.5 * pow(nl, 1.6);
+          diffuseColor.rgb *= key * (1.0 - 0.55 * limb);
+        }
         // --- structural damage (composited AFTER emphasis) --------------------
         // 0 = untouched; 1 = ember husk. Damage distinguishes OUTAGE from
         // STRUGGLE: a fully-dead node (d >= 0.95) is a steady dark ember with
@@ -232,8 +265,13 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
         if (vDamage > 0.0001) {
           float d = vDamage;
           float pulse = 0.5 + 0.5 * sin(uTime * 2.5132741 + vPhase);       // ~2.5s
-          vec3 emberLo = vec3(0.2902, 0.1216, 0.0784);                     // #4a1f14
-          vec3 emberHi = vec3(0.4784, 0.2078, 0.1255);                     // #7a3520
+          // Near-black embers: a fully-missed standard reads as OFF — a dark
+          // body holding its place — not as a glowing coal. The faint warm
+          // pulse is only there so the eye can find the wound on a dark field.
+          // Values are LINEAR (the output transform re-brightens them to the
+          // intended sRGB #1c0b07 → #38180e on screen).
+          vec3 emberLo = vec3(0.0116, 0.0037, 0.0021);
+          vec3 emberHi = vec3(0.0402, 0.0089, 0.0044);
           vec3 husk = mix(emberLo, emberHi, pulse);
           // Mid-range-boosted desaturation: the struggle band (d ~ 0.3–0.6)
           // visibly drains of strand color before it goes ember.
@@ -251,7 +289,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
       );
   };
   // Distinct cache key so the patched program never collides with a stock basic material.
-  material.customProgramCacheKey = () => "coherence-nodes-v4-storylift";
+  material.customProgramCacheKey = () => "coherence-nodes-v5-orbs";
 
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.frustumCulled = false;

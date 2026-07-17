@@ -36,5 +36,17 @@
     "yStep": 13,
     "yBase": -90,
     "zScale": 0.8
+  },
+  "blueprint": {
+    "comment": "Pose C: flat 2D circuit board echoing Achieve the Core's original coherence map. 13 columns left to right (K, 1..8, then Appendix A courses A1/G/A2/ADV; the 23 dual A1&A2 standards sit in A1 only). x = column center (columnWidth apart, row centered on 0). Within a column, standards group into DOMAIN BLOCKS in canonical code order (the original map's own grouping, separated by blockGapFactor*rowGap), and a barycenter heuristic reorders rows WITHIN each block only: every prerequisite neighbor pulls with weight 1/column-distance (same-column neighbors at 0.5), barycenterSweeps alternating sweeps. Rows re-spaced uniformly at rowGap = min(rowGapMax, targetColumnHeight / tallestColumn), each column centered on y=0. Isolated (edgeless) nodes sit in a side gutter (+18) stacked from the column top. z = 0 everywhere. Same-column edges all bow LEFT (fixed convention; depth encodes hop span up to sameColumnBow). Grade/course etch labels sit on one shared baseline labelDrop below the deepest column, front-on.",
+    "columnWidth": 80,
+    "rowGapMax": 9,
+    "targetColumnHeight": 440,
+    "isolatedGap": 24,
+    "barycenterSweeps": 8,
+    "blockGapFactor": 0.9,
+    "sameColumnBow": 30,
+    "crossColumnSourceBias": 0.65,
+    "labelDrop": 40
   }
 }

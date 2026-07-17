@@ -1065,6 +1065,75 @@ body {
   }
 }
 
+/* ========================================================================== */
+/* Mobile responsiveness (≤720px): the search rail wraps to the viewport, the   */
+/* three-segment view toggle shrinks to fit, and the story card + scrubber stop  */
+/* overlapping. Before this, .search-rail stayed a fixed-width centered flex row */
+/* (search bar min(420px,72vw) + two ghost buttons) that overflowed a phone.     */
+/* ========================================================================== */
+
+@media (max-width: 720px) {
+  /* Search rail: span the width (12px insets). The search bar takes the whole
+     first row; "Show me around" + "Stories" drop to an equal-width second row,
+     each ≥44px tall, keeping the glass style. Docked state still pins to top. */
+  .search-rail {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .search-bar {
+    flex: 1 0 100%; /* full first row → forces the buttons to wrap beneath it */
+    width: auto;
+  }
+  .ghost-btn {
+    flex: 1 1 0;
+    min-width: 0; /* allow the two buttons to share the row and shrink */
+    height: 44px;
+    padding: 0 12px;
+  }
+  /* The results dropdown fills the full-width rail and stays inside the viewport
+     (was width: min(420px, 72vw) anchored left, which no longer matched). */
+  .search-results {
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: 48vh;
+  }
+
+  /* View toggle: keep all three segments reachable and legible — trim the
+     padding/size (44px touch target preserved via min-height) and lift the
+     control clear of the centered Filters pill at the bottom. */
+  .view-toggle {
+    right: 12px;
+    bottom: clamp(72px, 12vh, 96px);
+  }
+  .view-seg {
+    padding: 0 10px;
+    font-size: 11px;
+  }
+  /* The open Filters sheet expands up through the view toggle's spot, and the
+     toggle (z 11) sits above the sheet (z 10) — an orphaned control floating on
+     the sheet. Hide it while the sheet is open (filters-rail precedes the toggle
+     in the DOM, so the sibling combinator reaches it). */
+  .filters-rail.filters-open ~ .view-toggle {
+    display: none;
+  }
+
+  /* Nav hints describe mouse-only gestures (drag / scroll-zoom / right-drag) that
+     don't apply to touch, and at phone widths the right-aligned hint line
+     collides with the centered Filters pill. Hide it on small screens (the
+     no-WebGL fallback already hides it for the same "not useful here" reason). */
+  .nav-hints {
+    display: none;
+  }
+  /* NOTE: the story card + scrubber mobile overrides live in their own block
+     AFTER the stories section below — the base .story-card/.story-scrubber rules
+     are defined later in this file, and media queries add no specificity, so an
+     override here would be beaten by source order. */
+}
+
 /* -- guided tour ----------------------------------------------------------- */
 
 .tour-backdrop {
@@ -1539,6 +1608,23 @@ body.storying .view-toggle,
 body.storying .nav-hints {
   opacity: 0;
   pointer-events: none;
+}
+
+/* Story card + timeline scrubber (≤720px): on a phone the card is near
+   full-width, so the bottom-left card and the bottom-center scrubber overlap.
+   Stack them — scrubber pinned to the very bottom, card lifted just above it.
+   This block sits AFTER the base .story-card / .story-scrubber rules on purpose:
+   media queries add no specificity, so it must win on source order. */
+@media (max-width: 720px) {
+  .story-scrubber {
+    bottom: 14px;
+  }
+  .story-card {
+    left: 12px;
+    right: 12px;
+    bottom: 74px;
+    width: auto;
+  }
 }
 
 /* -- no-WebGL fallback list ------------------------------------------------ */

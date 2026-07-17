@@ -1,19 +1,21 @@
 // View toggle — a small glass segmented control (bottom-right, above the nav
-// hints) that switches the scene between the two poses: "Constellation" (pose A)
-// and "Ascent" (pose B). It drives the pose morph ONLY through the driver's
-// public setPose; while a transition plays the control disables itself until the
-// promise settles, so a rapid double-click can't stack morphs.
+// hints) that switches the scene between the three poses: "Constellation"
+// (pose 0), "Ascent" (pose 1), and "Blueprint" (pose 2). It drives the pose
+// morph ONLY through the driver's public setPose; while a transition plays the
+// control disables itself until the promise settles, so a rapid double-click
+// can't stack morphs.
 //
 // In the Ascent it also reveals a subtle vertical scale hint on the left edge —
-// "0 · foundations" at the bottom, "30 · deepest chain" at the top — naming the
-// axis the massif is built on: prerequisite-chain depth. The hint fades in and
-// out with the pose (driven by main's per-frame reflect()).
+// "foundations" at the bottom, "30 prerequisites deep" at the top — naming the
+// axis the massif is built on: prerequisite-chain depth. The hint fades in for
+// the Ascent ONLY and is gone in the flat Blueprint (which has no depth axis);
+// it tracks the continuous pose value via main's per-frame reflect().
 //
-// Accessibility: two real <button>s in a labeled group, the aria-pressed toggle
-// pattern (matching the filter chips), 44px touch targets, and the global
+// Accessibility: three real <button>s in a labeled group, the aria-pressed
+// toggle pattern (matching the filter chips), 44px touch targets, and the global
 // :focus-visible ring. The scale hint is decorative (aria-hidden).
 
-import type { PoseDriver } from "../scene/pose";
+import type { Pose, PoseDriver } from "../scene/pose";
 
 interface ViewToggleDeps {
   driver: PoseDriver;
@@ -21,7 +23,7 @@ interface ViewToggleDeps {
 
 export interface ViewToggleHandle {
   /** Sync the control to the driver: aria-pressed ← target, hint opacity ← pose. */
-  reflect(pose: number, target: 0 | 1): void;
+  reflect(pose: number, target: Pose): void;
   dispose(): void;
 }
 
@@ -33,7 +35,7 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", "Layout");
 
-  function makeSegment(label: string, target: 0 | 1, pressed: boolean): HTMLButtonElement {
+  function makeSegment(label: string, target: Pose, pressed: boolean): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "view-seg";
@@ -43,9 +45,12 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
     return btn;
   }
 
-  const constellationBtn = makeSegment("Constellation", 0, true);
-  const ascentBtn = makeSegment("Ascent", 1, false);
-  group.append(constellationBtn, ascentBtn);
+  const segments: { btn: HTMLButtonElement; target: Pose }[] = [
+    { btn: makeSegment("Constellation", 0, true), target: 0 },
+    { btn: makeSegment("Ascent", 1, false), target: 1 },
+    { btn: makeSegment("Blueprint", 2, false), target: 2 },
+  ];
+  group.append(...segments.map((s) => s.btn));
 
   // Vertical depth-scale hint (left edge). Decorative — the panel/tooltip carry
   // the accessible reading of depth.
@@ -61,11 +66,10 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
   document.body.append(scale, group);
 
   let busy = false;
-  async function choose(target: 0 | 1): Promise<void> {
+  async function choose(target: Pose): Promise<void> {
     if (busy) return;
     busy = true;
-    constellationBtn.disabled = true;
-    ascentBtn.disabled = true;
+    for (const s of segments) s.btn.disabled = true;
     const p = driver.setPose(target);
     // setPose has already committed the target — flip aria-pressed immediately.
     reflect(driver.pose, driver.target);
@@ -73,17 +77,18 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
       await p;
     } finally {
       busy = false;
-      constellationBtn.disabled = false;
-      ascentBtn.disabled = false;
+      for (const s of segments) s.btn.disabled = false;
       reflect(driver.pose, driver.target);
     }
   }
 
-  function reflect(pose: number, target: 0 | 1): void {
-    constellationBtn.setAttribute("aria-pressed", String(target === 0));
-    ascentBtn.setAttribute("aria-pressed", String(target === 1));
-    // Fade the depth scale with the pose; clamp so tiny float noise reads as 0/1.
-    scale.style.opacity = String(pose < 0.001 ? 0 : pose > 0.999 ? 1 : pose);
+  function reflect(pose: number, target: Pose): void {
+    for (const s of segments) s.btn.setAttribute("aria-pressed", String(target === s.target));
+    // The depth scale belongs to the Ascent alone: opacity peaks at pose 1 and
+    // falls to 0 at both the Constellation (0) and the flat Blueprint (2), which
+    // has no depth axis. Triangular fade; clamp tiny float noise to 0/1.
+    const d = 1 - Math.abs(pose - 1);
+    scale.style.opacity = String(d < 0.001 ? 0 : d > 0.999 ? 1 : d);
   }
 
   reflect(driver.pose, driver.target);

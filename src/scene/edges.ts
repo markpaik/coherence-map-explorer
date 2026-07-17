@@ -132,12 +132,14 @@ const FRAG = /* glsl */ `
     vec3 col = vColor;
     float alpha;
 
-    // Story lift: while a story plays, HEALTHY edges rise toward the chain look
-    // (bright, flowing) so the constellation reads as alive with learning;
-    // damage kills the lift (gone by d≈0.7), leaving broken lineages to cool
-    // via the ember mix below. max(), not ×, so an already-chain-lit edge never
-    // double-brightens.
-    float story = uStory * (1.0 - clamp(vDamage * 1.45, 0.0, 1.0));
+    // Story lift: while a story plays, edges that are LIT (visible) and healthy
+    // rise toward the chain look (bright, flowing). Damage kills the lift
+    // (gone by d≈0.7) and so does the ghost mask — an edge outside the story's
+    // lit set stays a dark filament, no glow, no comets. max(), not ×, so an
+    // already-chain-lit edge never double-brightens.
+    float story = uStory
+      * (1.0 - clamp(vDamage * 1.45, 0.0, 1.0))
+      * clamp((vVisible - 0.06) / 0.94, 0.0, 1.0);
 
     if (vKind < 0.5) {
       // Prerequisite (directed): HDR-bright with directional comets when chain/hot.
@@ -155,11 +157,12 @@ const FRAG = /* glsl */ `
       col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
     }
 
-    // Structural damage (stories): pull the edge toward a dark ember
-    // (#4a2318) and drop its alpha, so a broken lineage visibly cools. Additive-
-    // blend safe: both moves subtract light rather than add it.
-    col = mix(col, vec3(0.2902, 0.1373, 0.0941), vDamage);
-    alpha *= (1.0 - 0.35 * vDamage);
+    // Structural damage (stories): pull the edge toward a near-black ember
+    // (sRGB #2a120c; the literal is LINEAR — the output transform re-brightens
+    // it) and drop most of its alpha — a broken lineage goes dark, not merely
+    // warm. Additive-blend safe: both moves subtract light.
+    col = mix(col, vec3(0.0231, 0.0060, 0.0037), vDamage);
+    alpha *= (1.0 - 0.55 * vDamage);
 
     // Soft edge across the ribbon is unnecessary at ~1px widths; keep it flat.
     fragColor = vec4(col, alpha * vVisible);

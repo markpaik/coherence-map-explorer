@@ -5,25 +5,36 @@ itself left to right: Kindergarten counting at one end, high-school modeling at
 the other. Everything below is normative for implementation; deviations get
 discussed first.
 
-## The two poses and the unravel
+## The three poses and the unravel
 
-The map has two truths and refuses to average them. **Pose A, the
+The map has three truths and refuses to average them. **Pose A, the
 Constellation**, is the explorable artwork: the band-relaxed galaxy of strand
 rivers, orbitable from any angle (generative-art lineage: one seeded
 algorithm, restrained palette, flow over grid — Hobbs/Cherniak/Watkinson).
-**Pose B, the Ascent**, is the canonical layered drawing of the partial order
-itself: x keeps the K–HS timeline, and height is the standard's longest
-prerequisite chain (a graph invariant, 0 at the foundations to 30 at the
-summit), so every standard rests physically above everything it builds on and
-every prerequisite edge points upward.
+**Pose B, the Ascent**, is the balance point — structured first, artful in
+its breath: x keeps the K–HS timeline at grade-band granularity, and height
+is the standard's longest prerequisite chain (a graph invariant, 0 at the
+foundations to 30 at the summit). Within its band each standard aligns
+ABOVE its prerequisites (weighted alignment sweeps, a small hashed fan so
+sibling stacks stay organic), so every prerequisite edge points upward and
+runs near-vertical: the climb reads at a glance. **Pose C, the Blueprint**, honors the
+source document: a flat circuit-board plane echoing Achieve the Core's
+original map — 13 grade/course columns left to right (K–8, then Algebra I,
+Geometry, Algebra II, Advanced), standards stacked in crossing-minimized rows
+(4 barycenter sweeps), edgeless standards in a dim side gutter inside their
+column, and one aligned grade-label rail beneath all columns. The camera
+frames it front-on and the idle sway quiets to ~a fifth of its amplitude so
+the plane breathes without leaning.
 
-The transition between them — **the unravel** — is a signature moment, not a
+The transition between poses — **the unravel** — is a signature moment, not a
 camera cut: entering the Ascent, nodes settle foundations-first (35ms stagger
 per depth layer, 650ms per-node smoothstep, ~1.7s total) so the viewer watches
-mathematics assemble into a load-bearing structure; returning, the summit
-releases first and the structure gathers back into the galaxy. Stories
-auto-unravel; a Constellation/Ascent toggle (bottom-right) offers both poses
-to everyone. Reduced motion cuts instantly.
+mathematics assemble into a load-bearing structure; entering the Blueprint,
+columns assemble in reading order (35ms per column); returning to the galaxy,
+the summit releases first. Morphs start from live positions, so re-targeting
+mid-flight stays continuous. Stories auto-pose per scene (the trace-back
+story runs in the Blueprint); a three-way toggle (bottom-right) offers every
+pose to everyone. Reduced motion cuts instantly.
 
 The high-school arc in both poses is organized by CCSS Appendix A's
 traditional pathway: Algebra I, Geometry, Algebra II sub-bands (23 standards
@@ -66,6 +77,14 @@ home angles, and labels/legend name them.
 | focused | base ×2.6 (HDR) | ×1.5 |
 | chain (ancestor/descendant of focus) | base ×1.9 (HDR) | ×1.15 |
 | related-to-focus | base ×1.25 | ×1.0 |
+
+Sphere shading: every node is an icosphere (detail 2) shaded in the patched
+basic material with limb darkening (`pow(1 − N·V, 2.2)`, ×0.62 at the
+silhouette) plus a soft key light from upper-left (0.88–1.0). Each orb reads
+as a self-luminous sphere — bright core, dark rim — so a node in front
+separates visibly from nodes behind it instead of flattening into one plane.
+The HDR core still crosses the bloom threshold; the rim falls below it, so
+halos hug centers.
 
 Bloom: pmndrs `postprocessing` BloomEffect, `luminanceThreshold: 1.0`,
 intensity ≈ 0.9, radius ≈ 0.7, mipmapBlur on. Only HDR (>1) colors glow.

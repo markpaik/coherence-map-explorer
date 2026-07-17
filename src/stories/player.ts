@@ -1,13 +1,21 @@
 // Story player — drives a story over the constellation, one scene at a time.
 //
-// A story is a time-lapsed argument (docs/STORIES.md): each scene names a graph
-// state (missed standards → structural damage, an optional spotlight, an optional
-// focus), a camera framing, and a card. The player is the only thing that:
+// A story is a time-lapsed argument (docs/STORIES.md). The visual grammar is
+// DARK-BASELINE: while a story runs, every node and edge defaults to the same
+// ghost state the filters use (dark speck, 0.06-alpha filament). Each scene
+// declares an explicit `lit` set — those nodes turn on (story-lift bright,
+// edges glowing and flowing) — and an optional directional `reveal` sweeps the
+// turn-on across grade columns left-to-right or right-to-left instead of all
+// at once. Damage then darkens WITHIN the lit set: a fully-missed standard is
+// a near-black body holding its place, a partly-hit one visibly dims. Off,
+// dim, and on are the whole vocabulary.
+//
+// The player is the only thing that:
 //   - puts the machine into the "storying" state (drift suspended, scene input
 //     blocked by a backdrop, exactly the tour's pattern);
-//   - resolves selectors → the damage engine → nodes/edges.setDamage;
-//   - drives the dual-pose unravel (stories live in the Ascent) and the camera;
-//   - eases the damage crossfade of a "lapse" transition over 1.4s.
+//   - resolves selectors → lit masks + the damage engine → nodes/edges;
+//   - drives the pose morphs and the camera;
+//   - eases the damage crossfade of a "lapse" transition.
 // It NEVER writes emphasis directly (the machine stays the single writer — the
 // player asks for a *silent* focus that lights the closure without opening the
 // panel or touching the hash) and it restores every borrowed surface on exit.
@@ -25,8 +33,11 @@ import type { SelectorResolver } from "./selectors";
 import { STORIES, type Story, type StoryScene } from "./scripts";
 import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
 
-const LAPSE_MS = 1400; // "lapse" transition length (damage crossfade)
-const DEFAULT_HOLD_MS = 9000; // auto-advance dwell when a scene omits holdMs
+const LAPSE_MS = 2000; // "lapse" transition length (damage crossfade)
+const DEFAULT_HOLD_MS = 10500; // auto-advance dwell when a scene omits holdMs
+const LIT_FADE_MS = 1200; // lit-set crossfade when a scene has no directional reveal
+const DEFAULT_REVEAL_MS = 3200; // directional reveal duration when unspecified
+const REVEAL_WINDOW = 0.35; // fraction of the reveal each node's own fade takes
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smoothstep = (x: number): number => {
   const t = clamp01(x);
@@ -79,7 +90,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   const N = graph.nodes.length;
   const M = graph.edges.length;
 
-  // Edge endpoint indices (for propagating a node spotlight mask onto edges).
+  // Edge endpoint indices (for propagating the node lit mask onto edges).
   const indexById = new Map<string, number>();
   graph.nodes.forEach((n, i) => indexById.set(n.id, i));
   const edgeS = new Int32Array(M);
@@ -111,9 +122,15 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   let running = false;
   let currentStory: Story | null = null;
   let currentIndex = 0;
-  let priorPose: 0 | 1 = 0;
+  let priorPose: 0 | 1 | 2 = 0;
   let deepLink = false;
   let navToken = 0;
+
+  // Grade rank per node (K=0 … HS=9) for directional reveals: a left-to-right
+  // reveal lights the lit set one grade column at a time.
+  const gradeRank = new Map<string, number>();
+  graph.grades.forEach((g, i) => gradeRank.set(g.id, i));
+  const rankOf = (i: number): number => gradeRank.get(graph.nodes[i].grade) ?? 0;
 
   // --- auto-advance / hold state -----------------------------------------
   // A scene runs through a TRANSITION (pose morph + lapse crossfade + camera
@@ -132,6 +149,29 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   let damageTo: Float32Array = new Float32Array(N);
   let easing = false;
   let easeElapsed = 0;
+
+  // Lit-set buffers (the dark-baseline grammar). litCur is each node's current
+  // on-amount (0 = ghost, 1 = lit); a scene change animates litCur toward
+  // litTo, optionally staggered by grade column (the directional reveal).
+  // Edge visibility is derived per frame: min of the two endpoint amounts.
+  const litCur = new Float32Array(N).fill(1); // pre-story the map is fully lit
+  const litFrom = new Float32Array(N);
+  const litTo = new Float32Array(N);
+  const litDelay = new Float32Array(N); // normalized reveal start per node, 0..1
+  const edgeLit = new Float32Array(M);
+  let litAnimating = false;
+  let litElapsed = 0;
+  let litDuration = LIT_FADE_MS;
+
+  function pushLit(): void {
+    nodes.setVisibleMask(litCur);
+    for (let j = 0; j < M; j++) {
+      const s = edgeS[j];
+      const t = edgeT[j];
+      edgeLit[j] = s >= 0 && t >= 0 ? Math.min(litCur[s], litCur[t]) : 0;
+    }
+    edges.setVisibleMask(edgeLit);
+  }
 
   function pushDamage(): void {
     nodes.setDamage(damageCur);
@@ -183,24 +223,49 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     }
   }
 
-  function applySpotlight(scene: StoryScene): void {
-    const spot = scene.state?.spotlight;
-    if (spot && spot.length) {
-      const set = resolveUnion(spot);
-      const nodeMask = new Float32Array(N); // 0 = ghost, 1 = lit
-      for (const i of set) nodeMask[i] = 1;
-      const edgeMask = new Float32Array(M);
-      for (let j = 0; j < M; j++) {
-        const s = edgeS[j];
-        const t = edgeT[j];
-        edgeMask[j] = s >= 0 && t >= 0 && nodeMask[s] === 1 && nodeMask[t] === 1 ? 1 : 0;
-      }
-      nodes.setVisibleMask(nodeMask);
-      edges.setVisibleMask(edgeMask);
-    } else {
-      nodes.setVisibleMask(null);
-      edges.setVisibleMask(null);
+  // Arm the lit-set transition for a scene. Everything outside scene.state.lit
+  // heads to ghost; everything inside heads to 1. A `reveal` staggers the
+  // CHANGING nodes by grade column ("ltr" lights early grades first, "rtl"
+  // lights late grades first) so the turn-on sweeps across the map instead of
+  // landing all at once. Returns the transition's duration in ms.
+  function armLit(scene: StoryScene, cut: boolean): number {
+    const litSel = scene.state?.lit;
+    litTo.fill(0);
+    if (litSel && litSel.length) {
+      for (const i of resolveUnion(litSel)) litTo[i] = 1;
     }
+    if (cut) {
+      litCur.set(litTo);
+      litAnimating = false;
+      pushLit();
+      return 0;
+    }
+    litFrom.set(litCur);
+    const reveal = scene.reveal;
+    if (reveal) {
+      // Normalize grade ranks of the CHANGING nodes to 0..1 reveal delays.
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = 0; i < N; i++) {
+        if (litFrom[i] !== litTo[i]) {
+          const r = rankOf(i);
+          if (r < lo) lo = r;
+          if (r > hi) hi = r;
+        }
+      }
+      const span = hi > lo ? hi - lo : 1;
+      for (let i = 0; i < N; i++) {
+        const r = (rankOf(i) - lo) / span;
+        litDelay[i] = reveal.dir === "rtl" ? 1 - r : r;
+      }
+      litDuration = reveal.ms ?? DEFAULT_REVEAL_MS;
+    } else {
+      litDelay.fill(0);
+      litDuration = LIT_FADE_MS;
+    }
+    litElapsed = 0;
+    litAnimating = true;
+    return litDuration;
   }
 
   function applyCamera(scene: StoryScene, animate: boolean): void {
@@ -241,14 +306,14 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
 
     applyFocus(scene, cut); // emphasis (silent) — camera below overrides framing
     applyDamage(scene, !cut);
-    applySpotlight(scene);
+    const revealMs = armLit(scene, cut);
     applyCamera(scene, !cut);
     card.render(scene, index, currentStory.scenes.length);
 
-    // Arm the settle window: once it elapses the scene is "holding" and the
-    // auto-advance countdown (holdMs, default 9s) begins. A cut settles at once.
+    // Arm the settle window: the scene holds only after BOTH the damage lapse
+    // and the lit reveal have finished. A cut settles at once.
     holdTotal = scene.holdMs ?? DEFAULT_HOLD_MS;
-    settleRemaining = cut ? 0 : LAPSE_MS;
+    settleRemaining = cut ? 0 : Math.max(LAPSE_MS, revealMs);
     settleArmed = true;
     requestRender();
   }
@@ -271,12 +336,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
 
     machine.setHover(null); // a stale hover must not linger under the backdrop
     machine.setStorying(true);
-    // Narrative luminance: while the story plays, healthy nodes rise to
-    // chain-level brightness and healthy prereq edges glow and FLOW — the
-    // constellation is alive with learning. Damage attenuates both lifts, so
-    // broken lineages visibly go dark against the shine.
+    // Narrative luminance: LIT nodes rise to chain-level brightness and lit
+    // prereq edges glow and FLOW; everything outside the lit set is a dark
+    // ghost, and damage darkens within the light. Contrast carries the story.
     nodes.setStoryLift(1.9);
     edges.setStory(1);
+    litCur.fill(1); // the map is fully on at entry; scene 0 fades it down
     document.body.classList.add("storying");
     backdrop.hidden = false;
     card.begin(story);
@@ -293,6 +358,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     running = false;
     navToken++;
     easing = false;
+    litAnimating = false;
     transitioning = false;
     settleArmed = false;
     settleRemaining = 0;
@@ -375,7 +441,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       const dtMs = dt * 1000;
       let active = false;
 
-      // 1) Lapse damage crossfade (the 1.4s eased state change).
+      // 1) Lapse damage crossfade (the eased state change).
       if (easing) {
         active = true;
         easeElapsed += dtMs;
@@ -388,6 +454,31 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
           damageCur.set(damageTo);
           easing = false;
           pushDamage();
+        }
+      }
+
+      // 1b) Lit-set transition: each node fades within its own reveal window,
+      //     so a directional reveal sweeps the turn-on across grade columns.
+      if (litAnimating) {
+        active = true;
+        litElapsed += dtMs;
+        const T = litElapsed / litDuration;
+        for (let i = 0; i < N; i++) {
+          const from = litFrom[i];
+          const to = litTo[i];
+          if (from === to) {
+            litCur[i] = to;
+            continue;
+          }
+          const startAt = litDelay[i] * (1 - REVEAL_WINDOW);
+          const k = smoothstep((T - startAt) / REVEAL_WINDOW);
+          litCur[i] = from + (to - from) * k;
+        }
+        pushLit();
+        if (litElapsed >= litDuration) {
+          litCur.set(litTo);
+          litAnimating = false;
+          pushLit();
         }
       }
 

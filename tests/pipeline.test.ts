@@ -130,8 +130,12 @@ describe("node geometry", () => {
       expect(n.pos2 && n.pos2.length === 3).toBe(true);
       for (const v of n.pos2!) expect(Number.isFinite(v)).toBe(true);
       expect(Number.isInteger(n.depth)).toBe(true);
-      // x is shared between poses: the timeline survives the unravel.
-      expect(n.pos2![0]).toBeCloseTo(n.pos[0], 1);
+      // The timeline survives the unravel at BAND granularity: the ascent
+      // alignment may shift x within the node's grade band (standards align
+      // above their prerequisites) but never across band boundaries.
+      const b = bandById[n.grade];
+      expect(n.pos2![0]).toBeGreaterThanOrEqual(b.x0 - 0.01);
+      expect(n.pos2![0]).toBeLessThanOrEqual(b.x1 + 0.01);
     }
     let maxDepth = 0;
     for (const e of core.edges) {
@@ -167,6 +171,79 @@ describe("node geometry", () => {
     const courses = (core as unknown as { courses: { id: string; marker: number[] }[] }).courses;
     expect(courses.map((c) => c.id)).toEqual(["A1", "G", "A2", "ADV"]);
     for (const c of courses) for (const v of c.marker) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe("pose C (blueprint)", () => {
+  // Column model: K,1..8 → 0..8; HS by primary course (courses[0]) → 9..12.
+  const COURSE_ORDER = ["A1", "G", "A2", "ADV"];
+  const columnOf = (n: OutNode & { grade: string; courses?: string[] }): number =>
+    n.grade === "HS" ? 9 + COURSE_ORDER.indexOf(n.courses![0]) : GRADES.indexOf(n.grade);
+  const bp = core.nodes as (OutNode & { pos3?: number[]; courses?: string[] })[];
+
+  it("every node carries a flat pos3 (z === 0)", () => {
+    expect(bp.length).toBe(480);
+    for (const n of bp) {
+      expect(n.pos3 && n.pos3.length === 3).toBe(true);
+      for (const v of n.pos3!) expect(Number.isFinite(v)).toBe(true);
+      expect(n.pos3![2]).toBe(0);
+    }
+  });
+
+  it("grade-column x is strictly increasing K→1→…→8→A1→G→A2→ADV", () => {
+    // Each column has a main lane plus an optional minority side gutter at
+    // exactly +18 (edgeless standards); the 13 main-lane x strictly increase.
+    const lanes = new Map<number, Map<number, number>>(); // col -> x -> count
+    for (const n of bp) {
+      const c = columnOf(n);
+      if (!lanes.has(c)) lanes.set(c, new Map());
+      const m = lanes.get(c)!;
+      m.set(n.pos3![0], (m.get(n.pos3![0]) ?? 0) + 1);
+    }
+    const mainX: number[] = [];
+    for (const [c, m] of [...lanes.entries()].sort((a, b) => a[0] - b[0])) {
+      const xs = [...m.keys()].sort((a, b) => a - b);
+      expect(xs.length === 1 || xs.length === 2).toBe(true);
+      if (xs.length === 2) {
+        expect(xs[1] - xs[0]).toBeCloseTo(18, 2); // gutter offset
+        expect(m.get(xs[1])!).toBeLessThan(m.get(xs[0])!); // gutter is minority
+      }
+      mainX[c] = xs[0];
+    }
+    expect(mainX.length).toBe(13);
+    for (let i = 1; i < mainX.length; i++) expect(mainX[i]).toBeGreaterThan(mainX[i - 1]);
+  });
+
+  it("no two nodes in a column share a lane+y slot", () => {
+    const seen = new Map<number, Set<string>>();
+    for (const n of bp) {
+      const c = columnOf(n);
+      if (!seen.has(c)) seen.set(c, new Set());
+      const slots = seen.get(c)!;
+      const slot = `${n.pos3![0]}:${n.pos3![1]}`;
+      expect(slots.has(slot)).toBe(false);
+      slots.add(slot);
+    }
+  });
+
+  it("every edge carries a flat blueprint control point c3", () => {
+    const edges = core.edges as (OutEdge & { c3?: number[] })[];
+    expect(edges.length).toBe(757 + 142);
+    for (const e of edges) {
+      expect(e.c3 && e.c3.length === 3).toBe(true);
+      for (const v of e.c3!) expect(Number.isFinite(v)).toBe(true);
+      expect(e.c3![2]).toBe(0);
+    }
+  });
+
+  it("K-8 grade + 4 course etches carry a blueprint marker3", () => {
+    const gm = core.grades.filter((g) => (g as { marker3?: number[] }).marker3);
+    expect(gm.map((g) => g.id)).toEqual(["K", "1", "2", "3", "4", "5", "6", "7", "8"]);
+    const courses = (core as unknown as { courses: { id: string; marker3?: number[] }[] }).courses;
+    for (const c of courses) {
+      expect(c.marker3 && c.marker3.length === 3).toBe(true);
+      expect(c.marker3![2]).toBe(0);
+    }
   });
 });
 
