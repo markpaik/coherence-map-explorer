@@ -246,11 +246,18 @@ export function createPanel(
       requests.close();
       return;
     }
-    const target = sheetY > peekY() / 2 ? peekY() : 0;
-    // Swiping UP past the peek hands the standard to Browse when Browse owns
-    // navigation — full detail lives there; the sheet is the map's caption.
-    if (target === 0 && expandToBrowse && currentCode) {
+    // A short upward FLICK (~56px) from the peek hands the standard to Browse
+    // when Browse owns navigation — full detail lives there; the sheet is the
+    // map's caption. No need to drag the sheet to the top of the screen.
+    const draggedUp = dragStartSheetY - sheetY;
+    if (expandToBrowse && currentCode && draggedUp > 56) {
       setSheetY(peekY(), true); // leave the sheet parked at peek behind Browse
+      expandToBrowse(currentCode);
+      return;
+    }
+    const target = sheetY > peekY() / 2 ? peekY() : 0;
+    if (target === 0 && expandToBrowse && currentCode) {
+      setSheetY(peekY(), true);
       expandToBrowse(currentCode);
       return;
     }

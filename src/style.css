@@ -1897,9 +1897,15 @@ body {
 /* ========================================================================== */
 
 /* The guided tour is desktop-first; hide its button on coarse-pointer phones.
-   (Stories work well on touch and stay.) */
+   (Stories work well on touch and stay.) Same media: the map view runs
+   FRAME-CLEAN on phones — the title block (whose identity job Browse's home
+   screen already does) collided with the top-anchored search rail, the
+   Stories button, and the pill; the map gets the whole frame instead. */
 @media (max-width: 720px) and (pointer: coarse) {
   #tour-btn {
+    display: none;
+  }
+  .title-block {
     display: none;
   }
 }
@@ -2434,8 +2440,11 @@ body {
 /* -- "Browse" pill (shown while in the 3D scene) --------------------------- */
 .browse-pill {
   position: fixed;
-  top: clamp(60px, 9vh, 78px);
-  right: 12px;
+  /* Bottom-left thumb zone (the view toggle owns bottom-right): the primary
+     "back to navigation" action sits where a phone thumb naturally rests,
+     clear of the title, search rail, and sheet. */
+  left: 12px;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   z-index: 44;
   display: inline-flex;
   align-items: center;
