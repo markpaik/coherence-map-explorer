@@ -39,6 +39,8 @@ import { createSearch } from "./ui/search";
 import { createFilters } from "./ui/filters";
 import { createTour } from "./ui/tour";
 import { createViewToggle } from "./ui/viewtoggle";
+import { createStyleToggle } from "./ui/styletoggle";
+import { ART_STYLE_SLUGS, FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse } from "./ui/browse";
 import { createPicking } from "./interaction/picking";
@@ -219,6 +221,38 @@ function start(graph: GraphCore): void {
   });
   const viewToggle = createViewToggle({ driver: poseDriver });
   let lastReflectedPose = poseDriver.pose;
+
+  // -- art styles (Galaxy / Ringers / Fidenza) ------------------------------
+  // A style is a LOOK: geometry skins + field color + UI ink swap in place;
+  // poses, focus, filters, and stories keep operating identically. The sky
+  // (stars/nebula/planets) belongs to the Galaxy alone — paper has no stars.
+  // Style 0 must stay pixel-identical to the shipped Galaxy.
+  let artStyle: ArtStyle = 0;
+  const ART_BG: readonly number[] = [BG, RINGERS.bg, FIDENZA.bg];
+  function applyArtStyle(style: ArtStyle): void {
+    artStyle = style;
+    nodes.setArtStyle(style);
+    edges.setArtStyle(style);
+    filaments.setArtStyle(style);
+    etches.setArtStyle(style);
+    bloom.setArtPaper(style !== 0);
+    const sky = style === 0;
+    stars.points.visible = sky;
+    nebula.group.visible = sky;
+    renderer.setClearColor(ART_BG[style], 1);
+    (scene.background as THREE.Color).setHex(ART_BG[style]);
+    document.body.classList.toggle("art-ringers", style === 1);
+    document.body.classList.toggle("art-fidenza", style === 2);
+    styleToggle.reflect(style);
+    requestRender();
+  }
+  const styleToggle = createStyleToggle({
+    apply: applyArtStyle,
+    initial: 0,
+  });
+  // ?style=ringers|fidenza deep-links a skin (session-only, not persisted).
+  const bootStyle = ART_STYLE_SLUGS.indexOf(params.get("style") ?? "galaxy");
+  if (bootStyle > 0) applyArtStyle(bootStyle as ArtStyle);
   search.setGradeContext((g) => filters.isGradeActive(g));
   const tour = createTour({
     machine,
@@ -343,8 +377,10 @@ function start(graph: GraphCore): void {
       planets.setTime(sceneTime);
       render = true;
     }
-    // The sky belongs to the Constellation: planets fade with the pose.
-    planets.setVisibleAmount(1 - Math.min(1, poseDriver.pose));
+    // The sky belongs to the Constellation: planets fade with the pose, and
+    // vanish entirely under the art styles (setVisibleAmount owns group
+    // visibility, so the art gate must live here, not in applyArtStyle).
+    planets.setVisibleAmount(artStyle === 0 ? 1 - Math.min(1, poseDriver.pose) : 0);
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;
@@ -533,6 +569,15 @@ function start(graph: GraphCore): void {
       tour,
       // Dual-pose morph driver, for automation (drive setPose, read pose/target).
       pose: { driver: poseDriver },
+      // Art styles, for automation (0 Galaxy | 1 Ringers | 2 Fidenza).
+      art: {
+        set(style: number): void {
+          applyArtStyle(style as ArtStyle);
+        },
+        get(): number {
+          return artStyle;
+        },
+      },
       // Stories, for automation (start/stop/step a story).
       stories: {
         player: storyPlayer,

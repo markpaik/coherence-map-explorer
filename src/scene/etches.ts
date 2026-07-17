@@ -49,6 +49,11 @@ export interface EtchesHandle {
    * the current pose so they never pop in at the wrong place.
    */
   setPose(p: number): void;
+  /**
+   * Swap the marker ink for the active art style: 0 Galaxy (the shipped faint
+   * violet) | 1 Ringers (ink on the cream board) | 2 Fidenza (deep teal-ink).
+   */
+  setArtStyle(style: number): void;
   dispose(): void;
 }
 
@@ -167,6 +172,9 @@ export function createEtches(
     setPose(p) {
       pose = p;
       for (const mk of markers) placeMarker(mk);
+    },
+    setArtStyle(style) {
+      void style; // Galaxy-only until the art-style build lands (agent-owned)
     },
     dispose() {
       for (const g of geometries) g.dispose();

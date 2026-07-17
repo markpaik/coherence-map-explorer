@@ -15,6 +15,12 @@ export interface BloomRig {
   composer: EffectComposer;
   render(deltaSeconds: number): void;
   setSize(width: number, height: number): void;
+  /**
+   * Paper mode (art styles): bypass the composer entirely — a flat direct
+   * render, no bloom, no vignette. Paint on paper doesn't glow, and the
+   * vignette would grime a cream board. Galaxy (off) restores the full chain.
+   */
+  setArtPaper(on: boolean): void;
   dispose(): void;
 }
 
@@ -51,13 +57,22 @@ export function createBloom(
   composer.addPass(new RenderPass(scene, camera));
   composer.addPass(new EffectPass(camera, bloom, vignette));
 
+  let artPaper = false;
+
   return {
     composer,
     render(deltaSeconds) {
+      if (artPaper) {
+        renderer.render(scene, camera);
+        return;
+      }
       composer.render(deltaSeconds);
     },
     setSize(width, height) {
       composer.setSize(width, height);
+    },
+    setArtPaper(on) {
+      artPaper = on;
     },
     dispose() {
       composer.dispose();

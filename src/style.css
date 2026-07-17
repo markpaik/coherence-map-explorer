@@ -267,6 +267,45 @@ body {
   cursor: default;
 }
 
+/* -- art-style toggle (under the pose toggle) + credit line ----------------- */
+
+.art-toggle {
+  position: fixed;
+  right: clamp(16px, 2.5vw, 28px);
+  bottom: clamp(46px, 7vh, 62px);
+  transform: translateY(calc(-100% - 8px)); /* stacked ABOVE the pose toggle */
+  z-index: 11;
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+.art-credit {
+  position: fixed;
+  right: clamp(16px, 2.5vw, 28px);
+  bottom: clamp(46px, 7vh, 62px);
+  transform: translateY(calc(-200% - 60px)); /* above the art toggle */
+  z-index: 11;
+  font-size: 11px;
+  color: var(--ink-2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 300ms ease;
+}
+.art-credit a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.art-credit.art-credit-on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* -- depth scale hint (left edge; visible in the Ascent) -------------------- */
 
 .depth-scale {

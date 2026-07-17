@@ -200,6 +200,14 @@ export interface EdgesHandle {
   setTime(t: number): void;
   setFlowEnabled(on: boolean): void;
   setViewport(widthPx: number, heightPx: number, pixelRatio: number): void;
+  /**
+   * Swap the render skin: 0 Galaxy (additive light ribbons, exactly the
+   * shipped look) | 1 Ringers (taut pure-color strings, normal blending) |
+   * 2 Fidenza (thick flat world-plane ribbons with striped caps). Emphasis /
+   * visibility / damage attributes keep their meaning; art styles express
+   * dimness as opacity.
+   */
+  setArtStyle(style: number): void;
   dispose(): void;
 }
 
@@ -345,6 +353,9 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     setViewport(widthPx, heightPx, pixelRatio) {
       uniforms.uViewport.value.set(widthPx, heightPx);
       uniforms.uPxRatio.value = pixelRatio;
+    },
+    setArtStyle(style) {
+      void style; // Galaxy-only until the art-style build lands (agent-owned)
     },
     dispose() {
       geometry.dispose();

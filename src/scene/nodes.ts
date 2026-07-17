@@ -89,6 +89,13 @@ export interface NodesHandle {
   setStoryLift(mul: number): void;
   /** Grow the proxy pick radius for touch pointers (idempotent). */
   setTouchPicking(on: boolean): void;
+  /**
+   * Swap the render skin: 0 Galaxy (orbs, exactly the shipped look) |
+   * 1 Ringers (bold-outlined pegs on cream) | 2 Fidenza (palette cubes on
+   * teal). Geometry/material swap only — instanced attributes, positions,
+   * picking, and every driver keep working identically across styles.
+   */
+  setArtStyle(style: number): void;
   /** Bounding sphere of the whole node cloud (for camera framing). */
   boundsSphere: THREE.Sphere;
   /** Axis-aligned bounds of the cloud (tighter framing than the sphere). */
@@ -428,6 +435,9 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
       if (on === touchMode) return;
       touchMode = on;
       writeProxyMatrices();
+    },
+    setArtStyle(style) {
+      void style; // Galaxy-only until the art-style build lands (agent-owned)
     },
     dispose() {
       geometry.dispose();

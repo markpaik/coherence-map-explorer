@@ -35,6 +35,11 @@ export interface FilamentsHandle {
    * 116 segments; call it each frame the scene renders.
    */
   update(): void;
+  /**
+   * Swap the render skin: 0 Galaxy (additive violet hairline) | 1 Ringers
+   * (faint ink on cream, normal blending) | 2 Fidenza (deep teal-ink).
+   */
+  setArtStyle(style: number): void;
   dispose(): void;
 }
 
@@ -123,6 +128,9 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
   return {
     object,
     update,
+    setArtStyle(style) {
+      void style; // Galaxy-only until the art-style build lands (agent-owned)
+    },
     dispose() {
       geometry.dispose();
       material.dispose();
