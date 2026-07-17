@@ -1,7 +1,7 @@
 // Distant planets — three faint procedural bodies far behind the
 // constellation: a banded gas giant low on the horizon, its small cratered
 // moon, and a pale ice dwarf on the far side. Atmosphere, not attraction:
-// they sit well below the bloom threshold, at ~half opacity, inside the
+// they sit well below the bloom threshold, at ~one-tenth opacity, inside the
 // starfield shell, and they FADE OUT as the scene leaves the Constellation
 // pose (the Ascent and the Blueprint are arguments, not skies).
 //
@@ -134,18 +134,25 @@ interface BodySpec {
 // presence, not decoration. Phases are WORLD-anchored and clock-driven — the
 // shared sun azimuth comes from the local time of day (one lap per 24h), so
 // a morning visit and an evening visit see different crescents, and orbiting
-// the map swings you around each eclipse like a real body in space. The
-// MEGAPLANET sits far south-low: a quarter of the sky at one-tenth opacity.
+// the map swings you around each eclipse like a real body in space.
+//
+// Parallax: every body sits at r≈2600–3000 (the megaplanet ~3350), all deep
+// inside the r=3600 star shell but far beyond the camera's ~1k max dolly, so
+// orbiting sweeps them only a few degrees against the stars — distant bodies,
+// not props on a stage. Radii scale with distance (radius/|pos| held from the
+// earlier close layout) so apparent size is unchanged; alphas dropped ~half
+// so the near giants whisper instead of glow.
 const BODIES: BodySpec[] = [
-  { type: 0, pos: [900, 275, -830], radius: 95, alpha: 0.3, colA: 0x232a56, colB: 0x2e5763, colC: 0x8a7550, phase: 0.4, sunY: 0.3 },
-  { type: 1, pos: [705, 185, -762], radius: 17, alpha: 0.27, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, phase: 3.3, sunY: 0.25 },
-  { type: 2, pos: [-985, -52, -625], radius: 30, alpha: 0.22, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, phase: 1.9, sunY: 0.42 },
+  { type: 0, pos: [2070, 632, -1909], radius: 218, alpha: 0.16, colA: 0x232a56, colB: 0x2e5763, colC: 0x8a7550, phase: 0.4, sunY: 0.3 },
+  { type: 1, pos: [1762, 462, -1905], radius: 42, alpha: 0.15, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, phase: 3.3, sunY: 0.25 },
+  { type: 2, pos: [-2364, -125, -1500], radius: 72, alpha: 0.13, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, phase: 1.9, sunY: 0.42 },
   // Behind the default camera, so a 180° orbit finds sky, not void.
-  { type: 0, pos: [880, -40, 760], radius: 66, alpha: 0.24, colA: 0x2e2a4e, colB: 0x4a3d55, colC: 0x8a7550, phase: 5.1, sunY: 0.2 },
-  { type: 2, pos: [-780, 140, 820], radius: 24, alpha: 0.2, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, phase: 2.6, sunY: 0.5 },
-  { type: 1, pos: [70, 360, 940], radius: 13, alpha: 0.22, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, phase: 4.2, sunY: 0.35 },
-  // The megaplanet: ~2700 world units out, radius 700 — a quarter of the sky.
-  { type: 0, pos: [460, -700, -2550], radius: 700, alpha: 0.11, colA: 0x1e2748, colB: 0x28454f, colC: 0x6f6a9a, phase: 0.9, sunY: 0.55 },
+  { type: 0, pos: [2112, -96, 1824], radius: 158, alpha: 0.13, colA: 0x2e2a4e, colB: 0x4a3d55, colC: 0x8a7550, phase: 5.1, sunY: 0.2 },
+  { type: 2, pos: [-1872, 336, 1968], radius: 58, alpha: 0.12, colA: 0x35566b, colB: 0x9fc4cf, colC: 0x5a6ab0, phase: 2.6, sunY: 0.5 },
+  { type: 1, pos: [182, 936, 2444], radius: 34, alpha: 0.13, colA: 0x8f8ba6, colB: 0x565370, colC: 0x9a94d8, phase: 4.2, sunY: 0.35 },
+  // The megaplanet: farthest of all (~3350 out, just inside the star shell),
+  // radius 875 — a quarter of the sky at under one-tenth opacity.
+  { type: 0, pos: [575, -875, -3188], radius: 875, alpha: 0.09, colA: 0x1e2748, colB: 0x28454f, colC: 0x6f6a9a, phase: 0.9, sunY: 0.55 },
 ];
 
 // One lap of the sun per real day, seeded from the visitor's local clock.

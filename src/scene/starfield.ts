@@ -1,10 +1,11 @@
-// Distant starfield: ~1000 THREE.Points on an r≈900 sphere, 0.5–1.2px,
+// Distant starfield: THREE.Points on an r≈3600 sphere, 0.5–1.2px,
 // colors #20204a → #3a3870, slow per-point twinkle in-shader.
 //
 // Parallax choice: the starfield sits static in world space. The camera
-// orbits well inside the r=900 shell, so distant-vs-near parallax falls out
-// of perspective for free — cheaper than re-rotating the shell against
-// camera azimuth every frame, and visually indistinguishable at this radius.
+// orbits deep inside the r=3600 shell (dolly tops out near 1k units), so the
+// stars barely wobble as you orbit — the fixed backdrop the planets read
+// against. The shell is the OUTERMOST layer: every planet sits inside it, so
+// nearer bodies show more parallax than the stars, never less.
 // (DESIGN.md offered either; this is the cheap one.)
 //
 // Reduced motion: twinkle disabled via uTwinkle uniform (alpha holds steady).
@@ -12,7 +13,7 @@
 import * as THREE from "three";
 
 const STAR_COUNT = 1750;
-const RADIUS = 900;
+const RADIUS = 3600;
 const COLOR_A = new THREE.Color(0x262552);
 const COLOR_B = new THREE.Color(0x4a4788);
 // A sparse population of standouts — near-white lavender, larger, still calm.

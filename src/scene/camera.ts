@@ -76,7 +76,10 @@ export function createCameraRig(
   boundsBox: THREE.Box3,
   opts: { reducedMotion: boolean; aspect: number },
 ): CameraRig {
-  const camera = new THREE.PerspectiveCamera(50, opts.aspect, 1, 5000);
+  // Far plane covers the deep sky: star shell at r=3600 and the megaplanet
+  // near r=3350 must stay inside the frustum even with the camera dollied to
+  // the far side of the cloud (max dolly ~1k units → ~4.5k worst case).
+  const camera = new THREE.PerspectiveCamera(50, opts.aspect, 1, 12000);
   const controls = new CameraControls(camera, domElement);
 
   // Home bounds are mutable: the dual-pose morph swaps them so frameHome refits
