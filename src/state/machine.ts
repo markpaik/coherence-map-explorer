@@ -224,6 +224,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   let curEdgeOv = new Map<number, Emphasis>();
   let lastAncestors: number[] = []; // for trace-to-foundations framing
   let lastNeighborhood: number[] = []; // for pose-morph reframing (no cascade re-run)
+  let lastRelated: number[] = []; // related pairs: widen the fit only up to the cap
   let revealTimers: number[] = [];
 
   function clearRevealTimers(): void {
@@ -418,12 +419,25 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   // panel offset shifts it to the center of the visible region) instead of
   // drifting to the neighborhood's centroid, which sat off toward the heavier
   // side of its connections and read as a random shift.
-  const sphereAround = (centerIdx: number, indices: number[]): THREE.Sphere => {
+  //
+  // Zoom consistency: the DIRECTED neighborhood (builds-on / leads-to / parts)
+  // always fits — that is the lineage the click promises. RELATED pairs only
+  // widen the frame up to 1.6× the directed radius; a related standard across
+  // the map stays lit and listed in the panel but no longer yanks the camera
+  // out to a wide shot (the old behavior read as arbitrary zoom-in/zoom-out).
+  const sphereAround = (
+    centerIdx: number,
+    directed: number[],
+    related: number[] = [],
+  ): THREE.Sphere => {
     const c = new THREE.Vector3();
     nodes.getPosition(centerIdx, c);
     const v = new THREE.Vector3();
-    let r = 0;
-    for (const i of indices) r = Math.max(r, c.distanceTo(nodes.getPosition(i, v)));
+    let rDir = 0;
+    for (const i of directed) rDir = Math.max(rDir, c.distanceTo(nodes.getPosition(i, v)));
+    let rRel = 0;
+    for (const i of related) rRel = Math.max(rRel, c.distanceTo(nodes.getPosition(i, v)));
+    const r = Math.max(rDir, Math.min(rRel, rDir * 1.6));
     return new THREE.Sphere(c.clone(), Math.max(r, 40));
   };
 
@@ -542,9 +556,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     // Camera: frame focus + its DIRECT neighbors (+ parts). During a story the
     // panel is closed, so the framing is unshifted (silent ⇒ 0 offset).
     const silent = opts?.silent === true;
-    const neighborhood = [nodeIndex, ...data.parts, ...data.buildsOn, ...data.leadsTo, ...data.related];
-    lastNeighborhood = neighborhood; // reframe() replays this fit after a morph
-    void rig.focusOn(sphereAround(nodeIndex, neighborhood), !cut, silent ? 0 : focusPanelOffsetPx());
+    const directed = [nodeIndex, ...data.parts, ...data.buildsOn, ...data.leadsTo];
+    lastNeighborhood = directed; // reframe() replays this fit after a morph
+    lastRelated = [...data.related];
+    void rig.focusOn(
+      sphereAround(nodeIndex, directed, lastRelated),
+      !cut,
+      silent ? 0 : focusPanelOffsetPx(),
+    );
 
     // Panel + narration + deep link — all owned by the story card while silent.
     if (!silent) {
@@ -588,9 +607,9 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   function reframe(): void {
     if (focusIndex === null) return;
     // Same fit as focus() — the neighborhood indices are unchanged; only their
-    // positions moved with the pose. Reuse the stored set, no cascade re-run.
+    // positions moved with the pose. Reuse the stored sets, no cascade re-run.
     void rig.focusOn(
-      sphereAround(focusIndex, lastNeighborhood),
+      sphereAround(focusIndex, lastNeighborhood, lastRelated),
       !reducedMotion,
       focusPanelOffsetPx(),
     );
@@ -606,6 +625,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     curEdgeOv = new Map();
     lastAncestors = [];
     lastNeighborhood = [];
+    lastRelated = [];
     tooltip.hide();
     canvas.style.cursor = "";
     applyEmphasis({ baseNode: EMPHASIS.REST, baseEdge: EMPHASIS.REST });

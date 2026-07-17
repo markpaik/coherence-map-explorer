@@ -11,18 +11,22 @@
 
 import * as THREE from "three";
 
-const STAR_COUNT = 1200;
+const STAR_COUNT = 1750;
 const RADIUS = 900;
 const COLOR_A = new THREE.Color(0x262552);
 const COLOR_B = new THREE.Color(0x4a4788);
 // A sparse population of standouts — near-white lavender, larger, still calm.
-const BRIGHT_FRACTION = 0.055;
+// SPARKLER_FRACTION of stars twinkle deeply (near-out dips, bright peaks);
+// the rest shimmer gently as before.
+const BRIGHT_FRACTION = 0.075;
 const COLOR_BRIGHT = new THREE.Color(0x9a94d8);
+const SPARKLER_FRACTION = 0.07;
 
 const VERT = /* glsl */ `
   attribute float aSize;   // CSS px, 0.5–1.2
   attribute float aPhase;
   attribute float aSpeed;
+  attribute float aAmp;    // twinkle depth: ~0.4 gentle, ~0.85 sparkler
   attribute vec3 aColor;
 
   uniform float uPxRatio;
@@ -30,11 +34,13 @@ const VERT = /* glsl */ `
   varying vec3 vColor;
   varying float vPhase;
   varying float vSpeed;
+  varying float vAmp;
 
   void main() {
     vColor = aColor;
     vPhase = aPhase;
     vSpeed = aSpeed;
+    vAmp = aAmp;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mv;
     gl_PointSize = max(aSize * uPxRatio, 1.0);
@@ -50,6 +56,7 @@ const FRAG = /* glsl */ `
   varying vec3 vColor;
   varying float vPhase;
   varying float vSpeed;
+  varying float vAmp;
 
   void main() {
     // Round point sprite with a soft rim.
@@ -58,7 +65,7 @@ const FRAG = /* glsl */ `
     if (d > 0.5) discard;
     float body = smoothstep(0.5, 0.3, d);
     // Slow twinkle: per-point phase + speed.
-    float tw = mix(1.0, 0.55 + 0.45 * sin(uTime * vSpeed + vPhase), uTwinkle);
+    float tw = mix(1.0, (1.0 - vAmp) + vAmp * (0.5 + 0.5 * sin(uTime * vSpeed + vPhase)), uTwinkle);
     gl_FragColor = vec4(vColor * tw, body * 0.9);
   }
 `;
@@ -76,6 +83,7 @@ export function createStarfield(reducedMotion: boolean): StarfieldHandle {
   const sizes = new Float32Array(STAR_COUNT);
   const phases = new Float32Array(STAR_COUNT);
   const speeds = new Float32Array(STAR_COUNT);
+  const amps = new Float32Array(STAR_COUNT);
   const colors = new Float32Array(STAR_COUNT * 3);
 
   // Deterministic LCG so the sky is stable across loads.
@@ -95,9 +103,12 @@ export function createStarfield(reducedMotion: boolean): StarfieldHandle {
     positions[i * 3 + 1] = RADIUS * u;
     positions[i * 3 + 2] = RADIUS * s * Math.sin(theta);
     const bright = rand() < BRIGHT_FRACTION;
+    const sparkler = rand() < SPARKLER_FRACTION;
     sizes[i] = bright ? 1.4 + rand() * 0.8 : 0.5 + rand() * 0.9;
     phases[i] = rand() * Math.PI * 2;
-    speeds[i] = 0.15 + rand() * 0.35; // rad/s — slow
+    // Sparklers twinkle deeper and a touch quicker; the rest stay calm.
+    speeds[i] = sparkler ? 0.5 + rand() * 0.7 : 0.15 + rand() * 0.35; // rad/s
+    amps[i] = sparkler ? 0.75 + rand() * 0.15 : 0.32 + rand() * 0.16;
     if (bright) c.copy(COLOR_BRIGHT).lerp(COLOR_B, rand() * 0.4);
     else c.copy(COLOR_A).lerp(COLOR_B, rand());
     colors[i * 3] = c.r;
@@ -110,6 +121,7 @@ export function createStarfield(reducedMotion: boolean): StarfieldHandle {
   geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
   geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
   geometry.setAttribute("aSpeed", new THREE.BufferAttribute(speeds, 1));
+  geometry.setAttribute("aAmp", new THREE.BufferAttribute(amps, 1));
   geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
 
   const uniforms = {

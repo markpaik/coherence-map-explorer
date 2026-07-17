@@ -29,6 +29,7 @@ import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
 import { createNebula } from "./scene/nebula";
+import { createPlanets } from "./scene/planets";
 import { createEtches } from "./scene/etches";
 import { createPoseDriver } from "./scene/pose";
 import { createMachine, type Machine } from "./state/machine";
@@ -119,7 +120,17 @@ function start(graph: GraphCore): void {
   const filaments = createFilaments(graph, nodes);
   const stars = createStarfield(reducedMotion);
   const nebula = createNebula();
-  scene.add(nodes.mesh, nodes.proxy, edges.mesh, filaments.object, stars.points, nebula.group);
+  // Distant sky: faint procedural planets, Constellation-only (pose-faded).
+  const planets = createPlanets();
+  scene.add(
+    nodes.mesh,
+    nodes.proxy,
+    edges.mesh,
+    filaments.object,
+    stars.points,
+    nebula.group,
+    planets.group,
+  );
 
   const rig = createCameraRig(canvas, nodes.boundsSphere, nodes.boundsBox, {
     reducedMotion,
@@ -329,8 +340,11 @@ function start(graph: GraphCore): void {
       nodes.setTime(sceneTime);
       edges.setTime(sceneTime);
       stars.setTime(sceneTime);
+      planets.setTime(sceneTime);
       render = true;
     }
+    // The sky belongs to the Constellation: planets fade with the pose.
+    planets.setVisibleAmount(1 - Math.min(1, poseDriver.pose));
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;

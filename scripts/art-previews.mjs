@@ -206,7 +206,7 @@ function svg(W, H, el, label, bg, ink) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <rect width="${W}" height="${H}" fill="${bg}"/>
 ${el.join("\n")}
-<text x="24" y="${H - 20}" font-family="ui-monospace, monospace" font-size="15" fill="${ink}" letter-spacing="0.08em">${label} · 480 standards · 757 prerequisite connections · real data, deterministic</text>
+<text x="24" y="${H - 20}" font-family="ui-monospace, monospace" font-size="15" fill="${ink}" letter-spacing="0.08em">${label} · 480 standards · 757 prerequisite connections · real data, deterministic · after Hobbs (curated.xyz/editorial/collecting-fidenza) and Cherniak (curated.xyz/editorial/collecting-ringers)</text>
 </svg>`;
 }
 

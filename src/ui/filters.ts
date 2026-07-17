@@ -188,15 +188,29 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   lensGroup.className = "filter-group";
   lensGroup.setAttribute("aria-label", "Lens");
 
-  const explainer = document.createElement("p");
-  explainer.className = "lens-explainer";
-  explainer.hidden = true;
+  // Definitions live in a styled hover/focus tooltip, not an inline paragraph
+  // — the rail stays tight. AT reads the same text via aria-describedby.
+  const tip = document.createElement("div");
+  tip.className = "filters-tip";
+  tip.id = "filters-tip";
+  tip.setAttribute("role", "tooltip");
+  tip.hidden = true;
+  function showTip(chip: HTMLElement, text: string): void {
+    tip.textContent = text;
+    tip.hidden = false;
+    const r = chip.getBoundingClientRect();
+    const tw = tip.getBoundingClientRect().width || 280;
+    let left = r.left + r.width / 2 - tw / 2;
+    left = Math.max(12, Math.min(left, window.innerWidth - 12 - tw));
+    tip.style.left = `${left}px`;
+    tip.style.bottom = `${window.innerHeight - r.top + 8}px`;
+  }
+  function hideTip(): void {
+    tip.hidden = true;
+  }
 
   function setLens(next: Lens): void {
     lens = lens === next ? "all" : next;
-    const active = LENSES.find((l) => l.id === lens);
-    explainer.hidden = !active;
-    explainer.textContent = active ? active.explain : "";
     syncChips();
     recompute();
   }
@@ -206,16 +220,20 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     chip.type = "button";
     chip.className = "filter-chip filter-toggle";
     chip.textContent = l.label;
-    chip.title = l.explain;
     chip.setAttribute("aria-pressed", "false");
+    chip.setAttribute("aria-describedby", "filters-tip");
     chip.addEventListener("click", () => setLens(l.id));
+    chip.addEventListener("mouseenter", () => showTip(chip, l.explain));
+    chip.addEventListener("mouseleave", hideTip);
+    chip.addEventListener("focus", () => showTip(chip, l.explain));
+    chip.addEventListener("blur", hideTip);
     lensChips.set(l.id, chip);
     lensGroup.appendChild(chip);
   }
 
   groups.append(gradeGroup, strandGroup, lensGroup);
-  rail.append(explainer, disclosure, groups);
-  document.body.appendChild(rail);
+  rail.append(disclosure, groups);
+  document.body.append(rail, tip);
 
   // Reflect a strand's aria-pressed to match the active set.
   function syncChips(): void {
@@ -230,7 +248,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       strandActive.add(strand);
       for (const g of GRADES) gradeActive.add(g);
       lens = "all";
-      explainer.hidden = true;
+      hideTip();
       syncChips();
       recompute();
     },
@@ -240,7 +258,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       strandActive.clear();
       for (const s of STRAND_ORDER) strandActive.add(s);
       lens = "all";
-      explainer.hidden = true;
+      hideTip();
       syncChips();
       recompute();
     },
@@ -252,6 +270,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     },
     dispose() {
       rail.remove();
+      tip.remove();
     },
   };
 }

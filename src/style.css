@@ -620,10 +620,13 @@ body {
   border-color: var(--ink-3);
 }
 
-/* one-line plain-language explainer shown above the rail while a lens is on */
-.lens-explainer {
-  margin: 0 0 6px;
-  padding: 6px 14px;
+/* Lens definitions: a styled hover/focus tooltip above the rail (the inline
+   explainer paragraph is gone — the rail stays tight). */
+.filters-tip {
+  position: fixed;
+  z-index: 30;
+  max-width: 320px;
+  padding: 8px 12px;
   font-size: 12px;
   line-height: 1.45;
   color: var(--ink-2);
@@ -632,7 +635,10 @@ body {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 10px;
-  max-width: 520px;
+  pointer-events: none;
+}
+.filters-tip[hidden] {
+  display: none;
 }
 
 .panel-desc-missing {
@@ -837,24 +843,24 @@ body {
 .filters-groups {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 5px 9px;
   flex-wrap: wrap;
 }
 .filter-group {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 .filter-group + .filter-group {
-  padding-left: 14px;
+  padding-left: 9px;
   border-left: 1px solid var(--line);
 }
 .filter-chip {
-  min-height: 30px;
-  padding: 4px 10px;
+  min-height: 26px;
+  padding: 3px 9px;
   font: inherit;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ink);
   background: rgb(255 255 255 / 0.03);
   border: 1px solid var(--line);

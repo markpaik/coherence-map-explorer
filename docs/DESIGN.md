@@ -181,3 +181,36 @@ all standards grouped by grade with the same panel. Every interactive target
 4. The whole thing holds 60fps on a 2020 laptop and doesn't melt a phone.
 5. A teacher can go from load → their standard → its prerequisites in under
    15 seconds without instructions.
+
+## Art styles (in exploration — previews in docs/previews/)
+
+Two artist-referenced styles are being explored as toggleable renderings,
+with Mark's colorways (2026-07-17). References, to be credited in-app when
+the styles ship:
+
+- **Fidenza** (Tyler Hobbs) — https://www.curated.xyz/editorial/collecting-fidenza
+- **Ringers** (Dmitri Cherniak) — https://www.curated.xyz/editorial/collecting-ringers
+
+Distilled principles to stay true to each artist (from the editorials):
+
+**Fidenza:** flow-field foundation; the signature is NON-OVERLAPPING curved
+rectangles with natural spacing (our build must route ribbons
+collision-aware, deflecting into adjacent lanes rather than crossing
+freely); mixed scale tiers with tuned probabilities (Jumbo common, Small
+rare — map edge weight to width tiers the same way); optional outline
+trait; a composition margin ("Have Margin") for a clean edge; segmented
+striped end-caps (Mark's ask: rebuilt in the node structure — cubes
+trailing striped segments into clean ribbons). Palette: Mark's provided
+teal/navy/brown/cream/yellow/red/mint colorway.
+
+**Ringers:** the signature is ONE continuous looped string wrapping pegs —
+per-edge strings are a departure; the true-to-artist moment is TRACE:
+render a standard's full prerequisite chain as a single continuous string
+wrapping each peg en route to the foundations. Bullseye (concentric) pegs
+on high-degree standards; paste/cream board (the community-favored beige);
+bold black peg outlines; taut tangent strings leaving the outer edge.
+Mark's colorway: pegs white/red/yellow/blue/green, white = edgeless.
+
+Dimness in these styles: prototype OPACITY (layered-wash translucency)
+against brightness — Mark's hypothesis is opacity reads better on flat
+fields; judge on stills.
