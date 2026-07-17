@@ -237,6 +237,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     morphing = false;
     elapsed = 0;
     writeAll();
+    nodes.refreshPickBounds();
     settleCamera(target, false);
     requestRender();
   }
@@ -322,6 +323,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
 
       if (landed) {
         morphing = false;
+        nodes.refreshPickBounds();
         settleCamera(dest, true);
         resolvePending();
       }

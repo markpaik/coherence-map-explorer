@@ -47,7 +47,9 @@ export function createTour(deps: TourDeps): TourHandle {
   const btn = document.getElementById("tour-btn") as HTMLButtonElement | null;
 
   const transition = (): boolean => !reducedMotion();
-  const autoAdvanceOn = (): boolean => !reducedMotion();
+  // Auto-advance is TIMING, not motion: it stays on under reduced motion (the
+  // transitions between stops become cuts, which is the accessible part).
+  // The pause button remains the way to stop the clock.
 
   // Four-rivers stop: cycle the strands one river at a time (2s each — one
   // full loop per 8s dwell) so all four colors actually take the stage.
@@ -105,7 +107,10 @@ export function createTour(deps: TourDeps): TourHandle {
       enter() {
         machine.clearFocus();
         rig.frameHome(transition());
-        if (reducedMotion()) return; // all four rivers stay lit, no cycling
+        if (reducedMotion()) {
+          filters.reset(); // all four rivers stay lit, no cycling
+          return;
+        }
         let riverIndex = 0;
         filters.setStrandsOnly(RIVERS[riverIndex]);
         riverTimer = window.setInterval(() => {
@@ -218,8 +223,6 @@ export function createTour(deps: TourDeps): TourHandle {
     backBtn.setAttribute("aria-disabled", String(index === 0));
     backBtn.classList.toggle("tour-btn-inert", index === 0);
     nextBtn.textContent = index === stops.length - 1 ? "Done" : "Next";
-    // Reduced motion: no auto-advance, no progress, no pause affordance.
-    pauseBtn.hidden = !autoAdvanceOn();
     holdRemaining = TOUR_HOLD_MS; // reset the dwell for the new stop
   }
 
@@ -239,6 +242,10 @@ export function createTour(deps: TourDeps): TourHandle {
     setPaused(false);
     machine.setHover(null); // a stale pre-tour hover must not linger under the card
     machine.setTouring(true);
+    // The tour breathes: skip the 20s post-interaction grace so the ethereal
+    // drift resumes at the first stop instead of leaving the model stagnant
+    // (main.ts allows drift while touring, matching story holds).
+    rig.resumeDriftNow();
     document.body.classList.add("touring");
     backdrop.hidden = false;
     card.hidden = false;
@@ -329,7 +336,7 @@ export function createTour(deps: TourDeps): TourHandle {
   return {
     start,
     tick(dt) {
-      if (!running || paused || !autoAdvanceOn()) return false;
+      if (!running || paused) return false;
       if (index >= stops.length - 1) return false; // last stop never auto-exits
       holdRemaining -= dt * 1000;
       const fill = dotFills[index];

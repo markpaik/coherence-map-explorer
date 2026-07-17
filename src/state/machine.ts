@@ -413,6 +413,20 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     };
   }
 
+  // Sphere CENTERED on one node, radius reaching the farthest of its neighbors:
+  // the focus fit uses this so the CLICKED standard lands dead center (then the
+  // panel offset shifts it to the center of the visible region) instead of
+  // drifting to the neighborhood's centroid, which sat off toward the heavier
+  // side of its connections and read as a random shift.
+  const sphereAround = (centerIdx: number, indices: number[]): THREE.Sphere => {
+    const c = new THREE.Vector3();
+    nodes.getPosition(centerIdx, c);
+    const v = new THREE.Vector3();
+    let r = 0;
+    for (const i of indices) r = Math.max(r, c.distanceTo(nodes.getPosition(i, v)));
+    return new THREE.Sphere(c.clone(), Math.max(r, 40));
+  };
+
   // Bounding sphere of a set of node indices (see nodeBoundingSphere). Keeps a
   // lone or tightly-clustered focus from filling the frame — a standard with no
   // mapped connections still lands in a legible local context.
@@ -530,7 +544,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     const silent = opts?.silent === true;
     const neighborhood = [nodeIndex, ...data.parts, ...data.buildsOn, ...data.leadsTo, ...data.related];
     lastNeighborhood = neighborhood; // reframe() replays this fit after a morph
-    void rig.focusOn(sphereOf(neighborhood), !cut, silent ? 0 : focusPanelOffsetPx());
+    void rig.focusOn(sphereAround(nodeIndex, neighborhood), !cut, silent ? 0 : focusPanelOffsetPx());
 
     // Panel + narration + deep link — all owned by the story card while silent.
     if (!silent) {
@@ -575,7 +589,11 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     if (focusIndex === null) return;
     // Same fit as focus() — the neighborhood indices are unchanged; only their
     // positions moved with the pose. Reuse the stored set, no cascade re-run.
-    void rig.focusOn(sphereOf(lastNeighborhood), !reducedMotion, focusPanelOffsetPx());
+    void rig.focusOn(
+      sphereAround(focusIndex, lastNeighborhood),
+      !reducedMotion,
+      focusPanelOffsetPx(),
+    );
     requestRender();
   }
 

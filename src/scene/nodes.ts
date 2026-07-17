@@ -70,8 +70,15 @@ export interface NodesHandle {
    * frame after a run of setInstancePosition calls.
    */
   setInstancePosition(index: number, x: number, y: number, z: number): void;
-  /** Flag both instance-matrix buffers dirty and refresh the proxy bounds. */
+  /**
+   * Flag both instance-matrix buffers dirty. Cheap enough for every morph
+   * frame — the proxy pick bounds are NOT refreshed here (that walk over all
+   * instances is the expensive part and mid-morph picking doesn't matter);
+   * call refreshPickBounds() once when a morph lands.
+   */
   commitPositions(): void;
+  /** Recompute the pick proxy's bounding sphere (call when a morph settles). */
+  refreshPickBounds(): void;
   /** Read instance i's current world position (for pose-correct camera framing). */
   getPosition(index: number, out: THREE.Vector3): THREE.Vector3;
   /** Advance the shimmer clock (seconds). */
@@ -394,6 +401,8 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     commitPositions() {
       mesh.instanceMatrix.needsUpdate = true;
       proxy.instanceMatrix.needsUpdate = true;
+    },
+    refreshPickBounds() {
       proxy.computeBoundingSphere();
     },
     getPosition(index, out) {

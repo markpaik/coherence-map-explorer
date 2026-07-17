@@ -39,6 +39,7 @@ import { createFilters } from "./ui/filters";
 import { createTour } from "./ui/tour";
 import { createViewToggle } from "./ui/viewtoggle";
 import { createFallback } from "./ui/fallback";
+import { createBrowse } from "./ui/browse";
 import { createPicking } from "./interaction/picking";
 import { createDamageEngine } from "./stories/damage";
 import { createSelectorResolver } from "./stories/selectors";
@@ -236,6 +237,22 @@ function start(graph: GraphCore): void {
   const storyPicker = createStoryPicker({ player: storyPlayer });
   void storyPicker;
 
+  // -- Browse mode (phone-first drill-down; default on phones) -------------
+  // A full-screen DOM overlay above the still-booting scene. Active when the
+  // device is a small coarse-pointer screen, or forced via ?browse=1 (any
+  // device — desktop testing); ?nobrowse=1 forces it off. Browse reads the
+  // boot hash itself (opens at a #/s/<CODE> deep link, stays closed for a
+  // #/story/<id> one). onEnterMap just pokes the render loop after hand-off.
+  const isPhoneDefault =
+    window.matchMedia("(max-width: 720px)").matches &&
+    window.matchMedia("(pointer: coarse)").matches;
+  const browseActive = params.has("nobrowse")
+    ? false
+    : params.has("browse") || isPhoneDefault;
+  if (browseActive) {
+    createBrowse({ graph, machine, storyPicker, onEnterMap: requestRender });
+  }
+
   // -- reduced motion (single control point; also the __cme debug hook) -----
   // Fans a single boolean out to every animated subsystem: idle drift, node
   // shimmer, star twinkle, edge flow comets, and the machine's cascade/camera
@@ -331,7 +348,10 @@ function start(graph: GraphCore): void {
     const storyHolding = machine.state === "storying" && storyPlayer.isHolding();
     if (storyHolding && !wasStoryHolding) rig.resumeDriftNow();
     wasStoryHolding = storyHolding;
-    const driftAllowed = machine.state === "idle" || storyHolding;
+    // Drift breathes while idle, during story holds, and through the tour —
+    // a stagnant model between tour stops read as broken, not calm.
+    const driftAllowed =
+      machine.state === "idle" || machine.state === "touring" || storyHolding;
     if (rig.update(delta, !driftAllowed)) render = true;
 
     if (render) {

@@ -1843,3 +1843,595 @@ body.og #veil {
 :root.rm .search-rail.search-pulse .search-bar {
   animation: none !important;
 }
+
+/* ========================================================================== */
+/* Browse mode — phone-first drill-down overlay (src/ui/browse.ts).            */
+/* One appended block; reuses the DESIGN tokens + the shared .badge classes.   */
+/* Body 16px, paddings 12-16px, 44px touch targets, --line hairline rows.      */
+/* ========================================================================== */
+
+/* The guided tour is desktop-first; hide its button on coarse-pointer phones.
+   (Stories work well on touch and stay.) */
+@media (max-width: 720px) and (pointer: coarse) {
+  #tour-btn {
+    display: none;
+  }
+}
+
+/* -- full-screen overlay (opaque --bg over the canvas) --------------------- */
+.browse {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.browse[hidden] {
+  display: none;
+}
+
+.browse-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.browse-back {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  background: none;
+  border: none;
+  border-radius: 10px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.browse-back:hover {
+  color: var(--ink);
+}
+.browse-header-label {
+  font-family: var(--display);
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browse-view {
+  flex: 1;
+  padding: 16px 16px 64px;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* -- home ------------------------------------------------------------------ */
+.browse-kicker {
+  margin: 0 0 6px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.browse-home-title {
+  margin: 0 0 18px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(24px, 7vw, 32px);
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.browse-home-title:focus {
+  outline: none;
+}
+
+.browse-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 50px;
+  padding: 0 14px;
+  margin-bottom: 12px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink-3);
+}
+.browse-search:focus-within {
+  outline: 2px solid rgb(236 234 246 / 0.6);
+  outline-offset: 2px;
+}
+.browse-search-icon {
+  flex: none;
+}
+.browse-search-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 16px; /* 16px avoids iOS zoom-on-focus */
+  color: var(--ink);
+}
+.browse-search-input::placeholder {
+  color: var(--ink-3);
+}
+
+.browse-results {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.browse-results[hidden] {
+  display: none;
+}
+.browse-result-hint {
+  padding: 12px 4px;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+
+/* -- section headings + tiles ---------------------------------------------- */
+.browse-section-h {
+  margin: 20px 0 10px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.browse-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 8px;
+}
+.browse-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 76px;
+  padding: 12px;
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.browse-tile:hover {
+  background: rgb(255 255 255 / 0.07);
+  border-color: var(--ink-3);
+}
+.browse-tile-token {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink);
+}
+.browse-tile-sub {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.browse-course-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.browse-course-tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 12px 14px;
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.browse-course-tile:hover {
+  background: rgb(255 255 255 / 0.07);
+  border-color: var(--ink-3);
+}
+.browse-course-label {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--ink);
+}
+.browse-course-count {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.browse-ghost-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+}
+.browse-ghost {
+  flex: 1 1 0;
+  min-height: 48px;
+  padding: 0 12px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.browse-ghost:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+/* -- view heading (group / domain) ----------------------------------------- */
+.browse-view-h {
+  margin: 2px 0 16px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(22px, 6vw, 28px);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.browse-view-h:focus,
+.browse-std-code:focus {
+  outline: none;
+}
+
+/* -- generic list + rows --------------------------------------------------- */
+.browse-list {
+  display: flex;
+  flex-direction: column;
+}
+.browse-domain-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 4px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+.browse-domain-row:hover {
+  background: rgb(255 255 255 / 0.04);
+}
+.browse-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.browse-domain-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+.browse-domain-count {
+  flex: none;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* -- domain view: clusters + standard rows --------------------------------- */
+.browse-cluster {
+  margin-bottom: 22px;
+}
+.browse-cluster-h {
+  margin: 0 0 6px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  line-height: 1.4;
+}
+
+/* A tappable standard row (domain list, search results, connections). */
+.browse-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 4px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+.browse-row:hover {
+  background: rgb(255 255 255 / 0.04);
+}
+.browse-row > .browse-dot {
+  margin-top: 5px;
+}
+.browse-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.browse-row-code {
+  flex: none;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.browse-row-text {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.browse-major-chip {
+  flex: none;
+  align-self: center;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 20px;
+  color: #f0d79a;
+  border: 1px solid #5a4a1e;
+  background: rgb(192 138 30 / 0.12);
+}
+
+/* Grade chip (search results / connections): a strand dot + grade token. */
+.browse-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+.browse-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot, var(--ink-3));
+}
+
+/* -- standard view --------------------------------------------------------- */
+.browse-std-head {
+  margin-bottom: 14px;
+}
+.browse-std-code-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.browse-std-dot {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+}
+.browse-std-code {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.browse-std-crumb {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.browse-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.browse-desc {
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ink);
+  margin-bottom: 22px;
+}
+.browse-desc p {
+  margin: 0 0 10px;
+}
+.browse-desc p:last-child {
+  margin-bottom: 0;
+}
+.browse-desc img,
+.browse-desc.math-host img {
+  max-width: 100%;
+  height: auto;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+}
+.browse-desc .term {
+  color: var(--ink);
+  border-bottom: 1px dotted var(--ink-3);
+  cursor: help;
+}
+.browse-loading {
+  color: var(--ink-3);
+}
+.browse-desc-missing {
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+.browse-conns {
+  margin-bottom: 8px;
+}
+.browse-conn-group {
+  margin-bottom: 18px;
+}
+.browse-conn-h {
+  margin: 0 0 4px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.browse-conn-empty {
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.browse-conn-note {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.browse-primary {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  margin: 14px 0 24px;
+  padding: 13px 16px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  color: #0b0b18;
+  background: linear-gradient(180deg, #b6a6ec, #8b5cf6);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.browse-primary:hover {
+  filter: brightness(1.08);
+}
+
+.browse-tasks {
+  margin-bottom: 8px;
+}
+.browse-task-group {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.browse-task-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.browse-task-list li {
+  margin: 6px 0;
+}
+.browse-tasks a {
+  color: #a99cf0;
+}
+
+/* -- "Browse" pill (shown while in the 3D scene) --------------------------- */
+.browse-pill {
+  position: fixed;
+  top: clamp(60px, 9vh, 78px);
+  right: 12px;
+  z-index: 44;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  cursor: pointer;
+}
+.browse-pill[hidden] {
+  display: none;
+}
+.browse-pill:hover {
+  border-color: var(--ink-3);
+}
+/* A running story owns the frame — keep the pill out of the way until it exits. */
+body.storying .browse-pill {
+  display: none;
+}
+
+/* While Browse is open, hide the scene chrome behind the opaque overlay so it
+   can't take keyboard focus (the ?browse=1 desktop path has a Tab key). */
+body.browsing .title-block,
+body.browsing .search-rail,
+body.browsing .filters-rail,
+body.browsing .view-toggle,
+body.browsing .depth-scale,
+body.browsing .nav-hints {
+  display: none;
+}
+
+/* Reduced motion: no hover/transition motion in Browse. */
+@media (prefers-reduced-motion: reduce) {
+  .browse-tile,
+  .browse-course-tile,
+  .browse-ghost {
+    transition: none;
+  }
+}
+:root.rm .browse-tile,
+:root.rm .browse-course-tile,
+:root.rm .browse-ghost {
+  transition: none !important;
+}

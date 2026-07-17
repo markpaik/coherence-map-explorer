@@ -116,7 +116,10 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     onTogglePause: () => togglePause(),
   });
 
-  const autoAdvanceOn = (): boolean => !reducedMotion();
+  // Auto-advance is TIMING, not motion: it stays on under reduced motion (the
+  // scene transitions become cuts, which is the accessible part). Pause is the
+  // control for stopping the clock.
+  const autoAdvanceOn = (): boolean => true;
 
   // --- state --------------------------------------------------------------
   let running = false;
@@ -345,8 +348,6 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     document.body.classList.add("storying");
     backdrop.hidden = false;
     card.begin(story);
-    // Reduced motion disables auto-advance entirely (manual stepping only, no
-    // progress animation) — hide the pause control and progress fill then.
     card.setAutoAdvanceEnabled(autoAdvanceOn());
     card.setPaused(false);
     void goto(0, !reducedMotion());
