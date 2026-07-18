@@ -55,21 +55,20 @@ wrangler deploy`, then `git push`. Data rebuilds: `npm run data`
 
 ## Open threads, ranked
 
-1. **Fidenza / Ringers real build** — v2 previews (docs/previews/, script
-   scripts/art-previews.mjs) rendered in Mark's colorways: Ringers on
-   paste-cream (#f0ece0) with bold-black-outlined pegs
-   (white/red/yellow/blue/green, white = edgeless) and taut tangent strings
-   that wrap the destination peg; Fidenza on teal (#43a08b) with
-   navy/brown/cream/yellow/red/mint ribbons and cube nodes trailing striped
-   caps. AWAITING Mark's verdict on the previews before building. Build
-   spec essentials (also in DESIGN.md "Art styles"): Fidenza ribbons must be
-   collision-aware (non-overlap is the artist's signature); Ringers' Trace
-   should render one CONTINUOUS string wrapping the whole ancestry chain;
-   prototype dimness as OPACITY vs brightness on stills; credit Hobbs
-   (curated.xyz/editorial/collecting-fidenza) and Cherniak
-   (curated.xyz/editorial/collecting-ringers) in-app when shipped. Mark
-   wants these as 3-D styles with real thickness — flat from a canonical
-   angle, sculptural when orbited.
+1. **Fidenza / Ringers: SHIPPED v1 (2026-07-17); refinements queued** — the
+   art-style system is live: Galaxy/Ringers/Fidenza toggle above the pose
+   toggle, ?style= deep links, in-app artist credits, opacity-as-dimness in
+   art styles, Ringers inverted-hull peg outlines + taut edge-leaving
+   strings, Fidenza world-plane flat ribbons (full width head-on,
+   foreshortened when orbited — the anamorphic behavior) + striped caps +
+   twisted cubes. Style 0 is pixel-pinned to the shipped Galaxy; edges moved
+   to RawShaderMaterial with packed scalars after the art attributes hit the
+   16-attribute WebGL2 minimum (the pre-fix program failed to link on
+   min-spec GPUs — keep an eye on odd devices). QUEUED refinements
+   (DESIGN.md "Art styles"): Ringers TRACE as one continuous string, bullseye
+   pegs for high-degree standards, collision-aware Fidenza routing
+   (non-overlap is Hobbs's signature; today's ribbons still cross), and
+   Mark's visual verdict on both styles in-app.
 2. **Constellation art pass** — promised previews (not yet made): edge-
    bundled strand rivers with visible fan-out, de-clumping for negative
    space, flow-field variant. Rule: beauty through ORGANIZATION, never

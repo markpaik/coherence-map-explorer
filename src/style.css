@@ -288,7 +288,11 @@ body {
   position: fixed;
   right: clamp(16px, 2.5vw, 28px);
   bottom: clamp(46px, 7vh, 62px);
-  transform: translateY(calc(-200% - 60px)); /* above the art toggle */
+  /* Sit above BOTH stacked toggles. The pose + art toggles are ~51px tall each
+     with an 8px gap between them, so the credit's baseline anchor must clear
+     2 × 51 + 2 × 8 ≈ 118px. A translateY tied to the credit's own (short)
+     height, as before, landed it inside the art toggle. */
+  transform: translateY(-118px);
   z-index: 11;
   font-size: 11px;
   color: var(--ink-2);
@@ -344,6 +348,94 @@ body {
 .depth-scale-sep {
   color: var(--ink-2);
   margin: 0 2px;
+}
+
+/* -- art styles: chrome that sits directly on the light field --------------- */
+/* When a style is active the title, nav hints, depth scale, and credit sit on a
+   printed board (Ringers cream #f0ece0) or a teal field (Fidenza #43a08b), not
+   the dark sky, so they re-ink to stay legible. Ringers inks them in board ink
+   (#1a1712); Fidenza uses the cream #e8e0cd with a dark shadow so it lifts off
+   the teal. The glass plaques (view/art toggles, filter rail) are deliberately
+   left as dark framed cards on the light fields — the accepted look this round.
+   Only body.art-* is scoped here; Galaxy (style 0) is untouched. */
+
+/* Page backdrop matches the active field so a deep-linked ?style= load (or any
+   frame where the canvas has not painted yet) shows the board/field, not the
+   dark-sky --bg flashing through. The canvas covers this in steady state; this
+   only guards the seams. Galaxy keeps the dark --bg. */
+body.art-ringers {
+  background: #f0ece0;
+}
+body.art-fidenza {
+  background: #43a08b;
+}
+
+/* Ringers — board ink on cream. */
+body.art-ringers .brand {
+  color: rgb(26 23 18 / 0.66);
+}
+body.art-ringers .headline {
+  color: #1a1712;
+  text-shadow: none; /* the dark-sky violet halo smears on cream */
+}
+body.art-ringers .subline {
+  color: rgb(26 23 18 / 0.82);
+}
+body.art-ringers .statline {
+  color: rgb(26 23 18 / 0.66);
+}
+body.art-ringers .nav-hints {
+  color: rgb(26 23 18 / 0.68);
+}
+body.art-ringers .nav-hints span {
+  color: rgb(26 23 18 / 0.92);
+}
+body.art-ringers .depth-scale,
+body.art-ringers .depth-scale-axis {
+  color: rgb(26 23 18 / 0.68);
+}
+body.art-ringers .depth-scale-sep {
+  color: rgb(26 23 18 / 0.9);
+}
+body.art-ringers .art-credit {
+  color: rgb(26 23 18 / 0.74);
+}
+
+/* Fidenza — cream, dark-shadowed to lift off the teal field. */
+body.art-fidenza .brand {
+  color: rgb(232 224 205 / 0.84);
+  text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
+}
+body.art-fidenza .headline {
+  color: #e8e0cd;
+  text-shadow: 0 2px 14px rgb(20 51 44 / 0.5); /* replaces the violet sky halo */
+}
+body.art-fidenza .subline {
+  color: rgb(232 224 205 / 0.92);
+  text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
+}
+body.art-fidenza .statline {
+  color: rgb(232 224 205 / 0.86);
+  text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
+}
+body.art-fidenza .nav-hints {
+  color: rgb(232 224 205 / 0.86);
+  text-shadow: 0 1px 3px rgb(20 51 44 / 0.55);
+}
+body.art-fidenza .nav-hints span {
+  color: #e8e0cd;
+}
+body.art-fidenza .depth-scale,
+body.art-fidenza .depth-scale-axis {
+  color: rgb(232 224 205 / 0.86);
+  text-shadow: 0 1px 3px rgb(20 51 44 / 0.55);
+}
+body.art-fidenza .depth-scale-sep {
+  color: #e8e0cd;
+}
+body.art-fidenza .art-credit {
+  color: rgb(232 224 205 / 0.92);
+  text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
 }
 
 /* -- hover tooltip (glass chip) ------------------------------------------ */
@@ -1157,6 +1249,14 @@ body {
   .view-seg {
     padding: 0 10px;
     font-size: 11px;
+  }
+  /* The art toggle + credit ride the same anchor + translateY stack as the pose
+     toggle, so they follow it up to the mobile position (12px / 72–96px). Their
+     segments already share .view-seg above, so they shrink with it. */
+  .art-toggle,
+  .art-credit {
+    right: 12px;
+    bottom: clamp(72px, 12vh, 96px);
   }
   /* The open Filters sheet expands up through the view toggle's spot, and the
      toggle (z 11) sits above the sheet (z 10) — an orphaned control floating on

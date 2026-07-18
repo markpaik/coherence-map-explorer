@@ -17,7 +17,8 @@
 
 import * as THREE from "three";
 import type { GraphEdge, GraphNode } from "../data";
-import { STRAND_COLORS } from "./palette";
+import { STRAND_COLORS, restRadius } from "./palette";
+import { RINGERS, FIDENZA, artHash } from "./artstyle";
 
 const SEGMENTS = 24;
 
@@ -32,6 +33,15 @@ const SEGMENTS = 24;
 // GLSL ES 3.00 (glslVersion: GLSL3) — the per-state tables below use float[]()
 // array constructors and dynamic indexing, which GLSL 1.00 forbids.
 const VERT = /* glsl */ `
+  precision highp float;
+
+  // RawShaderMaterial injects nothing, so the two matrices the galaxy + art
+  // paths use are declared here (and ONLY these — not the position/normal/uv
+  // that ShaderMaterial would auto-add, which pushed the edge program past the
+  // GPU's 16 vertex-attribute limit on min-spec hardware).
+  uniform mat4 projectionMatrix;
+  uniform mat4 modelViewMatrix;
+
   in float t;
   in float side;
   in vec3 aStart;
@@ -44,11 +54,20 @@ const VERT = /* glsl */ `
   in float aVisible;
   in float aDamage;
 
+  // Art-style per-instance data (baked once). Unused by the galaxy path.
+  in vec3 aArtRing;    // Ringers string color (source strand peg color)
+  in vec3 aArtFid;     // Fidenza ribbon body color (hash pick)
+  in vec3 aArtFid2;    // Fidenza striped-cap alternate color
+  in vec4 aArtScalars; // x=Fidenza world width, y=Ringers side ±1, z=radA, w=radB
+
   uniform vec2 uViewport;   // drawing-buffer size in device px
   uniform float uPxRatio;   // device px per CSS px (capped at 2)
+  uniform float uArtStyle;  // 0 Galaxy | 1 Ringers | 2 Fidenza
 
   out float vT;
   out vec3 vColor;
+  out vec3 vArtColor;
+  out vec3 vArtColor2;
   out float vKind;
   out float vEmphasis;
   out float vVisible;
@@ -60,45 +79,116 @@ const VERT = /* glsl */ `
   }
 
   void main() {
-    vec3 p = bezier(t);
-    // Analytic tangent of the quadratic bezier (well-defined at both ends).
-    vec3 tangent = 2.0 * (1.0 - t) * (aCtrl - aStart) + 2.0 * t * (aEnd - aCtrl);
-    // Coincident endpoints (control == start == end) give a zero tangent;
-    // normalize() would emit NaN and blow up the whole instanced draw.
-    float tlen = length(tangent);
-    vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
+    if (uArtStyle < 0.5) {
+      // ===================== GALAXY (shipped, byte-identical) ===============
+      vec3 p = bezier(t);
+      // Analytic tangent of the quadratic bezier (well-defined at both ends).
+      vec3 tangent = 2.0 * (1.0 - t) * (aCtrl - aStart) + 2.0 * t * (aEnd - aCtrl);
+      // Coincident endpoints (control == start == end) give a zero tangent;
+      // normalize() would emit NaN and blow up the whole instanced draw.
+      float tlen = length(tangent);
+      vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
 
-    vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-    vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + tdir, 1.0);
+      vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + tdir, 1.0);
 
-    // Screen-space direction (device px), then its normal.
-    vec2 dir = (clipT.xy / clipT.w - clip.xy / clip.w) * uViewport;
-    float len = max(length(dir), 1e-6);
-    vec2 normalPx = vec2(-dir.y, dir.x) / len;
+      // Screen-space direction (device px), then its normal.
+      vec2 dir = (clipT.xy / clipT.w - clip.xy / clip.w) * uViewport;
+      float len = max(length(dir), 1e-6);
+      vec2 normalPx = vec2(-dir.y, dir.x) / len;
 
-    // Width (CSS px) per state — prereq widens more when hot/chain than related.
-    float e = clamp(aEmphasis, 0.0, 5.0);
-    // wR[5] (related-to-focus) widened 1.3 → 1.9: the 2026-07 audit found 37%
-    // of focuses light a related standard whose only visible link is this
-    // dash — it must read as an explanation, not a subtlety.
-    float wP[6] = float[](1.2, 1.2, 2.5, 2.5, 2.5, 1.4);
-    float wR[6] = float[](1.0, 1.0, 2.0, 2.0, 2.0, 1.9);
-    int i0 = int(floor(e));
-    int i1 = int(min(floor(e) + 1.0, 5.0));
-    float f = fract(e);
-    float width = mix(mix(wP[i0], wP[i1], f), mix(wR[i0], wR[i1], f), aKind);
+      // Width (CSS px) per state — prereq widens more when hot/chain than related.
+      float e = clamp(aEmphasis, 0.0, 5.0);
+      // wR[5] (related-to-focus) widened 1.3 → 1.9: the 2026-07 audit found 37%
+      // of focuses light a related standard whose only visible link is this
+      // dash — it must read as an explanation, not a subtlety.
+      float wP[6] = float[](1.2, 1.2, 2.5, 2.5, 2.5, 1.4);
+      float wR[6] = float[](1.0, 1.0, 2.0, 2.0, 2.0, 1.9);
+      int i0 = int(floor(e));
+      int i1 = int(min(floor(e) + 1.0, 5.0));
+      float f = fract(e);
+      float width = mix(mix(wP[i0], wP[i1], f), mix(wR[i0], wR[i1], f), aKind);
 
-    vec2 offsetNdc = normalPx * (width * uPxRatio * 0.5 * side) / (uViewport * 0.5);
-    clip.xy += offsetNdc * clip.w;
-    gl_Position = clip;
+      vec2 offsetNdc = normalPx * (width * uPxRatio * 0.5 * side) / (uViewport * 0.5);
+      clip.xy += offsetNdc * clip.w;
+      gl_Position = clip;
 
-    vT = t;
-    vColor = mix(aColorA, aColorB, t);
-    vKind = aKind;
-    vEmphasis = e;
-    // Filtered-out edges (either endpoint hidden) fade toward a 0.06 ghost.
-    vVisible = mix(0.06, 1.0, aVisible);
-    vDamage = clamp(aDamage, 0.0, 1.0);
+      vT = t;
+      vColor = mix(aColorA, aColorB, t);
+      vKind = aKind;
+      vEmphasis = e;
+      // Filtered-out edges (either endpoint hidden) fade toward a 0.06 ghost.
+      vVisible = mix(0.06, 1.0, aVisible);
+      vDamage = clamp(aDamage, 0.0, 1.0);
+    } else if (uArtStyle < 1.5) {
+      // ===================== RINGERS: taut string ===========================
+      // A straight string leaving the source peg's outer edge and landing on
+      // the destination peg's edge (string-art). Inset each endpoint along the
+      // chord by its node radius, then push it off the peg centre, perpendicular
+      // to the chord in the world xy-plane, by the tangent-leave amount.
+      float radA = aArtScalars.z;
+      float radB = aArtScalars.w;
+      float leaveSide = aArtScalars.y;
+      vec3 chord = aEnd - aStart;
+      float clen = length(chord);
+      vec3 dir = clen > 1e-6 ? chord / clen : vec3(1.0, 0.0, 0.0);
+      vec3 perp = length(dir.xy) < 1e-4
+        ? vec3(1.0, 0.0, 0.0)
+        : normalize(vec3(-dir.y, dir.x, 0.0));
+      vec3 A2 = aStart + dir * radA + perp * leaveSide * radA * 0.85;
+      vec3 B2 = aEnd - dir * radB + perp * leaveSide * radB * 0.85;
+      vec3 p = mix(A2, B2, t);
+
+      vec3 tangent = B2 - A2;
+      float tlen = length(tangent);
+      vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
+
+      vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + tdir, 1.0);
+      vec2 sdir = (clipT.xy / clipT.w - clip.xy / clip.w) * uViewport;
+      float len = max(length(sdir), 1e-6);
+      vec2 normalPx = vec2(-sdir.y, sdir.x) / len;
+
+      // Constant 1.7 CSS-px string (screen-space width, like the galaxy).
+      float width = 1.7;
+      vec2 offsetNdc = normalPx * (width * uPxRatio * 0.5 * side) / (uViewport * 0.5);
+      clip.xy += offsetNdc * clip.w;
+      gl_Position = clip;
+
+      vT = t;
+      vColor = mix(aColorA, aColorB, t);
+      vArtColor = aArtRing;
+      vArtColor2 = aArtFid2;
+      vKind = aKind;
+      vEmphasis = clamp(aEmphasis, 0.0, 5.0);
+      vVisible = mix(0.06, 1.0, aVisible);
+      vDamage = clamp(aDamage, 0.0, 1.0);
+    } else {
+      // ===================== FIDENZA: flat world-plane ribbon ===============
+      // Keep the bezier + tangent, but expand in the WORLD PLANE (not screen
+      // space): the width vector has no z-component, so the strip shows FULL
+      // width from the canonical front camera and foreshortens as you orbit —
+      // the anamorphic strokes that are the whole point of this style.
+      vec3 p = bezier(t);
+      vec3 tangent = 2.0 * (1.0 - t) * (aCtrl - aStart) + 2.0 * t * (aEnd - aCtrl);
+      float tlen = length(tangent);
+      vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
+      vec3 offAxis = cross(tdir, vec3(0.0, 0.0, 1.0));
+      if (length(offAxis) < 1e-4) offAxis = cross(tdir, vec3(0.0, 1.0, 0.0));
+      vec3 offsetDir = normalize(offAxis);
+      vec3 wp = p + offsetDir * aArtScalars.x * 0.5 * side;
+
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(wp, 1.0);
+
+      vT = t;
+      vColor = mix(aColorA, aColorB, t);
+      vArtColor = aArtFid;
+      vArtColor2 = aArtFid2;
+      vKind = aKind;
+      vEmphasis = clamp(aEmphasis, 0.0, 5.0);
+      vVisible = mix(0.06, 1.0, aVisible);
+      vDamage = clamp(aDamage, 0.0, 1.0);
+    }
   }
 `;
 
@@ -108,9 +198,13 @@ const FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uFlow; // 1 = animate prereq comets, 0 = frozen (reduced motion)
   uniform float uStory; // 1 while a story plays: healthy edges lift toward the chain look
+  uniform float uArtStyle; // 0 Galaxy | 1 Ringers | 2 Fidenza
+  uniform vec3 uField; // active art-style field color (damage fades toward it)
 
   in float vT;
   in vec3 vColor;
+  in vec3 vArtColor;
+  in vec3 vArtColor2;
   in float vKind;
   in float vEmphasis;
   in float vVisible;
@@ -119,56 +213,88 @@ const FRAG = /* glsl */ `
   out vec4 fragColor;
 
   void main() {
-    float e = vEmphasis;
-    int i0 = int(floor(e));
-    int i1 = int(min(floor(e) + 1.0, 5.0));
-    float f = fract(e);
+    if (uArtStyle < 0.5) {
+      // ===================== GALAXY (shipped, byte-identical) ===============
+      float e = vEmphasis;
+      int i0 = int(floor(e));
+      int i1 = int(min(floor(e) + 1.0, 5.0));
+      float f = fract(e);
 
-    // Per-state tables indexed by emphasis: dimmed/rest/hover/focus/chain/related.
-    float aP[6]    = float[](0.06, 0.35, 0.9, 0.9, 0.9, 0.40);  // prereq alpha
-    float aR[6]    = float[](0.04, 0.18, 0.7, 0.7, 0.7, 0.90);  // related alpha
-    float mulP[6]  = float[](1.0,  1.0,  2.2, 2.2, 2.2, 1.40);  // prereq HDR mul
-    float mulR[6]  = float[](1.0,  1.0,  1.3, 1.3, 1.3, 1.6);   // related HDR mul (5: audit)
-    float flowP[6] = float[](0.0,  0.0,  1.0, 1.0, 1.0, 0.0);   // comet flow (prereq)
-    float shimR[6] = float[](0.0,  0.0,  1.0, 0.0, 0.0, 1.0);   // shimmer (related)
+      // Per-state tables indexed by emphasis: dimmed/rest/hover/focus/chain/related.
+      float aP[6]    = float[](0.06, 0.35, 0.9, 0.9, 0.9, 0.40);  // prereq alpha
+      float aR[6]    = float[](0.04, 0.18, 0.7, 0.7, 0.7, 0.90);  // related alpha
+      float mulP[6]  = float[](1.0,  1.0,  2.2, 2.2, 2.2, 1.40);  // prereq HDR mul
+      float mulR[6]  = float[](1.0,  1.0,  1.3, 1.3, 1.3, 1.6);   // related HDR mul (5: audit)
+      float flowP[6] = float[](0.0,  0.0,  1.0, 1.0, 1.0, 0.0);   // comet flow (prereq)
+      float shimR[6] = float[](0.0,  0.0,  1.0, 0.0, 0.0, 1.0);   // shimmer (related)
 
-    vec3 col = vColor;
-    float alpha;
+      vec3 col = vColor;
+      float alpha;
 
-    // Story lift: while a story plays, edges that are LIT (visible) and healthy
-    // rise toward the chain look (bright, flowing). Damage kills the lift
-    // (gone by d≈0.7) and so does the ghost mask — an edge outside the story's
-    // lit set stays a dark filament, no glow, no comets. max(), not ×, so an
-    // already-chain-lit edge never double-brightens.
-    float story = uStory
-      * (1.0 - clamp(vDamage * 3.0, 0.0, 1.0))
-      * clamp((vVisible - 0.06) / 0.94, 0.0, 1.0);
+      // Story lift: while a story plays, edges that are LIT (visible) and healthy
+      // rise toward the chain look (bright, flowing). Damage kills the lift
+      // (gone by d≈0.7) and so does the ghost mask — an edge outside the story's
+      // lit set stays a dark filament, no glow, no comets. max(), not ×, so an
+      // already-chain-lit edge never double-brightens.
+      float story = uStory
+        * (1.0 - clamp(vDamage * 3.0, 0.0, 1.0))
+        * clamp((vVisible - 0.06) / 0.94, 0.0, 1.0);
 
-    if (vKind < 0.5) {
-      // Prerequisite (directed): HDR-bright with directional comets when chain/hot.
-      alpha = max(mix(aP[i0], aP[i1], f), 0.65 * story);
-      col *= max(mix(mulP[i0], mulP[i1], f), 1.0 + 0.8 * story);
-      float flow = max(mix(flowP[i0], flowP[i1], f), story);
-      float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
-      float comet = pow(fr, 3.0);
-      col += vColor * comet * 2.0 * flow;
+      if (vKind < 0.5) {
+        // Prerequisite (directed): HDR-bright with directional comets when chain/hot.
+        alpha = max(mix(aP[i0], aP[i1], f), 0.65 * story);
+        col *= max(mix(mulP[i0], mulP[i1], f), 1.0 + 0.8 * story);
+        float flow = max(mix(flowP[i0], flowP[i1], f), story);
+        float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
+        float comet = pow(fr, 3.0);
+        col += vColor * comet * 2.0 * flow;
+      } else {
+        // Related (undirected): in-shader dash, slow shimmer, NEVER a flow comet.
+        float dash = step(0.5, fract(vT * 14.0));
+        alpha = max(mix(aR[i0], aR[i1], f), 0.4 * story) * dash;
+        float shim = max(mix(shimR[i0], shimR[i1], f), story);
+        col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
+      }
+
+      // Structural damage (stories): pull the edge toward a near-black ember
+      // (sRGB #2a120c; the literal is LINEAR — the output transform re-brightens
+      // it) and drop most of its alpha — a broken lineage goes dark, not merely
+      // warm. Additive-blend safe: both moves subtract light.
+      col = mix(col, vec3(0.0231, 0.0060, 0.0037), vDamage);
+      alpha *= (1.0 - 0.55 * vDamage);
+
+      // Soft edge across the ribbon is unnecessary at ~1px widths; keep it flat.
+      fragColor = vec4(col, alpha * vVisible);
     } else {
-      // Related (undirected): in-shader dash, slow shimmer, NEVER a flow comet.
-      float dash = step(0.5, fract(vT * 14.0));
-      alpha = max(mix(aR[i0], aR[i1], f), 0.4 * story) * dash;
-      float shim = max(mix(shimR[i0], shimR[i1], f), story);
-      col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
+      // ===================== ART STYLES (paper: opacity, never HDR) =========
+      // Dimness is OPACITY toward the field: no comets, no shimmer, no bloom.
+      vec3 col = vArtColor;
+      float litness = clamp((vVisible - 0.06) / 0.94, 0.0, 1.0);
+      float baseA = (uArtStyle < 1.5) ? 0.85 : 0.95; // Ringers / Fidenza
+      float alpha = baseA * mix(0.08, 1.0, litness);
+      // Emphasis dim (e < 1) drops alpha; hover/focus/chain (e >= 1) read via
+      // width + full opacity, never a brightness multiply.
+      alpha *= mix(0.25, 1.0, clamp(vEmphasis, 0.0, 1.0));
+
+      // Related edges keep the in-shader dash in both art styles.
+      if (vKind >= 0.5) {
+        float dash = step(0.5, fract(vT * 14.0));
+        alpha *= dash;
+      }
+
+      // Fidenza striped caps (prereq ends only): alternate the body color with
+      // the cap alternate near t = 0 and t = 1.
+      if (uArtStyle >= 1.5 && vKind < 0.5 && (vT < 0.12 || vT > 0.88)) {
+        float band = step(0.5, fract(vT * 42.0));
+        col = mix(col, vArtColor2, band);
+      }
+
+      // Damage: dissolve a broken lineage into the field and shed opacity.
+      col = mix(col, uField, clamp(vDamage * 0.85, 0.0, 1.0));
+      alpha *= (1.0 - 0.5 * vDamage);
+
+      fragColor = vec4(col, alpha);
     }
-
-    // Structural damage (stories): pull the edge toward a near-black ember
-    // (sRGB #2a120c; the literal is LINEAR — the output transform re-brightens
-    // it) and drop most of its alpha — a broken lineage goes dark, not merely
-    // warm. Additive-blend safe: both moves subtract light.
-    col = mix(col, vec3(0.0231, 0.0060, 0.0037), vDamage);
-    alpha *= (1.0 - 0.55 * vDamage);
-
-    // Soft edge across the ribbon is unnecessary at ~1px widths; keep it flat.
-    fragColor = vec4(col, alpha * vVisible);
   }
 `;
 
@@ -251,6 +377,18 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   const visible = new Float32Array(count).fill(1); // filter visibility
   const damage = new Float32Array(count); // structural damage 0..1 (all 0 at rest)
 
+  // Art-style per-instance data (baked once; static across poses — a node's
+  // radius and strand never change). Colors baked via THREE.Color.r/g/b, i.e.
+  // LINEAR, matching the galaxy edge/instanceColor convention.
+  const artRing = new Float32Array(count * 3); // Ringers string color (source strand)
+  const artFid = new Float32Array(count * 3); // Fidenza ribbon body color
+  const artFid2 = new Float32Array(count * 3); // Fidenza striped-cap alternate
+  // Four scalars packed into one vec4 attribute (x=Fidenza world width, y=Ringers
+  // string-leave side ±1, z=source rest radius, w=target rest radius). Packing
+  // keeps the geometry under the GPU's 16 vertex-attribute limit — four separate
+  // float attributes tipped the edge program over (link error on 16-attrib GPUs).
+  const artScalars = new Float32Array(count * 4);
+
   const c = new THREE.Color();
   for (let i = 0; i < count; i++) {
     const e = edges[i];
@@ -265,6 +403,23 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     c.setHex(STRAND_COLORS[t.strand]);
     colorB.set([c.r, c.g, c.b], i * 3);
     kind[i] = e.k;
+
+    // Ringers: the string carries the SOURCE peg's strand color.
+    c.setHex(RINGERS.peg[s.strand] ?? RINGERS.pegWhite);
+    artRing.set([c.r, c.g, c.b], i * 3);
+    // Fidenza: body + cap-alternate palette picks (two different hash salts).
+    c.setHex(FIDENZA.palette[Math.floor(artHash(e.s + "→" + e.t) * 6)]);
+    artFid.set([c.r, c.g, c.b], i * 3);
+    c.setHex(FIDENZA.palette[Math.floor(artHash("alt:" + e.s + "→" + e.t) * 6)]);
+    artFid2.set([c.r, c.g, c.b], i * 3);
+    // Packed scalars (x,y,z,w):
+    //  x — Fidenza ribbon width (world units): base + hash jitter + degree bonus,
+    //      capped so hub-to-hub ribbons never swamp the field.
+    //  y — Ringers string-leave side (±1); z/w — source/target rest radii.
+    artScalars[i * 4] = Math.min(4.5, 0.9 + artHash(e.s + e.t) * 2.4 + (s.deg + t.deg) * 0.1);
+    artScalars[i * 4 + 1] = artHash(e.s + "|" + e.t) < 0.5 ? 1 : -1;
+    artScalars[i * 4 + 2] = restRadius(s.deg);
+    artScalars[i * 4 + 3] = restRadius(t.deg);
   }
 
   const emphasisAttr = new THREE.InstancedBufferAttribute(emphasis, 1);
@@ -290,6 +445,10 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
   geometry.setAttribute("aKind", new THREE.InstancedBufferAttribute(kind, 1));
   geometry.setAttribute("aEmphasis", emphasisAttr);
   geometry.setAttribute("aDamage", damageAttr);
+  geometry.setAttribute("aArtRing", new THREE.InstancedBufferAttribute(artRing, 3));
+  geometry.setAttribute("aArtFid", new THREE.InstancedBufferAttribute(artFid, 3));
+  geometry.setAttribute("aArtFid2", new THREE.InstancedBufferAttribute(artFid2, 3));
+  geometry.setAttribute("aArtScalars", new THREE.InstancedBufferAttribute(artScalars, 4));
 
   const uniforms = {
     uViewport: { value: new THREE.Vector2(1, 1) },
@@ -297,9 +456,18 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     uTime: { value: 0 },
     uFlow: { value: 1 },
     uStory: { value: 0 },
+    // Art style: 0 Galaxy | 1 Ringers | 2 Fidenza. uField is the active paper
+    // color the damage-fade lerps toward (unused in the galaxy branch).
+    uArtStyle: { value: 0 },
+    uField: { value: new THREE.Color(RINGERS.bg) },
   };
 
-  const material = new THREE.ShaderMaterial({
+  // RawShaderMaterial (not ShaderMaterial): it injects no built-in attributes,
+  // so the vertex program declares only the 15 attributes it actually uses.
+  // ShaderMaterial's auto position/normal/uv would put the count at 18 and the
+  // link fails on 16-attribute GPUs ("Too many attributes"). The galaxy shader
+  // math is unchanged, so its output stays byte-identical.
+  const material = new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3,
     vertexShader: VERT,
     fragmentShader: FRAG,
@@ -355,7 +523,13 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
       uniforms.uPxRatio.value = pixelRatio;
     },
     setArtStyle(style) {
-      void style; // Galaxy-only until the art-style build lands (agent-owned)
+      // One program, branched by uArtStyle. Galaxy reads as additive light on
+      // black; the paper styles switch to normal alpha blending (opacity IS the
+      // dimness — additive would just brighten the field). Blending + uniform
+      // changes need no material.needsUpdate.
+      uniforms.uArtStyle.value = style;
+      material.blending = style === 0 ? THREE.AdditiveBlending : THREE.NormalBlending;
+      uniforms.uField.value.setHex(style === 1 ? RINGERS.bg : FIDENZA.bg);
     },
     dispose() {
       geometry.dispose();

@@ -25,6 +25,14 @@ import type { NodesHandle } from "./nodes";
 const DIM = new THREE.Color(0x34315e).multiplyScalar(0.22); // baked hairline
 const LIT = new THREE.Color(0x9a94d8).multiplyScalar(0.85); // both ends lit
 
+// Art-style pairs: a faint ink/teal annotation ON the field (no glow — normal
+// blending, half opacity). The dim state is a whisper; the lit state is the
+// solid ink/teal for the same "missing hand-off" cue as the galaxy hairline.
+const DIM_RING = new THREE.Color(0x1a1712).multiplyScalar(0.25);
+const LIT_RING = new THREE.Color(0x1a1712);
+const DIM_FID = new THREE.Color(0x14332c).multiplyScalar(0.3);
+const LIT_FID = new THREE.Color(0x14332c);
+
 export interface FilamentsHandle {
   /** The single LineSegments draw call — add it to the scene. */
   object: THREE.LineSegments;
@@ -87,7 +95,13 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
   const b = new THREE.Vector3();
   const emphasis = nodes.emphasisAttr.array as Float32Array;
 
+  // Active render skin; picks the DIM/LIT pair each frame (colors recompute
+  // per frame anyway, so no rebuild is needed on a style switch).
+  let style = 0;
+
   function update(): void {
+    const dim = style === 1 ? DIM_RING : style === 2 ? DIM_FID : DIM;
+    const lit = style === 1 ? LIT_RING : style === 2 ? LIT_FID : LIT;
     for (let s = 0; s < segCount; s++) {
       const pi = pairs[s][0];
       const ci = pairs[s][1];
@@ -109,9 +123,9 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
       // fractional eases blend the color with them).
       const e = Math.min(emphasis[pi], emphasis[ci]);
       const k = Math.min(1, Math.max(0, e - 1));
-      const r = DIM.r + (LIT.r - DIM.r) * k;
-      const g = DIM.g + (LIT.g - DIM.g) * k;
-      const bl = DIM.b + (LIT.b - DIM.b) * k;
+      const r = dim.r + (lit.r - dim.r) * k;
+      const g = dim.g + (lit.g - dim.g) * k;
+      const bl = dim.b + (lit.b - dim.b) * k;
       colors[off] = r;
       colors[off + 1] = g;
       colors[off + 2] = bl;
@@ -128,8 +142,18 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
   return {
     object,
     update,
-    setArtStyle(style) {
-      void style; // Galaxy-only until the art-style build lands (agent-owned)
+    setArtStyle(s) {
+      // Galaxy: additive violet hairline (opacity 1). Paper styles: faint ink /
+      // teal annotation with normal blending at half opacity — no glow. The
+      // active DIM/LIT pair is chosen in update(), which reruns next frame.
+      style = s;
+      if (s === 0) {
+        material.blending = THREE.AdditiveBlending;
+        material.opacity = 1;
+      } else {
+        material.blending = THREE.NormalBlending;
+        material.opacity = 0.5;
+      }
     },
     dispose() {
       geometry.dispose();

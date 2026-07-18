@@ -15,6 +15,7 @@
 import * as THREE from "three";
 import type { GraphNode } from "../data";
 import { EMPHASIS, STRAND_COLORS, restRadius } from "./palette";
+import { RINGERS, FIDENZA, artHash } from "./artstyle";
 
 const DIM_TARGET = 0x0a0a18; // dimmed nodes lerp toward this (factor 0.82)
 const PROXY_RADIUS_FACTOR = 2.5; // pick radius vs. visual radius
@@ -33,6 +34,128 @@ const STATE_TABLE = [
 
 const glslTable = (key: "mul" | "scale" | "dim"): string =>
   STATE_TABLE.map((s) => s[key].toFixed(4)).join(", ");
+
+// ---------------------------------------------------------------------------
+// Art-style node materials (Ringers pegs / outline, Fidenza cubes).
+//
+// All three share the galaxy's MeshBasicMaterial + onBeforeCompile skeleton but
+// swap the shading model for Mark's paper grammar:
+//   - FLAT fill (no limb darkening, no key light, no shimmer, no HDR multiply).
+//   - Base color from a per-instance art attribute (aArtRing / aArtFid) or a
+//     flat uniform (the outline ink), IGNORING instanceColor.
+//   - Dimness is OPACITY, never brightness. The emphasis SCALE table still
+//     drives size (so hover/focus/chain read exactly as in the galaxy), but
+//     ghosted / dimmed / damaged instances lose alpha and (on damage) fade
+//     toward the field color. Emphasis brightening is gone — there is no bloom
+//     on paper.
+// The shared alpha law:
+//   alpha = (1 − 0.92·(1−aVisible)) · (1 − 0.7·dimT) · (1 − 0.55·damage)
+// where dimT is the emphasis-only dim from the galaxy dim table.
+interface ArtNodeMatOpts {
+  /** Flat fill color: a per-instance vec3 attribute, or a flat ink uniform. */
+  colorSource: { kind: "attr"; name: string } | { kind: "uniform" };
+  /** Field color the damage-fade lerps toward (auto sRGB→linear). */
+  uField: { value: THREE.Color };
+  /** Flat color uniform (outline ink) — required when colorSource is uniform. */
+  uColor?: { value: THREE.Color };
+  /** Fidenza cube twist: rotate the position around z by aTwist. */
+  twist: boolean;
+  /** Distinct program cache key so patched programs never collide. */
+  cacheKey: string;
+}
+
+function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMatOpts): void {
+  const colorAttrDecl =
+    opts.colorSource.kind === "attr" ? `attribute vec3 ${opts.colorSource.name};` : "";
+  const colorUniformDecl = opts.colorSource.kind === "uniform" ? "uniform vec3 uArtColor;" : "";
+  const colorAssign =
+    opts.colorSource.kind === "attr" ? `vArtColor = ${opts.colorSource.name};` : "vArtColor = uArtColor;";
+  const twistDecl = opts.twist ? "attribute float aTwist;" : "";
+  const twistApply = opts.twist
+    ? /* glsl */ `{
+          float ca = cos(aTwist);
+          float sa = sin(aTwist);
+          transformed.xy = mat2(ca, -sa, sa, ca) * transformed.xy;
+        }`
+    : "";
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uField = opts.uField;
+    if (opts.uColor) shader.uniforms.uArtColor = opts.uColor;
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `
+        #include <common>
+        attribute float aEmphasis;
+        attribute float aVisible;
+        attribute float aDamage;
+        ${colorAttrDecl}
+        ${colorUniformDecl}
+        ${twistDecl}
+        varying vec3 vArtColor;
+        varying float vVisible;
+        varying float vDimE;
+        varying float vDamage;
+        `,
+      )
+      .replace(
+        "#include <begin_vertex>",
+        /* glsl */ `
+        #include <begin_vertex>
+        {
+          // Emphasis SCALE — the exact galaxy size table (hover/focus/chain read
+          // identically). Dimness is opacity, so the galaxy's aVisible SHRINK is
+          // dropped: ghosted pegs stay full-size and simply go near-transparent.
+          float sclTab[6] = float[](${glslTable("scale")});
+          float dimTab[6] = float[](${glslTable("dim")});
+          float e = clamp(aEmphasis, 0.0, 5.0);
+          int i0 = int(floor(e));
+          int i1 = int(min(floor(e) + 1.0, 5.0));
+          float f = fract(e);
+          float scl = mix(sclTab[i0], sclTab[i1], f);
+          vDimE = mix(dimTab[i0], dimTab[i1], f);
+          vVisible = aVisible;
+          vDamage = clamp(aDamage, 0.0, 1.0);
+          ${colorAssign}
+          transformed *= scl;
+          ${twistApply}
+        }
+        `,
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `
+        #include <common>
+        uniform vec3 uField;
+        varying vec3 vArtColor;
+        varying float vVisible;
+        varying float vDimE;
+        varying float vDamage;
+        `,
+      )
+      .replace(
+        "#include <color_fragment>",
+        /* glsl */ `
+        #include <color_fragment>
+        // Flat fill — overwrite whatever instanceColor produced with the art
+        // color, fading toward the field as damage rises (dissolve into paper).
+        vec3 col = mix(vArtColor, uField, clamp(vDamage, 0.0, 1.0));
+        diffuseColor.rgb = col;
+        // Opacity-only dimness: ghosted (aVisible→0), emphasis-dimmed, and
+        // damaged instances lose alpha; nothing ever brightens.
+        float artAlpha = (1.0 - 0.92 * (1.0 - vVisible)) * (1.0 - 0.7 * vDimE) * (1.0 - 0.55 * vDamage);
+        diffuseColor.a *= artAlpha;
+        `,
+      );
+  };
+  // Distinct cache key so this patched program never collides with the galaxy
+  // orb program or the other art materials.
+  material.customProgramCacheKey = () => opts.cacheKey;
+}
 
 export interface NodesHandle {
   /** The single visible instanced mesh (1 draw call). */
@@ -133,6 +256,35 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   geometry.setAttribute("aPhase", phaseAttr);
   geometry.setAttribute("aVisible", visibleAttr);
   geometry.setAttribute("aDamage", damageAttr);
+
+  // -- art-style per-instance attributes (baked once) ----------------------
+  // aArtRing — Ringers peg fill by strand (near-white for edgeless standards);
+  // aArtFid — Fidenza cube fill by strand; aTwist — Fidenza per-cube z-rotation.
+  // Colors are baked via THREE.Color.r/g/b, i.e. LINEAR (the pipeline's own
+  // convention for instanceColor + edge colors), so the shaders never need an
+  // sRGB→linear step and no hand-written hex ever reaches the GLSL.
+  const artRing = new Float32Array(count * 3);
+  const artFid = new Float32Array(count * 3);
+  const twist = new Float32Array(count);
+  const bakeC = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const nd = nodes[i];
+    bakeC.setHex(nd.deg === 0 ? RINGERS.pegWhite : (RINGERS.peg[nd.strand] ?? RINGERS.pegWhite));
+    artRing[i * 3] = bakeC.r;
+    artRing[i * 3 + 1] = bakeC.g;
+    artRing[i * 3 + 2] = bakeC.b;
+    bakeC.setHex(FIDENZA.node[nd.strand] ?? FIDENZA.palette[0]);
+    artFid[i * 3] = bakeC.r;
+    artFid[i * 3 + 1] = bakeC.g;
+    artFid[i * 3 + 2] = bakeC.b;
+    twist[i] = (artHash(nd.id) - 0.5) * 0.6;
+  }
+  const artRingAttr = new THREE.InstancedBufferAttribute(artRing, 3);
+  const artFidAttr = new THREE.InstancedBufferAttribute(artFid, 3);
+  const twistAttr = new THREE.InstancedBufferAttribute(twist, 1);
+  geometry.setAttribute("aArtRing", artRingAttr);
+  geometry.setAttribute("aArtFid", artFidAttr);
+  geometry.setAttribute("aTwist", twistAttr);
 
   const uniforms = {
     uTime: { value: 0 },
@@ -310,9 +462,82 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   // Distinct cache key so the patched program never collides with a stock basic material.
   material.customProgramCacheKey = () => "coherence-nodes-v5-orbs";
 
-  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  // -- art-style geometries + materials (built once; swapped in setArtStyle) --
+  // Every geometry carries the SAME instanced attribute objects (state, filters,
+  // stories, and poses all keep working across a swap because the buffers are
+  // shared). Only position/normal differ per skin.
+  function attachShared(g: THREE.BufferGeometry): void {
+    g.setAttribute("aEmphasis", emphasisAttr);
+    g.setAttribute("aPhase", phaseAttr);
+    g.setAttribute("aVisible", visibleAttr);
+    g.setAttribute("aDamage", damageAttr);
+    g.setAttribute("aArtRing", artRingAttr);
+    g.setAttribute("aArtFid", artFidAttr);
+    g.setAttribute("aTwist", twistAttr);
+  }
+
+  // Ringers peg: a short cylinder whose AXIS points +z, so the flat circular
+  // face fronts the canonical camera (a disc) and orbiting reveals its height.
+  const ringGeometry = new THREE.CylinderGeometry(1, 1, 1.7, 24);
+  ringGeometry.rotateX(Math.PI / 2);
+  attachShared(ringGeometry);
+  // Ringers outline: an inverted-hull shell of the same peg, fattened in radius
+  // (x/y) and a touch in height (z, the axis after the rotate). BackSide ink.
+  const outlineGeometry = ringGeometry.clone();
+  outlineGeometry.scale(1.14, 1.14, 1.06);
+  attachShared(outlineGeometry);
+  // Fidenza node: a cube (twisted per-instance in the vertex shader).
+  const fidGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+  attachShared(fidGeometry);
+
+  const ringMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+  ringMaterial.depthWrite = true;
+  patchArtNodeMaterial(ringMaterial, {
+    colorSource: { kind: "attr", name: "aArtRing" },
+    uField: { value: new THREE.Color(RINGERS.bg) },
+    twist: false,
+    cacheKey: "coherence-nodes-ringers-peg",
+  });
+
+  const outlineMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    side: THREE.BackSide,
+  });
+  outlineMaterial.depthWrite = true;
+  patchArtNodeMaterial(outlineMaterial, {
+    colorSource: { kind: "uniform" },
+    uColor: { value: new THREE.Color(RINGERS.ink) },
+    uField: { value: new THREE.Color(RINGERS.bg) },
+    twist: false,
+    cacheKey: "coherence-nodes-ringers-outline",
+  });
+
+  const fidMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+  fidMaterial.depthWrite = true;
+  patchArtNodeMaterial(fidMaterial, {
+    colorSource: { kind: "attr", name: "aArtFid" },
+    uField: { value: new THREE.Color(FIDENZA.bg) },
+    twist: true,
+    cacheKey: "coherence-nodes-fidenza",
+  });
+
+  // Widened to InstancedMesh<BufferGeometry> so setArtStyle can swap in the
+  // cylinder/box skins (the constructor would otherwise pin it to Icosahedron).
+  const mesh: THREE.InstancedMesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.frustumCulled = false;
   mesh.name = "nodes";
+
+  // Ringers outline mesh — a sibling InstancedMesh that shares the peg matrices
+  // (written alongside the visible matrix below). Parented to `mesh` (identity
+  // transform) so it enters the scene graph without touching main.ts, and
+  // renders in lockstep with the pegs (same renderOrder). Hidden off-Ringers.
+  const outline = new THREE.InstancedMesh(outlineGeometry, outlineMaterial, count);
+  outline.frustumCulled = false;
+  outline.visible = false;
+  outline.name = "nodes-outline";
+  outline.renderOrder = mesh.renderOrder;
+  mesh.add(outline);
 
   // -- transforms + colors ----------------------------------------------
   // Current world position per instance (mutable — the pose driver morphs it
@@ -330,6 +555,10 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     m.makeScale(r, r, r);
     m.setPosition(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
     mesh.setMatrixAt(i, m);
+    // The Ringers outline rides the exact same matrix (its fatter geometry is
+    // what makes the ink rim); writing it here keeps the outline glued to the
+    // pegs through every pose morph and filter/story spotlight.
+    outline.setMatrixAt(i, m);
   }
 
   for (let i = 0; i < count; i++) {
@@ -338,6 +567,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     mesh.setColorAt(i, color); // every instance colored before first render
   }
   mesh.instanceMatrix.needsUpdate = true;
+  outline.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
   // -- raycast proxy (never rendered) -------------------------------------
@@ -412,6 +642,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     },
     commitPositions() {
       mesh.instanceMatrix.needsUpdate = true;
+      outline.instanceMatrix.needsUpdate = true;
       proxy.instanceMatrix.needsUpdate = true;
     },
     refreshPickBounds() {
@@ -437,11 +668,33 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
       writeProxyMatrices();
     },
     setArtStyle(style) {
-      void style; // Galaxy-only until the art-style build lands (agent-owned)
+      // Swap the render skin in place: geometry + material only. The instanced
+      // attributes, positions, picking proxy, and every driver keep working
+      // identically because they never move. Style 0 restores the EXACT galaxy
+      // geometry + material objects — pixel-identical, by construction.
+      if (style === 1) {
+        mesh.geometry = ringGeometry;
+        mesh.material = ringMaterial;
+        outline.visible = true;
+      } else if (style === 2) {
+        mesh.geometry = fidGeometry;
+        mesh.material = fidMaterial;
+        outline.visible = false;
+      } else {
+        mesh.geometry = geometry;
+        mesh.material = material;
+        outline.visible = false;
+      }
     },
     dispose() {
       geometry.dispose();
       material.dispose();
+      ringGeometry.dispose();
+      outlineGeometry.dispose();
+      fidGeometry.dispose();
+      ringMaterial.dispose();
+      outlineMaterial.dispose();
+      fidMaterial.dispose();
       proxyGeometry.dispose();
       proxyMaterial.dispose();
     },

@@ -19,6 +19,18 @@ const GRADE_FONT_URL = "/fonts/space-grotesk-600.typeface.json";
 const COURSE_FONT_URL = "/fonts/space-grotesk-600-course.typeface.json";
 const FACE_COLOR = 0x34315e;
 const SIDE_COLOR = 0x16142e;
+
+// Marker ink per art style, index-aligned with ArtStyle (0 Galaxy | 1 Ringers |
+// 2 Fidenza). The etches are engraved monuments in the Galaxy; under an art
+// style they read as printed labels standing on the field, so face = the
+// board/board-ink color and side = a quieter tint that keeps a hint of relief
+// without competing with the field. face/side for style 0 restore the shipped
+// faint-violet extrusion exactly (regression-free default).
+const MARKER_INK: readonly { face: number; side: number }[] = [
+  { face: FACE_COLOR, side: SIDE_COLOR }, // 0 Galaxy — shipped
+  { face: 0x1a1712, side: 0x8a8272 }, // 1 Ringers — ink face, warm grey-brown relief on cream
+  { face: 0x14332c, side: 0x2a6355 }, // 2 Fidenza — deep teal-ink face, teal relief on the field
+];
 const GRADE_SIZE = 26;
 // Sized so the longest same-rank neighbors (GEOMETRY / ADVANCED) clear each
 // other over their narrow arcs: at 11 units their half-widths sum to ~60 vs
@@ -174,7 +186,12 @@ export function createEtches(
       for (const mk of markers) placeMarker(mk);
     },
     setArtStyle(style) {
-      void style; // Galaxy-only until the art-style build lands (agent-owned)
+      // Both marker materials are shared across every etch, so a single color
+      // swap re-inks the whole set. Clamp to a known style; anything else keeps
+      // the shipped Galaxy ink.
+      const ink = MARKER_INK[style] ?? MARKER_INK[0];
+      faceMat.color.setHex(ink.face);
+      sideMat.color.setHex(ink.side);
     },
     dispose() {
       for (const g of geometries) g.dispose();

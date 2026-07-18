@@ -182,35 +182,91 @@ all standards grouped by grade with the same panel. Every interactive target
 5. A teacher can go from load → their standard → its prerequisites in under
    15 seconds without instructions.
 
-## Art styles (in exploration — previews in docs/previews/)
+## Art styles
 
-Two artist-referenced styles are being explored as toggleable renderings,
-with Mark's colorways (2026-07-17). References, to be credited in-app when
-the styles ship:
+The scene ships three render skins, switchable live from the bottom-right
+toggle and deep-linkable by URL. A style is a LOOK, not a layout: all three
+poses (Constellation, Ascent, Blueprint) work under every style, and the state
+machine, filters, and stories drive the same attributes no matter which skin is
+active. Switching is instant, since a style is a look and not a place, so
+nothing needs a transition to interrupt. Reference stills live in
+docs/previews/.
 
-- **Fidenza** (Tyler Hobbs) — https://www.curated.xyz/editorial/collecting-fidenza
-- **Ringers** (Dmitri Cherniak) — https://www.curated.xyz/editorial/collecting-ringers
+- **Galaxy** (style 0, the default), the shipped dark look: bloom, additive
+  light, HDR emphasis, starfield, nebula. It is the baseline and stays
+  untouched. Every art branch is a no-op at style 0, so Galaxy renders exactly
+  as it did before the art-style work.
+- **Ringers** (style 1), after Dmitri Cherniak: a cream printed board
+  (#f0ece0) with board ink (#1a1712). Standards are bold-outlined 3D pegs in
+  Mark's colorway (white, red, yellow, blue, green; white marks an edgeless
+  standard); the outline is an inverted-hull ink shell that tracks every
+  emphasis state. Edges are taut, pure-color strings that leave a peg's outer
+  edge and land on the destination's edge, string-art style.
+- **Fidenza** (style 2), after Tyler Hobbs: a teal field (#43a08b) with the
+  provided colorway (navy, brown, cream, yellow, red, mint). Standards are
+  cubes (each with a small hashed twist) and edges are thick FLAT ribbons that
+  lie on one world plane. Because the ribbons live on a plane rather than
+  facing the camera, they read at full width head-on and foreshorten as you
+  orbit, so the field is anamorphic: the flat composition resolves from the
+  front and skews to thin bands from the side. Ribbons carry striped end caps.
 
-Distilled principles to stay true to each artist (from the editorials):
+Refinements queued for a later round, each grounded in the editorials:
+Ringers TRACE as one continuous string wrapping each peg back to the
+foundations (after Cherniak's single looped string), bullseye pegs for
+high-degree standards, and collision-aware Fidenza ribbon routing (Hobbs's
+non-overlap signature; today's ribbons still cross).
 
-**Fidenza:** flow-field foundation; the signature is NON-OVERLAPPING curved
-rectangles with natural spacing (our build must route ribbons
-collision-aware, deflecting into adjacent lanes rather than crossing
-freely); mixed scale tiers with tuned probabilities (Jumbo common, Small
-rare — map edge weight to width tiers the same way); optional outline
-trait; a composition margin ("Have Margin") for a clean edge; segmented
-striped end-caps (Mark's ask: rebuilt in the node structure — cubes
-trailing striped segments into clean ribbons). Palette: Mark's provided
-teal/navy/brown/cream/yellow/red/mint colorway.
+### Dimness is opacity, not brightness
 
-**Ringers:** the signature is ONE continuous looped string wrapping pegs —
-per-edge strings are a departure; the true-to-artist moment is TRACE:
-render a standard's full prerequisite chain as a single continuous string
-wrapping each peg en route to the foundations. Bullseye (concentric) pegs
-on high-degree standards; paste/cream board (the community-favored beige);
-bold black peg outlines; taut tangent strings leaving the outer edge.
-Mark's colorway: pegs white/red/yellow/blue/green, white = edgeless.
+The art styles have no bloom and no HDR, because paper and painted fields do
+not glow. So dimness is OPACITY. Ghosted, unlit, or damaged elements fade
+toward the field color (a layered-wash translucency) instead of darkening,
+which is what separates the flat-field skins from Galaxy, where dimness is
+brightness. Rest states, the focus chain, filters, and story reveals all
+express through alpha under an art style. Mark's direction, 2026-07.
 
-Dimness in these styles: prototype OPACITY (layered-wash translucency)
-against brightness — Mark's hypothesis is opacity reads better on flat
-fields; judge on stills.
+### Marker ink and on-canvas chrome
+
+The grade and course etches re-ink per style so they read as printed labels on
+the field, not engraved monuments: Galaxy keeps its faint violet extrusion,
+Ringers uses board ink (#1a1712 face, warm grey-brown relief 0x8a8272), Fidenza
+uses deep teal-ink (#14332c face, teal relief 0x2a6355). The DOM chrome that
+sits directly on the canvas (the title block, the nav hints, the depth-scale
+hint, the credit line) re-inks the same way: board ink on Ringers, cream
+(#e8e0cd) with a dark shadow on Fidenza. The glass plaques (view and art
+toggles, the filter rail) stay dark framed cards on the light fields, which is
+the accepted look this round.
+
+### Credits and deep links
+
+While an art style is active a one-line credit appears under the toggle,
+naming the artist and linking the curated.xyz editorial the style is after,
+because the styles are homages and should say so in the room where they hang:
+
+- Ringers (Dmitri Cherniak): https://www.curated.xyz/editorial/collecting-ringers
+- Fidenza (Tyler Hobbs): https://www.curated.xyz/editorial/collecting-fidenza
+
+`?style=ringers` or `?style=fidenza` deep-links a skin on load (session only,
+not persisted); `?style=galaxy` or no param loads the default. Galaxy carries
+no credit line.
+
+### Distilled artist principles (stay true to each)
+
+**Fidenza** (from the editorial): flow-field foundation; the signature is
+NON-OVERLAPPING curved rectangles with natural spacing (the queued
+collision-aware routing target; today's ribbons still cross);
+mixed scale tiers with tuned probabilities (Jumbo common, Small rare),
+so map edge weight to width tiers the same way; an optional outline trait; a
+composition margin (the "Have Margin" trait) for a clean edge; segmented
+striped end caps (Mark's ask: rebuilt in the node structure, cubes trailing
+striped segments into clean ribbons). Palette: Mark's teal, navy, brown, cream,
+yellow, red, mint colorway.
+
+**Ringers** (from the editorial): the signature is ONE continuous looped string
+wrapping pegs, so per-edge strings are the departure and TRACE is the
+true-to-artist return (a standard's full prerequisite chain as a single
+continuous string wrapping each peg en route to the foundations). Bullseye
+(concentric) pegs on high-degree standards; the paste/cream board (the
+community-favored beige); bold black peg outlines; taut tangent strings leaving
+the outer edge. Mark's colorway: pegs white, red, yellow, blue, green, with
+white for an edgeless standard.
