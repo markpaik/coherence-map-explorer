@@ -2,13 +2,15 @@
 // Blueprint pose lays the 480 standards out as a grade-column circuit board;
 // what makes it READ as an architecture blueprint (rather than a flat scatter
 // of dots) is the SHEET behind it: a Prussian-blue cyanotype field with uneven
-// exposure washes, a faint drafting grid, a double border frame with corner
-// registers, and a title block. It is the in-app realisation of the acceptance
-// preview (scripts/pose-grammar-previews.mjs blueprintSheet).
+// exposure washes, a faint drafting grid, and a double border frame with corner
+// registers. (The title block was removed in round-12 — the frame + grid + field
+// carry the sheet on their own.) It echoes the acceptance preview
+// (scripts/pose-grammar-previews.mjs blueprintSheet).
 //
-// The plane sits at z = −8, behind the content (z = 0), spanning the pos3
-// content bounds plus a generous margin so the frame clears the linework. A
-// slight orbit reads the drawing as a sheet floating in space. The texture is
+// The plane sits at z = −20 (round-12: pushed back from −8 to clear the real LIFT
+// of the pos3 block z-planes, which now rise to 146), behind the content, spanning
+// the pos3 content bounds plus a generous margin so the frame clears the linework.
+// A slight orbit reads the drawing as a sheet floating in space. The texture is
 // canvas-generated and fully DETERMINISTIC — no Math.random, no Date — so every
 // visitor sees the same sheet; three cached canvases (one per art style) swap on
 // an art-style change:
@@ -24,26 +26,22 @@ import * as THREE from "three";
 import type { GraphNode } from "../data";
 import { RINGERS, FIDENZA } from "./artstyle";
 
-const SHEET_Z = -8;
+const SHEET_Z = -20; // round-12: back from −8 so it clears the lifted pos3 block planes
 const MARGIN = 120; // world units of sheet around the pos3 content bounds
 const CANVAS_W = 1600; // texture resolution; height derived from the plane aspect
-
-// Middot separator used verbatim in the title block (matches the preview).
-const DOT = "·";
 
 interface SheetPalette {
   field: string; // sheet field
   wash1: string; // upper-left exposure wash
   wash2: string; // lower-right exposure wash
-  ink: string; // drafting ink (lines, frame, text)
-  blockField: string; // title-block fill (a shade of the field)
+  ink: string; // drafting ink (lines, frame)
 }
 // Index-aligned with ArtStyle (0 Galaxy | 1 Ringers | 2 Fidenza). The Galaxy
 // values are the acceptance preview's exact cyanotype hexes.
 const PALETTES: readonly SheetPalette[] = [
-  { field: "#123a63", wash1: "#1a4a7a", wash2: "#0d2c4e", ink: "#eaf2ff", blockField: "#123a63" },
-  { field: "#f0ece0", wash1: "#e2dccb", wash2: "#d8d0bc", ink: "#1a1712", blockField: "#e8e2d4" },
-  { field: "#43a08b", wash1: "#4fb89f", wash2: "#2f7d6a", ink: "#e8e0cd", blockField: "#357f6d" },
+  { field: "#123a63", wash1: "#1a4a7a", wash2: "#0d2c4e", ink: "#eaf2ff" },
+  { field: "#f0ece0", wash1: "#e2dccb", wash2: "#d8d0bc", ink: "#1a1712" },
+  { field: "#43a08b", wash1: "#4fb89f", wash2: "#2f7d6a", ink: "#e8e0cd" },
 ];
 
 // #rrggbb → "r,g,b" for building rgba() strokes at arbitrary opacity.
@@ -122,39 +120,9 @@ function drawSheet(ctx: CanvasRenderingContext2D, W: number, H: number, p: Sheet
     ctx.stroke();
   }
 
-  // title block, bottom-right (exact copy text from the acceptance preview).
-  // Inset up and left of the sheet corner so the app's fixed bottom-right
-  // chrome (pose pills / Art styles tab) never covers it at the Blueprint's
-  // deterministic front-on framing.
-  const TBw = 392 * k;
-  const TBh = 128 * k;
-  const tbx = W - F - TBw - 52 * k;
-  const tby = H - F - TBh - 96 * k;
-  ctx.fillStyle = `rgba(${rgb(p.blockField)},0.9)`;
-  ctx.fillRect(tbx, tby, TBw, TBh);
-  ctx.strokeStyle = `rgba(${ink},0.85)`;
-  ctx.lineWidth = 1.4 * k;
-  ctx.strokeRect(tbx, tby, TBw, TBh);
-  ctx.strokeStyle = `rgba(${ink},0.6)`;
-  ctx.lineWidth = 0.8 * k;
-  for (const dy of [40, 92]) {
-    ctx.beginPath();
-    ctx.moveTo(tbx, tby + dy * k);
-    ctx.lineTo(tbx + TBw, tby + dy * k);
-    ctx.stroke();
-  }
-  ctx.textBaseline = "alphabetic";
-  if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${1.1 * k}px`;
-  const line = (x: number, y: number, size: number, txt: string, op: number): void => {
-    ctx.font = `${size * k}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
-    ctx.fillStyle = `rgba(${ink},${op})`;
-    ctx.fillText(txt, tbx + x * k, tby + y * k);
-  };
-  line(14, 26, 16, `COHERENCE ${DOT} PREREQUISITE CIRCUIT`, 0.9);
-  line(14, 60, 11, `480 STANDARDS ${DOT} 757 PREREQ EDGES ${DOT} 142 RELATED`, 0.75);
-  line(14, 78, 11, "SOURCE: ACHIEVE THE CORE COHERENCE MAP (CC0)", 0.75);
-  line(14, 112, 11, `SHEET 3 OF 4 ${DOT} SCALE NONE ${DOT} SEED 1337`, 0.75);
-  if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "0px";
+  // (Round-12: the bottom-right title block — the box + rules + copy text — was
+  // removed for all three art styles. The double frame, corner registers, drafting
+  // grid, field, and exposure washes above carry the sheet on their own.)
 }
 
 function texFromCanvas(canvas: HTMLCanvasElement): THREE.CanvasTexture {
@@ -279,7 +247,7 @@ export function createSheet(nodes: GraphNode[]): SheetHandle {
     opacity: 0,
   });
   const back = new THREE.Mesh(geometry, backMat);
-  back.position.set(cx, cy, SHEET_Z - 0.5);
+  back.position.set(cx, cy, SHEET_Z - 1.5); // −21.5: just behind the front plate
   back.rotation.y = Math.PI;
   back.frustumCulled = false;
   back.name = "blueprint-sheet-back";

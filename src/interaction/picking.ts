@@ -23,6 +23,10 @@ export function createPicking(
   camera: THREE.Camera,
   nodes: NodesHandle,
   machine: Machine,
+  // A genuine primary click on EMPTY canvas (no node hit, not a drag). main.ts
+  // wires this to exit a focus — clicking off the model zooms back out. Reuses
+  // the exact click-vs-drag discrimination below, so an orbit never fires it.
+  onEmptyClick?: () => void,
 ): PickingHandle {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -82,8 +86,12 @@ export function createPicking(
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
     if (moved > CLICK_MOVE_TOLERANCE) return; // a camera drag, not a click
     const id = pickAt(e.clientX, e.clientY);
-    if (id == null) return;
-    machine.focus(id);
+    if (id == null) {
+      onEmptyClick?.(); // empty canvas: exit any active focus (main.ts guards it)
+      return;
+    }
+    machine.focus(id); // a hit always (re)focuses that node — existing behavior wins
+
   }
   function onPointerCancel(e: PointerEvent): void {
     downs.delete(e.pointerId);

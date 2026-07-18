@@ -15,17 +15,21 @@
 // and it makes draw order irrelevant (no transparent-sort artifacts).
 // depthWrite off, depthTest on (edges still occlude behind opaque nodes).
 //
-// Daylight enamel (round-12): the ONE exception is the Transit concrete-daylight
-// window, where the ribbons paint onto a LIGHT field. Additive light washes every
-// strand toward cream there, so setDaylight flips the Galaxy material to
-// NormalBlending past the window midpoint and the fragment pulls the colour to its
-// full, ~15%-deepened strand hue (painted enamel signage). uDaylight 0 keeps the
-// shipped additive neon byte-identical, so poses 0–2 and the dark baseline are
-// untouched; the paper art styles own their own (normal) blending independently.
+// Enamel signage (round-12): the exceptions are the two LIGHT environments — the
+// Ascent dawn (pose 1) and the Transit concrete daylight (pose 3) — where the
+// ribbons paint onto a bright field. Additive light washes every strand toward
+// cream there, so setEnvLight flips the Galaxy material to NormalBlending past the
+// window midpoint and the fragment repaints each ribbon with the full-saturation
+// VIVID strand hue (STRAND_VIVID: taxi gold / electric violet / subway teal / hot
+// rose) — painted enamel signage, not an additive glow. The dawn widens the lines
+// ×1.25 and floors their alpha ~0.92 (bold structure carving the morning sky); the
+// daylight keeps the metro focus grammar. uEnvLight 0 keeps the shipped additive
+// neon byte-identical, so poses 0/2 and the dark baseline are untouched; the paper
+// art styles own their own (normal) blending independently.
 
 import * as THREE from "three";
 import type { GraphEdge, GraphNode } from "../data";
-import { STRAND_COLORS, restRadius } from "./palette";
+import { STRAND_COLORS, STRAND_VIVID, STRAND_ORDER, restRadius } from "./palette";
 import { RINGERS, FIDENZA, artHash } from "./artstyle";
 
 const SEGMENTS = 24;
@@ -57,6 +61,7 @@ const VERT = /* glsl */ `
   in vec3 aEnd;
   in vec3 aColorA;
   in vec3 aColorB;
+  in vec2 aStrand;   // (source strand index, target strand index) 0..3 → VIVID palette
   in float aKind;
   in float aEmphasis;
   in float aVisible;
@@ -72,9 +77,12 @@ const VERT = /* glsl */ `
   uniform float uPxRatio;   // device px per CSS px (capped at 2)
   uniform float uArtStyle;  // 0 Galaxy | 1 Ringers | 2 Fidenza
   uniform float uPose;      // eased pose value 0..3 (driver-fed); 3 = Transit
+  uniform float uEnvLight;  // 0..1 light-environment amount (Ascent dawn OR Transit daylight)
+  uniform vec3 uVivid[4];   // VIVID enamel palette, index-aligned number/algebra/geometry/data
 
   out float vT;
   out vec3 vColor;
+  out vec3 vVivid;          // interpolated VIVID strand colour (enamel repaint in light envs)
   out vec3 vArtColor;
   out vec3 vArtColor2;
   out float vKind;
@@ -212,12 +220,23 @@ const VERT = /* glsl */ `
         width = mix(width, metroW, m3);
       }
 
+      // Ascent dawn enamel (round-12): bold lines carving the morning sky. In the
+      // pose-1 window (m1, the dawn analog of the Blueprint's m2) widen ×1.25 so the
+      // structure reads against the bright field. Gated on uEnvLight so it only fires
+      // when the dawn is actually up (a 0→3 sweep passing pose 1 has uEnvLight 0);
+      // m1 is 0 at poses 0/2/3, so the metro/blueprint weights are untouched.
+      float m1 = clamp(1.0 - abs(uPose - 1.0) / 0.5, 0.0, 1.0);
+      width *= mix(1.0, 1.25, m1 * clamp(uEnvLight, 0.0, 1.0));
+
       vec2 offsetNdc = normalPx * (width * uPxRatio * 0.5 * side) / (uViewport * 0.5);
       clip.xy += offsetNdc * clip.w;
       gl_Position = clip;
 
       vT = t;
       vColor = mix(aColorA, aColorB, t);
+      // VIVID enamel strand colour, interpolated endpoint→endpoint like vColor. The
+      // fragment cross-fades to this in the light-environment windows (dawn/daylight).
+      vVivid = mix(uVivid[int(aStrand.x + 0.5)], uVivid[int(aStrand.y + 0.5)], t);
       vKind = aKind;
       vEmphasis = e;
       // Ribbon-silhouette AA inputs (round 11): the strip's cross-position and its
@@ -321,10 +340,11 @@ const FRAG = /* glsl */ `
   uniform float uArtStyle; // 0 Galaxy | 1 Ringers | 2 Fidenza
   uniform float uPose; // eased pose value 0..3; 3 = Transit (opaque metro lines)
   uniform vec3 uField; // active art-style field color (damage fades toward it)
-  uniform float uDaylight; // 0..1 concrete-daylight amount at Transit (bloom keys off the same)
+  uniform float uEnvLight; // 0..1 light-environment amount (Ascent dawn OR Transit daylight)
 
   in float vT;
   in vec3 vColor;
+  in vec3 vVivid; // interpolated VIVID strand colour (enamel repaint in light envs)
   in vec3 vArtColor;
   in vec3 vArtColor2;
   in float vKind;
@@ -341,6 +361,13 @@ const FRAG = /* glsl */ `
     // Blueprint window (pose 2, Galaxy only): a triangular ramp peaking at 2.0,
     // zero outside 1.6..2.4 — off at poses 0/1 and at Transit.
     float m2 = clamp(1.0 - abs(uPose - 2.0) / 0.4, 0.0, 1.0);
+    // Ascent dawn window (pose 1, Galaxy only): the dawn analog of m2, peaking at
+    // 1.0, zero outside 0.5..1.5. env gates on the actual light-environment amount
+    // so a sweep passing pose 1 with no dawn up stays byte-identical; enamel is the
+    // VIVID repaint strength, live in EITHER light window (dawn m1 OR daylight m3).
+    float m1 = clamp(1.0 - abs(uPose - 1.0) / 0.5, 0.0, 1.0);
+    float env = clamp(uEnvLight, 0.0, 1.0);
+    float enamel = env * max(m1, m3);
     if (uArtStyle < 0.5) {
       // ===================== GALAXY (shipped, byte-identical) ===============
       float e = vEmphasis;
@@ -387,6 +414,10 @@ const FRAG = /* glsl */ `
         // Blueprint ink alpha (round 11): dimmed→faint 0.18, resting→0.55 legible
         // ink, connected→0.90 highlighter (= 0.55 + 0.35·lit − 0.37·dimd).
         alpha = mix(alpha, 0.55 + 0.35 * lit - 0.37 * dimd, m2);
+        // Ascent dawn (round-12): bold enamel — resting/connected lines carry ~0.92
+        // alpha so they carve the morning sky; an unconnected (focus-dimmed) line
+        // still recedes to ~0.15. Gated on env·m1 (dawn only), so poses 0/2/3 unchanged.
+        alpha = mix(alpha, 0.15 + 0.77 * clamp(e, 0.0, 1.0), env * m1);
         col *= max(mix(mulP[i0], mulP[i1], f), 1.0 + 0.8 * story);
         float flow = max(mix(flowP[i0], flowP[i1], f), story);
         float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
@@ -403,19 +434,22 @@ const FRAG = /* glsl */ `
         // Blueprint: connected related re-saturate (dashed highlighter); unconnected
         // fade faint (= 0.50 + 0.35·lit − 0.32·dimd).
         aRel = mix(aRel, 0.50 + 0.35 * lit - 0.32 * dimd, m2);
+        // Ascent dawn: bold the dashed transfer to match the prereq enamel (~0.92).
+        aRel = mix(aRel, 0.15 + 0.77 * clamp(e, 0.0, 1.0), env * m1);
         alpha = aRel * dash;
         float shim = max(mix(shimR[i0], shimR[i1], f), story);
         col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
       }
 
-      // Daylight enamel (round-12, Galaxy Transit): in the concrete-daylight window
-      // the material paints with NORMAL blending (edges.setDaylight), so the strand
-      // must carry its FULL colour rather than an additive glow. Pull the ribbon to
-      // its pure strand hue, deepened ~15% (×0.85) so it sits ON the concrete instead
-      // of floating over it — the HDR multiplier + flow comet dissolve into flat
-      // paint. Gated on uDaylight·m3: uDaylight 0 (and poses 0–2) stay byte-identical,
-      // and the unconnected city dissolve below still recedes the ghosted map.
-      col = mix(col, vColor * 0.85, uDaylight * m3);
+      // VIVID enamel repaint (round-12, Galaxy light environments): in the Ascent
+      // dawn AND the Transit daylight the material paints with NORMAL blending
+      // (edges.setEnvLight), so the strand must carry a FULL, VIVID colour rather
+      // than an additive glow. Repaint the ribbon with its pure VIVID strand hue at
+      // full saturation (the round-11 ×0.85 deepening is GONE — it read "muddy"); the
+      // HDR multiplier + flow comet dissolve into flat enamel signage. Gated on
+      // enamel = env·max(m1, m3): uEnvLight 0 (and poses 0/2) stay byte-identical,
+      // and the unconnected city dissolve below still recedes the ghosted Transit map.
+      col = mix(col, vVivid, enamel);
 
       // Blueprint recolor (pose 2, Galaxy only): the resting sheet is white ink;
       // strand colour is the highlighter. Resting ink = white-ink at a 50% strand
@@ -430,11 +464,12 @@ const FRAG = /* glsl */ `
       }
       // Transit recolor (pose 3, Galaxy only): a focus dissolves UNCONNECTED lines
       // into the CITY BACKGROUND — near-black #0a0a16 in the dark baseline, concrete
-      // grey #beb9b0 at daylight (mix by uDaylight) — so the ghosted city recedes and
-      // the chain reads. Connected + resting lines keep their strand colour. Literals
-      // are LINEAR. Gated on dimd·m3, so no-focus Transit and poses 0–2 are untouched.
+      // grey #beb9b0 at daylight (mix by uEnvLight, which equals the daylight amount
+      // at pose 3 — dawn is 0 there) — so the ghosted city recedes and the chain
+      // reads. Connected + resting lines keep their VIVID enamel. Literals are LINEAR.
+      // Gated on dimd·m3, so no-focus Transit and poses 0–2 are untouched.
       if (m3 > 0.0) {
-        vec3 cityBg = mix(vec3(0.003035, 0.003035, 0.008023), vec3(0.514918, 0.485150, 0.434154), uDaylight);
+        vec3 cityBg = mix(vec3(0.003035, 0.003035, 0.008023), vec3(0.514918, 0.485150, 0.434154), uEnvLight);
         col = mix(col, cityBg, dimd * m3);
       }
 
@@ -536,16 +571,17 @@ export interface EdgesHandle {
    */
   setPose(p: number): void;
   /**
-   * Feed the concrete-daylight amount (0..1). Two consumers: (1) the Transit focus
-   * grammar dissolves unconnected metro lines toward the live city background
-   * (near-black in the dark baseline, concrete grey at daylight); (2) the daylight
-   * enamel — past the window midpoint the Galaxy material flips to normal blending
-   * and the fragment deepens each ribbon to its full painted strand hue, so signage
-   * sits ON the concrete instead of washing to cream. main.ts passes
-   * environs.daylight01() each rendered frame (0 off-Galaxy, so paper styles are
+   * Feed the LIGHT-environment amount (0..1) — max(dawn, daylight). Consumers:
+   * (1) the VIVID enamel — past the window midpoint the Galaxy material flips to
+   * normal blending and the fragment repaints each ribbon with its full VIVID strand
+   * hue, so signage sits ON the bright field (dawn sky / concrete) instead of washing
+   * to cream; the dawn also widens ×1.25 and floors alpha ~0.92. (2) the Transit
+   * focus grammar dissolves unconnected metro lines toward the live city background
+   * (near-black dark baseline → concrete grey at daylight). main.ts passes
+   * environs.envLight01() each rendered frame (0 off-Galaxy, so paper styles are
    * never touched).
    */
-  setDaylight(amount: number): void;
+  setEnvLight(amount: number): void;
   setViewport(widthPx: number, heightPx: number, pixelRatio: number): void;
   /**
    * Swap the render skin: 0 Galaxy (additive light ribbons, exactly the
@@ -603,6 +639,17 @@ export function createEdges(
   const emphasis = new Float32Array(count).fill(1); // rest
   const visible = new Float32Array(count).fill(1); // filter visibility
   const damage = new Float32Array(count); // structural damage 0..1 (all 0 at rest)
+  // (source strand index, target strand index) 0..3 → the VIVID enamel palette
+  // (uVivid[], index-aligned to STRAND_ORDER). One packed vec2 attribute keeps the
+  // galaxy vertex program at 16 attributes — its guaranteed WebGL2 floor.
+  const strand = new Float32Array(count * 2);
+
+  // VIVID enamel palette as LINEAR vec3s (THREE.Color sRGB→working), index-aligned
+  // to STRAND_ORDER — the uVivid[4] uniform the light-environment repaint samples.
+  const vividVecs = STRAND_ORDER.map((s) => {
+    const cc = new THREE.Color().setHex(STRAND_VIVID[s]);
+    return new THREE.Vector3(cc.r, cc.g, cc.b);
+  });
 
   // Art-style per-instance data (baked once; static across poses — a node's
   // radius and strand never change). Colors baked via THREE.Color.r/g/b, i.e.
@@ -630,6 +677,8 @@ export function createEdges(
     c.setHex(STRAND_COLORS[t.strand]);
     colorB.set([c.r, c.g, c.b], i * 3);
     kind[i] = e.k;
+    strand[i * 2] = STRAND_ORDER.indexOf(s.strand);
+    strand[i * 2 + 1] = STRAND_ORDER.indexOf(t.strand);
 
     // Ringers: the string carries the SOURCE peg's strand color.
     c.setHex(RINGERS.peg[s.strand] ?? RINGERS.pegWhite);
@@ -669,6 +718,7 @@ export function createEdges(
   geometry.setAttribute("aEnd", endAttr);
   geometry.setAttribute("aColorA", new THREE.InstancedBufferAttribute(colorA, 3));
   geometry.setAttribute("aColorB", new THREE.InstancedBufferAttribute(colorB, 3));
+  geometry.setAttribute("aStrand", new THREE.InstancedBufferAttribute(strand, 2));
   geometry.setAttribute("aKind", new THREE.InstancedBufferAttribute(kind, 1));
   geometry.setAttribute("aEmphasis", emphasisAttr);
   geometry.setAttribute("aDamage", damageAttr);
@@ -691,17 +741,21 @@ export function createEdges(
     // 0–2 render byte-identically to the shipped look.
     uPose: { value: 0 },
     uField: { value: new THREE.Color(RINGERS.bg) },
-    // Concrete-daylight amount 0..1 (Transit). The focus grammar dissolves
-    // unconnected metro lines toward mix(#0a0a16, #beb9b0, uDaylight) — the live
-    // background — so they recede whether the stage is the dark baseline or daylight.
-    uDaylight: { value: 0 },
+    // Light-environment amount 0..1 (Ascent dawn OR Transit daylight). Drives the
+    // VIVID enamel repaint (both windows) and the Transit city-background dissolve
+    // toward mix(#0a0a16, #beb9b0, uEnvLight).
+    uEnvLight: { value: 0 },
+    // VIVID enamel palette (LINEAR), index-aligned number/algebra/geometry/data.
+    uVivid: { value: vividVecs },
   };
 
   // RawShaderMaterial (not ShaderMaterial): it injects no built-in attributes,
-  // so the vertex program declares only the 15 attributes it actually uses.
-  // ShaderMaterial's auto position/normal/uv would put the count at 18 and the
-  // link fails on 16-attribute GPUs ("Too many attributes"). The galaxy shader
-  // math is unchanged, so its output stays byte-identical.
+  // so the vertex program declares only the 16 attributes it actually uses (the
+  // round-12 aStrand brings it to exactly WebGL2's guaranteed MAX_VERTEX_ATTRIBS
+  // floor of 16). ShaderMaterial's auto position/normal/uv would put the count at
+  // 19 and the link fails on 16-attribute GPUs ("Too many attributes"). The galaxy
+  // shader math is unchanged off the light environments, so its output stays
+  // byte-identical there.
   const material = new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3,
     vertexShader: VERT,
@@ -756,16 +810,16 @@ export function createEdges(
     setPose(p) {
       uniforms.uPose.value = p;
     },
-    setDaylight(amount) {
-      uniforms.uDaylight.value = amount;
-      // Enamel compositing: in the daylight window the ribbons must PAINT (normal
-      // alpha blend) rather than GLOW (additive), or gold/violet wash to cream on
-      // the light concrete. Flip the Galaxy material at the window midpoint; the
-      // fragment lerps the enamel deepening by uDaylight so uDaylight 0 stays
-      // additive + byte-identical (poses 0–2, dark-baseline Transit). Only the
-      // Galaxy path is touched — the paper styles set their own blending in
-      // setArtStyle and never raise daylight (environs zeroes it off-Galaxy).
-      // Blending is applied at draw time, so no material.needsUpdate (see setArtStyle).
+    setEnvLight(amount) {
+      uniforms.uEnvLight.value = amount;
+      // Enamel compositing: in a light environment (dawn or daylight) the ribbons
+      // must PAINT (normal alpha blend) rather than GLOW (additive), or the vivid
+      // strands wash to cream on the bright field. Flip the Galaxy material at the
+      // window midpoint; the fragment lerps the enamel repaint by uEnvLight so
+      // uEnvLight 0 stays additive + byte-identical (poses 0/2, dark-baseline
+      // Transit). Only the Galaxy path is touched — the paper styles set their own
+      // blending in setArtStyle and never raise env-light (environs zeroes it
+      // off-Galaxy). Blending applies at draw time, so no material.needsUpdate.
       if (uniforms.uArtStyle.value < 0.5) {
         const target = amount > 0.5 ? THREE.NormalBlending : THREE.AdditiveBlending;
         if (material.blending !== target) material.blending = target;

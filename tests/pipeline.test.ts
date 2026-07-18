@@ -184,12 +184,13 @@ describe("pose C (blueprint)", () => {
     n.grade === "HS" ? 9 + COURSE_ORDER.indexOf(n.courses![0]) : GRADES.indexOf(n.grade);
   const bp = core.nodes as (OutNode & { pos3?: number[]; courses?: string[] })[];
 
-  it("every node carries a lifted pos3 (z on a block plane 8..40, gutter 4)", () => {
+  it("every node carries a lifted pos3 (z on a block plane 16..146, gutter 8)", () => {
     expect(bp.length).toBe(480);
-    // Round-11 lift: each domain block rides its own z-plane (8 + 7k capped 40)
-    // like layered paper in a pop-up card; the edgeless side gutter is one quiet
-    // z=4 plane. The legal planes for k = 0,1,2,… (capped at 40) are finite.
-    const planes = new Set([4, 8, 15, 22, 29, 36, 40]);
+    // Round-12 lift (rescaled ~3.7× from round-11's imperceptible 8..40): each
+    // domain block rides its own z-plane (16 + 26k capped 146) like layered paper
+    // in a pop-up card; the edgeless side gutter is one quiet z=8 plane. The legal
+    // planes for k = 0,1,2,… (capped at 146) are finite.
+    const planes = new Set([8, 16, 42, 68, 94, 120, 146]);
     for (const n of bp) {
       expect(n.pos3 && n.pos3.length === 3).toBe(true);
       for (const v of n.pos3!) expect(Number.isFinite(v)).toBe(true);
@@ -197,9 +198,9 @@ describe("pose C (blueprint)", () => {
     }
   });
 
-  it("pos3 z steps each domain block deeper, monotone down every column, gutter on z=4", () => {
+  it("pos3 z steps each domain block deeper, monotone down every column, gutter on z=8", () => {
     // Down a column the connected stack runs block-by-block onto deeper planes
-    // (non-decreasing z); the +18 side gutter is edgeless nodes on one z=4 plane.
+    // (non-decreasing z); the +18 side gutter is edgeless nodes on one z=8 plane.
     const cols = new Map<number, (typeof bp)[number][]>();
     for (const n of bp) {
       const c = columnOf(n);
@@ -214,12 +215,12 @@ describe("pose C (blueprint)", () => {
         .filter((n) => n.pos3![0] === mainX)
         .sort((a, b) => b.pos3![1] - a.pos3![1]); // top → bottom
       const gutter = ns.filter((n) => n.pos3![0] !== mainX);
-      for (const g of gutter) expect(g.pos3![2]).toBe(4);
+      for (const g of gutter) expect(g.pos3![2]).toBe(8);
       let prevZ = -Infinity;
       const seenPlanes = new Set<number>();
       for (const n of connected) {
-        expect(n.pos3![2]).toBeGreaterThanOrEqual(8);
-        expect(n.pos3![2]).toBeLessThanOrEqual(40);
+        expect(n.pos3![2]).toBeGreaterThanOrEqual(16);
+        expect(n.pos3![2]).toBeLessThanOrEqual(146);
         expect(n.pos3![2]).toBeGreaterThanOrEqual(prevZ); // monotone down the column
         prevZ = n.pos3![2];
         seenPlanes.add(n.pos3![2]);
@@ -227,8 +228,8 @@ describe("pose C (blueprint)", () => {
       }
       if (seenPlanes.size > 1) multiBlockCols++;
     }
-    expect(maxZ).toBeGreaterThan(8); // at least one column stacks multiple blocks
-    expect(maxZ).toBeLessThanOrEqual(40); // capped
+    expect(maxZ).toBeGreaterThan(16); // at least one column stacks multiple blocks
+    expect(maxZ).toBeLessThanOrEqual(146); // capped
     expect(multiBlockCols).toBeGreaterThan(0);
   });
 

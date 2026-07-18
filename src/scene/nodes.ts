@@ -14,7 +14,7 @@
 
 import * as THREE from "three";
 import type { GraphNode } from "../data";
-import { EMPHASIS, STRAND_COLORS, restRadius } from "./palette";
+import { EMPHASIS, STRAND_COLORS, STRAND_VIVID, restRadius } from "./palette";
 import { RINGERS, FIDENZA, artHash } from "./artstyle";
 
 const DIM_TARGET = 0x0a0a18; // dimmed nodes lerp toward this (factor 0.82)
@@ -270,6 +270,13 @@ export interface NodesHandle {
    * poses 0/1 (and the 2.4→2.6 gap between the two windows) untouched.
    */
   setOrbFade(amount: number): void;
+  /**
+   * Ascent-dawn boldness (0 normal … 1 full dawn). Orb (Galaxy) material only:
+   * grows each bead ×1.15 and pulls its fill toward the deep vivid strand hue so it
+   * reads against the bright morning sky instead of washing out. 0 everywhere but
+   * the settled Ascent dawn; the paper skins never see it.
+   */
+  setDawnBold(amount: number): void;
   /** Grow the proxy pick radius for touch pointers (idempotent). */
   setTouchPicking(on: boolean): void;
   /**
@@ -329,6 +336,10 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
   const artRing = new Float32Array(count * 3);
   const artFid = new Float32Array(count * 3);
   const twist = new Float32Array(count);
+  // VIVID strand hue per node (LINEAR), the deep street tone the Ascent-dawn
+  // boldness pulls each orb toward so it reads against the bright morning sky.
+  // Galaxy-only (attached to the orb geometry, not the shared art skins).
+  const vivid = new Float32Array(count * 3);
   const bakeC = new THREE.Color();
   for (let i = 0; i < count; i++) {
     const nd = nodes[i];
@@ -340,14 +351,20 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     artFid[i * 3] = bakeC.r;
     artFid[i * 3 + 1] = bakeC.g;
     artFid[i * 3 + 2] = bakeC.b;
+    bakeC.setHex(STRAND_VIVID[nd.strand]);
+    vivid[i * 3] = bakeC.r;
+    vivid[i * 3 + 1] = bakeC.g;
+    vivid[i * 3 + 2] = bakeC.b;
     twist[i] = (artHash(nd.id) - 0.5) * 0.6;
   }
   const artRingAttr = new THREE.InstancedBufferAttribute(artRing, 3);
   const artFidAttr = new THREE.InstancedBufferAttribute(artFid, 3);
   const twistAttr = new THREE.InstancedBufferAttribute(twist, 1);
+  const vividAttr = new THREE.InstancedBufferAttribute(vivid, 3);
   geometry.setAttribute("aArtRing", artRingAttr);
   geometry.setAttribute("aArtFid", artFidAttr);
   geometry.setAttribute("aTwist", twistAttr);
+  geometry.setAttribute("aVivid", vividAttr); // orb geometry only (dawn boldness)
 
   const uniforms = {
     uTime: { value: 0 },
@@ -364,6 +381,10 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     // Transit station handoff (0 normal … 1 fully stationed). Shared with the
     // art-node materials so every skin crossfades pegs → station marks the same.
     uPoseFade: { value: 0 },
+    // Ascent-dawn boldness (0 normal … 1 full dawn). Orb material only: opaque,
+    // ×1.15, pulled toward the deep VIVID strand hue so the bead reads against the
+    // bright morning sky. 0 everywhere but the settled Ascent dawn (Galaxy).
+    uDawnBold: { value: 0 },
   };
 
   material.onBeforeCompile = (shader) => {
@@ -372,6 +393,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     shader.uniforms.uShimmer = uniforms.uShimmer;
     shader.uniforms.uStoryLift = uniforms.uStoryLift;
     shader.uniforms.uPoseFade = uniforms.uPoseFade;
+    shader.uniforms.uDawnBold = uniforms.uDawnBold;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -382,9 +404,11 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         attribute float aPhase;
         attribute float aVisible;
         attribute float aDamage;
+        attribute vec3 aVivid;
         uniform float uTime;
         uniform float uShimmer;
         uniform float uPoseFade;
+        uniform float uDawnBold;
         varying float vColorMul;
         varying float vShim;
         varying float vDim;
@@ -392,6 +416,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         varying float vPhase;
         varying vec3 vNrm;
         varying vec3 vViewPos;
+        varying vec3 vVivid;
         `,
       )
       .replace(
@@ -422,6 +447,10 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           // mark fades in (uPoseFade 0→1). At 0 this is a no-op (× 1.0), so poses
           // 0–2 stay byte-identical.
           scl *= mix(1.0, 0.001, uPoseFade);
+          // Ascent-dawn boldness: grow the bead ×1.15 so it holds against the bright
+          // sky. uDawnBold 0 (every pose but the settled dawn) is a no-op.
+          scl *= mix(1.0, 1.15, uDawnBold);
+          vVivid = aVivid;
           vDim = max(dim, (1.0 - aVisible) * 0.9);
           // Damage rides on top of emphasis: it recolors (fragment) but never
           // resizes, so a chain-lit-but-damaged node keeps its emphasis size.
@@ -446,6 +475,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         uniform vec3 uDimColor;
         uniform float uTime;
         uniform float uStoryLift;
+        uniform float uDawnBold;
         varying float vColorMul;
         varying float vShim;
         varying float vDim;
@@ -453,6 +483,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         varying float vPhase;
         varying vec3 vNrm;
         varying vec3 vViewPos;
+        varying vec3 vVivid;
         `,
       )
       .replace(
@@ -469,6 +500,11 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         float lift = mix(uStoryLift, 1.0, clamp(vDamage * 3.0, 0.0, 1.0));
         float mulTotal = max(vColorMul, lift * vShim);
         diffuseColor.rgb = mix(diffuseColor.rgb * mulTotal, uDimColor, vDim);
+        // Ascent-dawn boldness: pull the fill toward the DEEP vivid strand hue so the
+        // orb reads as a solid coloured bead against the bright sky, not an additive
+        // pastel wash. Applied BEFORE the sphere shading so the limb/key modelling
+        // still rides on top; uDawnBold 0 → untouched (poses 0/2/3, dark baseline).
+        diffuseColor.rgb = mix(diffuseColor.rgb, vVivid * 0.72, uDawnBold * 0.85);
         // --- sphere shading: limb darkening + a soft key light ----------------
         // Bright core, darkened silhouette: each orb reads as a self-luminous
         // sphere, and an orb in front separates visibly from one behind it
@@ -744,6 +780,9 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     },
     setOrbFade(amount) {
       uniforms.uPoseFade.value = amount;
+    },
+    setDawnBold(amount) {
+      uniforms.uDawnBold.value = amount;
     },
     setTouchPicking(on) {
       if (on === touchMode) return;

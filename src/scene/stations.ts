@@ -36,6 +36,7 @@
 
 import * as THREE from "three";
 import type { GraphCore, StrandId } from "../data";
+import { STRAND_VIVID } from "./palette";
 import { RINGERS, FIDENZA } from "./artstyle";
 import { stationFocusFade, cityFadeTarget } from "./focusgrammar";
 
@@ -135,9 +136,12 @@ export interface StationsHandle {
    * from the live node position and fold in per-node story dimming. `daylight01`
    * (0..1) is the concrete-daylight amount: the missed / focus-collapsed fade
    * target lerps from near-black #0a0a16 (dark baseline) to concrete grey #beb9b0,
-   * so an unconnected station dissolves into the live city background.
+   * so an unconnected station dissolves into the live city background. `envLight01`
+   * (0..1) is the light-environment amount: the strand-coloured borders + line dots
+   * cross-fade to the VIVID enamel palette so the metro reads as vibrant street
+   * signage on the light concrete (at the Transit, envLight01 == daylight01).
    */
-  update(pose: number, daylight01?: number): void;
+  update(pose: number, daylight01?: number, envLight01?: number): void;
   /** Swap fills / borders / dot inks for the active art style (0/1/2). */
   setArtStyle(style: number): void;
   dispose(): void;
@@ -272,6 +276,7 @@ export function createStations(
   const fBorder = new Float32Array(F);
   const fFill = new Float32Array(F * 3);
   const fStroke = new Float32Array(F * 3);
+  const fStrokeVivid = new Float32Array(F * 3); // VIVID stroke — light-env enamel border
   const fState = new Float32Array(F * 2).fill(1); // [colorDim, alphaMul]
   frames.forEach((d, k) => {
     fOffset[k * 2] = d.offset[0];
@@ -287,6 +292,7 @@ export function createStations(
   fStateAttr.setUsage(THREE.DynamicDrawUsage);
   const fFillAttr = new THREE.InstancedBufferAttribute(fFill, 3);
   const fStrokeAttr = new THREE.InstancedBufferAttribute(fStroke, 3);
+  const fStrokeVividAttr = new THREE.InstancedBufferAttribute(fStrokeVivid, 3);
   frameGeo.setAttribute("aCenter", fCenterAttr);
   frameGeo.setAttribute("aOffset", new THREE.InstancedBufferAttribute(fOffset, 2));
   frameGeo.setAttribute("aHalf", new THREE.InstancedBufferAttribute(fHalf, 2));
@@ -294,12 +300,14 @@ export function createStations(
   frameGeo.setAttribute("aBorder", new THREE.InstancedBufferAttribute(fBorder, 1));
   frameGeo.setAttribute("aFill", fFillAttr);
   frameGeo.setAttribute("aStroke", fStrokeAttr);
+  frameGeo.setAttribute("aStrokeVivid", fStrokeVividAttr);
   frameGeo.setAttribute("aState", fStateAttr);
   frameGeo.instanceCount = F;
 
   const frameUniforms = {
     uFade: { value: 0 },
     uMissed: { value: new THREE.Color(MISSED) },
+    uEnvLight: { value: 0 }, // 0..1 → cross-fade strand border to the VIVID enamel palette
   };
   const frameMat = new THREE.ShaderMaterial({
     uniforms: frameUniforms,
@@ -316,7 +324,9 @@ export function createStations(
       attribute float aBorder;
       attribute vec3 aFill;
       attribute vec3 aStroke;
+      attribute vec3 aStrokeVivid;
       attribute vec2 aState;
+      uniform float uEnvLight;
       varying vec2 vLocal;
       varying vec2 vHalf;
       varying float vCorner;
@@ -336,7 +346,8 @@ export function createStations(
         vCorner = aCorner;
         vBorder = aBorder;
         vFill = aFill;
-        vStroke = aStroke;
+        // Light-environment enamel: cross-fade the strand border to its VIVID tone.
+        vStroke = mix(aStroke, aStrokeVivid, clamp(uEnvLight, 0.0, 1.0));
         vState = aState;
       }
     `,
@@ -391,6 +402,7 @@ export function createStations(
   const pOffset = new Float32Array(P * 2);
   const pScale = new Float32Array(P);
   const pColor = new Float32Array(P * 3);
+  const pColorVivid = new Float32Array(P * 3); // VIVID dot — light-env enamel line colour
   const pState = new Float32Array(P * 2).fill(1);
   pips.forEach((d, k) => {
     pOffset[k * 2] = d.offset[0];
@@ -402,16 +414,19 @@ export function createStations(
   const pStateAttr = new THREE.InstancedBufferAttribute(pState, 2);
   pStateAttr.setUsage(THREE.DynamicDrawUsage);
   const pColorAttr = new THREE.InstancedBufferAttribute(pColor, 3);
+  const pColorVividAttr = new THREE.InstancedBufferAttribute(pColorVivid, 3);
   pipGeo.setAttribute("aCenter", pCenterAttr);
   pipGeo.setAttribute("aOffset", new THREE.InstancedBufferAttribute(pOffset, 2));
   pipGeo.setAttribute("aScale", new THREE.InstancedBufferAttribute(pScale, 1));
   pipGeo.setAttribute("aColor", pColorAttr);
+  pipGeo.setAttribute("aColorVivid", pColorVividAttr);
   pipGeo.setAttribute("aState", pStateAttr);
   pipGeo.instanceCount = P;
 
   const pipUniforms = {
     uFade: { value: 0 },
     uMissed: { value: new THREE.Color(MISSED) },
+    uEnvLight: { value: 0 }, // 0..1 → cross-fade line dots to the VIVID enamel palette
   };
   const pipMat = new THREE.ShaderMaterial({
     uniforms: pipUniforms,
@@ -425,7 +440,9 @@ export function createStations(
       attribute vec2 aOffset;
       attribute float aScale;
       attribute vec3 aColor;
+      attribute vec3 aColorVivid;
       attribute vec2 aState;
+      uniform float uEnvLight;
       varying vec2 vP;
       varying vec3 vColor;
       varying vec2 vState;
@@ -434,7 +451,8 @@ export function createStations(
         mv.xy += aOffset + position.xy * 2.0 * aScale;
         gl_Position = projectionMatrix * mv;
         vP = position.xy * 2.0;
-        vColor = aColor;
+        // Light-environment enamel: cross-fade the line dot to its VIVID tone.
+        vColor = mix(aColor, aColorVivid, clamp(uEnvLight, 0.0, 1.0));
         vState = aState;
       }
     `,
@@ -492,16 +510,31 @@ export function createStations(
       fStroke[k * 3] = c.r;
       fStroke[k * 3 + 1] = c.g;
       fStroke[k * 3 + 2] = c.b;
+      // VIVID border for the light environments: Galaxy strand-coloured strokes
+      // (disc + lozenge) switch to the vivid enamel palette; the pale interchange
+      // capsule border is not a strand colour, so it (and the art skins) hold.
+      const vividStroke = style === 0 && d.kind !== 1 ? STRAND_VIVID[d.strand] : stroke;
+      c.setHex(vividStroke);
+      fStrokeVivid[k * 3] = c.r;
+      fStrokeVivid[k * 3 + 1] = c.g;
+      fStrokeVivid[k * 3 + 2] = c.b;
     });
     fFillAttr.needsUpdate = true;
     fStrokeAttr.needsUpdate = true;
+    fStrokeVividAttr.needsUpdate = true;
     pips.forEach((d, k) => {
       c.setHex(lineHexFor(d.strand));
       pColor[k * 3] = c.r;
       pColor[k * 3 + 1] = c.g;
       pColor[k * 3 + 2] = c.b;
+      // VIVID line dots in the light environments (Galaxy only; art skins hold).
+      c.setHex(style === 0 ? STRAND_VIVID[d.strand] : lineHexFor(d.strand));
+      pColorVivid[k * 3] = c.r;
+      pColorVivid[k * 3 + 1] = c.g;
+      pColorVivid[k * 3 + 2] = c.b;
     });
     pColorAttr.needsUpdate = true;
+    pColorVividAttr.needsUpdate = true;
   }
   bakeColors(0);
 
@@ -535,7 +568,7 @@ export function createStations(
 
   return {
     group,
-    update(pose, daylight01 = 0) {
+    update(pose, daylight01 = 0, envLight01 = 0) {
       const fade = smoothstep01((pose - 2.6) / 0.4);
       if (fade <= 0.001) {
         if (group.visible) group.visible = false;
@@ -544,6 +577,10 @@ export function createStations(
       group.visible = true;
       frameUniforms.uFade.value = fade;
       pipUniforms.uFade.value = fade;
+      // Strand borders + line dots cross-fade to the vivid enamel palette in the
+      // light environment (at the Transit, envLight01 == daylight01).
+      frameUniforms.uEnvLight.value = envLight01;
+      pipUniforms.uEnvLight.value = envLight01;
       // Fade target for missed / ghosted / focus-collapsed marks: the live city
       // background — near-black #0a0a16 in the dark baseline, concrete grey #beb9b0
       // at daylight (mix by daylight01). Stories force daylight01→0, so the missed

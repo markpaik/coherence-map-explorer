@@ -1,17 +1,22 @@
 // Thematic environments — the sky each pose earns once it settles. The
 // Constellation keeps the galaxy (stars + planets); the three structured poses
 // each raise a place instead:
-//   · home 1 (the Ascent)    → a Sierra DAWN: an inside-out gradient sky, low
-//                              valley mist, and two distant ridge silhouettes.
+//   · home 1 (the Ascent)    → a Sierra DAWN: an inside-out gradient sky with a
+//                              gold horizon band and low valley mist. The dawn
+//                              lives entirely ON/AROUND the 360° shell (gradient +
+//                              horizon glow + four mist planes) so an orbit never
+//                              breaks it — the old distant ridge planes, which
+//                              ended and broke on orbit, were removed in round-12.
 //   · home 2 (the Blueprint)  → a quiet STUDIO shell — the sheet is the show.
-//   · home 3 (the Transit)    → CONCRETE daylight: a flat overcast gradient with
-//                              large-scale mottling, enamel-sign clear.
+//   · home 3 (the Transit)    → CONCRETE daylight: a clean, light overcast gradient
+//                              with an infinite procedural concrete grain, enamel-
+//                              sign clear (modern / street / vibrant city daylight).
 //
 // All three are ONE THREE.Group, each a sub-group faded by a pose window. Every
 // mark is deterministic canvas + geometry — no Math.random, no Date; a fixed
-// seed hash decides only texture detail (the ridge silhouette, the mist grain,
-// the concrete mottle), never a node's position. Everything is static, so the
-// environments are reduced-motion safe by construction.
+// seed hash decides only texture detail (the mist grain, the concrete grain),
+// never a node's position. Everything is static, so the environments are
+// reduced-motion safe by construction.
 //
 // ENDPOINT GATING (the round-11 bug fix): a window is forced to 0 unless its
 // home pose is one of the morph's endpoints (origin / target). A morph that
@@ -129,28 +134,43 @@ const SHELL_FRAG = /* glsl */ `
       vec3 bandA = vec3(0.796078, 0.709804, 0.607843); // #cbb59b
       vec3 bandB = vec3(0.890196, 0.803922, 0.698039); // #e3cdb2
       vec3 band = mix(bandA, bandB, smoothstep(-0.5, 0.9, vDir.x));
-      // Widened band→ridge transition (round-12): the mask now feathers over ~0.09
-      // of elevation (was 0.05), so the gold horizon dissolves gradually into the
-      // sky above the ridgeline instead of leaving a hard banding seam at the ridge.
-      float bandMask = 1.0 - smoothstep(0.0, 0.09, abs(e - 0.02));
-      col = mix(col, band, bandMask * 0.9);
+      // Widened horizon glow (round-12): with the ridge planes gone the band is the
+      // dawn's only depth cue, so its feather is widened ~15% (0.09 → 0.104 of
+      // elevation) and its strength nudged up, carrying the horizon on its own.
+      float bandMask = 1.0 - smoothstep(0.0, 0.104, abs(e - 0.02));
+      col = mix(col, band, bandMask * 0.95);
     } else if (uType == 1) {
       // Studio — a quiet charcoal shell. The sheet is the show.
       vec3 top = vec3(0.062745, 0.082353, 0.113725); // #10151d
       vec3 bot = vec3(0.090196, 0.113725, 0.156863); // #171d28
       col = mix(bot, top, smoothstep(-0.4, 0.8, e));
     } else {
-      // Concrete daylight — flat overcast, material not photograph.
-      vec3 cZ = vec3(0.811765, 0.800000, 0.768627); // #cfccc4
-      vec3 cM = vec3(0.745098, 0.725490, 0.690196); // #beb9b0
-      vec3 cL = vec3(0.658824, 0.643137, 0.607843); // #a8a49b
+      // Concrete daylight — clean, light overcast; a material, not a photograph.
+      // Round-12 (user: the old #a8a49b→#cfccc4 shell read "muddy and bleh"):
+      // lighter, closer stops for modern city-daylight concrete, with an infinite
+      // procedural grain overlay so the flat field reads as fine grey stone.
+      vec3 cZ = vec3(0.850980, 0.839216, 0.811765); // #d9d6cf zenith
+      vec3 cM = vec3(0.803922, 0.792157, 0.764706); // #cdcac3 mid
+      vec3 cL = vec3(0.768627, 0.756863, 0.729412); // #c4c1ba low
       col = mix(cL, cM, smoothstep(-0.10, 0.42, e));
       col = mix(col, cZ, smoothstep(0.42, 1.00, e));
-      // Large-scale mottling ±3% — soft hash-noise blobs, no literal seams.
-      float m1 = vnoise(vDir.xy * 3.0 + vDir.z * 1.7);
-      float m2 = vnoise(vDir.zx * 5.3 - 4.0);
-      float mott = (m1 * 0.6 + m2 * 0.4) - 0.5;
-      col *= 1.0 + mott * 0.06;
+      // Very-low-frequency mottle (±2.5%) — broad, soft unevenness. Direction-based
+      // so it is infinite and never seams as the camera orbits.
+      float lo1 = vnoise(vDir.xy * 3.0 + vDir.z * 1.7);
+      float lo2 = vnoise(vDir.zx * 5.3 - 4.0);
+      col *= 1.0 + ((lo1 * 0.6 + lo2 * 0.4) - 0.5) * 0.05;
+      // Fine concrete grain — a multi-octave hash speckle plus sparse, slightly
+      // darker pore flecks, composited like a Photoshop "light overlay" at ±5%.
+      // vDir-driven → INFINITE, no tiling (the round-12 replacement for a canvas
+      // texture, which would have wrapped and repeated on the shell). Non-repeating
+      // per-octave phase offsets keep the speckle from beating with itself.
+      vec2 gd = vDir.xy + vDir.z * 0.7;
+      float gFine = vnoise(gd * 640.0 + 11.3);
+      float gMed  = vnoise(gd * 230.0 - 4.0);
+      float grain = (gFine - 0.5) * 0.085 + (gMed - 0.5) * 0.05;
+      float pore = vnoise(gd * 400.0 + 40.0);
+      grain -= smoothstep(0.80, 0.97, pore) * 0.06; // sparse darker pores
+      col *= 1.0 + grain;
     }
     gl_FragColor = vec4(col, uOpacity);
     if (gl_FragColor.a < 0.002) discard;
@@ -214,74 +234,6 @@ function buildMistTexture(): THREE.CanvasTexture {
 }
 
 // ---------------------------------------------------------------------------
-// Dawn ridges — 2 distant silhouettes, a genuinely jagged ridgeline from the
-// fixed seed (round-12 rebuild: the old 3/7/15-octave profile read as a broad,
-// flat-topped dark stripe). Each layer carries a horizontal `phase` so the two
-// ridgelines' peaks fall in different places (stacked ranges, not a doubled
-// outline); the far one is darker + more opaque and sits behind via parallax (z).
-const RIDGES = [
-  { z: -650, fill: 0x1b2436, op: 0.55, seed: 101, phase: 0.0 },
-  { z: -950, fill: 0x141b2a, op: 0.75, seed: 257, phase: 0.37 },
-] as const;
-const RIDGE_W = 4800; // x span ±2400 — wide enough that no plane edge enters the frame
-const RIDGE_H = 260;
-const RIDGE_Y = -10;
-// Ridge floor + jag amplitude as fractions of the texture height. Lower than the
-// old 0.46/0.23 hump so the range reads as distant foothills, not a wall.
-const RIDGE_BASE = 0.4;
-const RIDGE_AMP = 0.22;
-
-function buildRidgeTexture(seed: number, phase: number): THREE.CanvasTexture {
-  const W = 1024;
-  const H = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  if (!ctx) return tex;
-  const img = ctx.createImageData(W, H);
-  const d = img.data;
-  const s = seed * 0.123;
-  for (let x = 0; x < W; x++) {
-    const t = x / W + phase; // per-layer horizontal phase → offset peaks
-    // Higher-frequency, varied-amplitude value noise: coarse crests (×5) carry the
-    // skyline, finer octaves (×11/×23/×47) cut the teeth. Weights sum to 1 so h
-    // stays in [0,1]. Deterministic (fixed seed) — texture detail only, never a
-    // node position.
-    const h =
-      0.4 * vnoise(t * 5 + s, s * 1.3) +
-      0.26 * vnoise(t * 11 + s * 2.0, 7 + s) +
-      0.2 * vnoise(t * 23 + s * 0.7, 3 + s) +
-      0.14 * vnoise(t * 47 + s * 1.7, 5 + s);
-    const frac = RIDGE_BASE + RIDGE_AMP * clamp01(h); // ridge height as a fraction of H
-    const topRow = (1 - frac) * H; // rows below this are mountain
-    const mountainH = H - topRow; // this column's opaque height (rows)
-    // Soft feathered top: alpha ramps 0 → 1 over ~12% of the ridge height below the
-    // ridgeline, so the silhouette has NO hard edge anywhere (the old ±1.5-row
-    // smoothstep was a near-hard cut). The per-column feather also softens the
-    // horizontal jaggies where neighbouring peaks differ in height.
-    const feather = Math.max(3, 0.12 * mountainH);
-    // Horizontal end feather: the ridge dissolves over the outer 8% of each
-    // side, so a finite plane never shows a hard vertical edge if the camera
-    // catches its end mid-frame.
-    const endFade = clamp01(Math.min(x, W - 1 - x) / (0.08 * W));
-    for (let y = 0; y < H; y++) {
-      const a = clamp01((y - topRow) / feather) * endFade; // 0 at the ridgeline → 1 by topRow + feather
-      const k = (y * W + x) * 4;
-      d[k] = 255;
-      d[k + 1] = 255;
-      d[k + 2] = 255;
-      d[k + 3] = Math.round(a * 255);
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-// ---------------------------------------------------------------------------
 export interface EnvironsDeps {
   /** Planets recede as an environment takes over (1 galaxy … 0 gone). */
   planets: { setVisibleAmount(a: number): void };
@@ -307,6 +259,11 @@ export interface EnvironsHandle {
    *  chrome (body.env-light) and to darken the etch markers. Studio is a DARK
    *  shell and is deliberately NOT reported here. */
   dawn01(): number;
+  /** Effective LIGHT-environment amount = max(dawn01, daylight01) (the two never
+   *  overlap). The single amount the enamel mechanism keys off: edges flip to
+   *  normal-blend vivid signage, and nodes/stations repaint to the vivid palette,
+   *  whenever this owns the frame — at the Ascent dawn AND the Transit daylight. */
+  envLight01(): number;
   dispose(): void;
 }
 
@@ -363,31 +320,6 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
     mistGeos.push(geo);
   });
 
-  // -- dawn ridges ---------------------------------------------------------
-  const ridgeTexs: THREE.CanvasTexture[] = [];
-  const ridgeMats: THREE.MeshBasicMaterial[] = [];
-  const ridgeGeos: THREE.PlaneGeometry[] = [];
-  RIDGES.forEach((r) => {
-    const tex = buildRidgeTexture(r.seed, r.phase);
-    const geo = new THREE.PlaneGeometry(RIDGE_W, RIDGE_H);
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      color: r.fill,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      depthTest: false,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(0, RIDGE_Y, r.z);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = -8;
-    dawnGroup.add(mesh);
-    ridgeTexs.push(tex);
-    ridgeMats.push(mat);
-    ridgeGeos.push(geo);
-  });
-
   // -- fade state ----------------------------------------------------------
   let storyMul = 1; // 1 environments live … 0 fully suppressed by a story
   let planetVis = 1;
@@ -401,7 +333,6 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
     if (!dawnGroup.visible) return;
     dawnShellMat.uniforms.uOpacity.value = a;
     for (let i = 0; i < mistMats.length; i++) mistMats[i].opacity = MIST[i].op * a;
-    for (let i = 0; i < ridgeMats.length; i++) ridgeMats[i].opacity = RIDGES[i].op * a;
   }
   function applyStudio(a: number): void {
     studioGroup.visible = a > 0.0015;
@@ -456,6 +387,11 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
     dawn01() {
       return lastDawn;
     },
+    envLight01() {
+      // The two light environments never overlap (dawn zero by pose 1.5, daylight
+      // zero until 2.5), so a max is a clean union of the two effective amounts.
+      return lastDawn > lastDaylight ? lastDawn : lastDaylight;
+    },
     dispose() {
       shellGeo.dispose();
       dawnShellMat.dispose();
@@ -464,9 +400,6 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
       mistTex.dispose();
       for (const m of mistMats) m.dispose();
       for (const g of mistGeos) g.dispose();
-      for (const t of ridgeTexs) t.dispose();
-      for (const m of ridgeMats) m.dispose();
-      for (const g of ridgeGeos) g.dispose();
     },
   };
 }

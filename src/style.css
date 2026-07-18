@@ -775,6 +775,7 @@ body.art-fidenza .ghost-btn:hover {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   line-height: 1.4;
+  font-size: 13px; /* panel card text tier (search .res-title keeps 12px) */
 }
 
 /* -- detail panel ---------------------------------------------------------- */
@@ -852,7 +853,7 @@ body.art-fidenza .ghost-btn:hover {
 }
 .panel-crumb {
   margin: 6px 0 0;
-  font-size: 12.5px;
+  font-size: 11.5px; /* metadata tier */
   line-height: 1.4;
   color: var(--ink-2);
 }
@@ -994,7 +995,7 @@ body.art-fidenza .ghost-btn:hover {
 }
 .conn-rollup-note {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 11.5px; /* metadata tier */
   line-height: 1.4;
   color: var(--ink-3);
 }
@@ -1032,13 +1033,19 @@ body.art-fidenza .ghost-btn:hover {
 }
 .task-group {
   margin: 10px 0 4px;
-  font-size: 12px;
+  font-size: 11.5px; /* metadata eyebrow above the 13px link list */
   font-weight: 600;
   color: var(--ink-2);
 }
+/* Link-list tier: without a font-size the <ul>/<li>/<a> (built in JS, not
+   innerHTML) inherited the root 16px and rendered visibly larger than the rest
+   of the panel. Scope the size here so every link — and any future injected
+   list HTML under it — lands on the 13px body/card/link tier. */
 .task-list {
   margin: 0;
   padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.55;
 }
 .task-list li {
   margin: 4px 0;
@@ -1060,11 +1067,13 @@ body.art-fidenza .ghost-btn:hover {
   font-weight: 600;
   color: var(--ink-2);
 }
+/* Worked-example + progression body: pipeline-injected HTML, so its p/li/a
+   inherit this size — the 13px body/card/link tier, matching the task links. */
 .example-body,
 .progression-note .math-host {
   margin-top: 10px;
-  font-size: 13.5px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--ink);
 }
 .example-body h3 {

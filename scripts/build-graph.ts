@@ -1300,12 +1300,15 @@ export function buildGraph(): BuildResult {
   // A visible breath between domain blocks, so the bands read as bands.
   const blockGap = rowGap * B.blockGapFactor;
   const gutterX = 18; // gutter lane offset from the column center (band is ±40)
-  // THE LIFT (round 11): each domain block rides its own z-plane like layered
-  // paper in a pop-up card — block bi (canonical order) at z = 8 + 7*bi, capped
-  // at 40 — so a side orbit reads the sheet as stacked cards while the front-on
-  // (x/y) schematic is unchanged. The isolated gutter is one quiet plane at z=4.
-  const GUTTER_Z = 4;
-  const blockZ = (bi: number): number => Math.min(40, 8 + bi * 7);
+  // THE LIFT (round 12): the round-11 8..40 planes read as no lift at all, so the
+  // spacing is rescaled ~3.7×. Each domain block rides its own z-plane like layered
+  // paper in a pop-up card — block bi (canonical order) at z = 16 + 26*bi, capped
+  // at 146 — so a side orbit reads the sheet as real stacked cards while the
+  // front-on (x/y) schematic is byte-for-byte unchanged. The isolated gutter is one
+  // quiet plane at z=8 (below every block card). Plane set: {8, 16, 42, 68, 94,
+  // 120, 146}. The sheet plane sits at z=−20 to clear all of it.
+  const GUTTER_Z = 8;
+  const blockZ = (bi: number): number => Math.min(146, 16 + bi * 26);
   const pos3 = new Map<string, [number, number, number]>();
   const bpBlockZOf = new Map<string, number>(); // connected node -> its block z-plane
   const colMinY = new Array<number>(N_COLS).fill(0);
@@ -1341,8 +1344,8 @@ export function buildGraph(): BuildResult {
   }
 
   // Blueprint sanity: every node's x is exactly its column center (gutter +18),
-  // its z rides its block's pop-up plane (connected: 8..40, non-decreasing down
-  // the column; gutter: the single quiet z=4 plane), and no two nodes in a
+  // its z rides its block's pop-up plane (connected: 16..146, non-decreasing down
+  // the column; gutter: the single quiet z=8 plane), and no two nodes in a
   // column share a (rounded, i.e. emitted) lane+y slot (connected stack and
   // isolated gutter are separate lanes at distinct x).
   for (let c = 0; c < N_COLS; c++) {
@@ -1354,7 +1357,7 @@ export function buildGraph(): BuildResult {
       const p = pos3.get(id)!;
       const bz = bpBlockZOf.get(id)!;
       assert(p[2] === bz, `blueprint: pos3 z ${p[2]} != block plane ${bz} on ${id}`);
-      assert(bz >= 8 && bz <= 40, `blueprint: block z ${bz} out of [8,40] on ${id}`);
+      assert(bz >= 16 && bz <= 146, `blueprint: block z ${bz} out of [16,146] on ${id}`);
       assert(bz >= prevBlockZ, `blueprint: block z not monotone down column ${c} on ${id}`);
       prevBlockZ = bz;
       assert(round2(p[0]) === cx, `blueprint: pos3 x ${p[0]} off main lane in column ${c} on ${id}`);

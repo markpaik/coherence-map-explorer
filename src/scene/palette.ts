@@ -11,6 +11,18 @@ export const STRAND_COLORS: Record<StrandId, number> = {
   data: 0xde5a85, // rose — Measurement, Data & Statistics
 };
 
+// VIVID enamel palette (round-12). In the LIGHT environments — the Ascent dawn
+// and the Transit concrete daylight — the additive strand hues wash out against
+// the bright field, so edges/nodes/stations repaint with these full-saturation
+// "street" tones (taxi gold / electric violet / subway teal / hot rose). Painted
+// enamel signage, index-aligned to STRAND_ORDER; never used in the dark baseline.
+export const STRAND_VIVID: Record<StrandId, number> = {
+  number: 0xf2a20d, // taxi gold
+  algebra: 0x6f4dff, // electric violet
+  geometry: 0x00b3a4, // subway teal
+  data: 0xff3d6e, // hot rose
+};
+
 export const STRAND_LABELS: Record<StrandId, string> = {
   number: "Number & Quantity",
   algebra: "Algebra & Functions",

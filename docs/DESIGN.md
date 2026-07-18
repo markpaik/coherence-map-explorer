@@ -258,15 +258,23 @@ neon night Transit):
 - **Constellation** — the shipped galaxy. Untouched.
 - **Ascent, "Sierra dawn"** — pre-dawn indigo grading to a narrow gold horizon
   band biased toward the summit side; four static mist planes pooling at the
-  foundations; two feathered jagged ridge silhouettes (deterministic hash,
-  texture only, horizontal end-fade so no plane edge ever shows); stars hold
-  at 0.35 (dawn keeps its stars), planets gone.
-- **Blueprint, "studio"** — quiet slate shell; the sheet is the show, and it
-  has a BACK (mirrored bleed-through plate) so orbiting behind reads as paper.
-- **Transit, "concrete daylight"** — warm mottled concrete shell; bloom off;
-  edges flip to normal-blend ENAMEL (full strand hue ×0.85) so lines read as
-  painted signage, not glow; stations stay painted roundels (a touch brighter
-  than lines — deliberate, signage-true).
+  foundations; stars hold at 0.35 (dawn keeps its stars), planets gone. The
+  dawn lives entirely on the 360° shell — ridge planes were removed in round
+  12 (they ended and broke on orbit). The STRUCTURE stays bold against the
+  sky: in light environments edges flip to normal-blend enamel in the VIVID
+  palette (below) at width ×1.25, and orbs pull to deep vivid hues ×1.15.
+- **Blueprint, "studio"** — quiet slate shell; the sheet is the show (frame,
+  grid, corner registers — the title block was cut in round 12), it has a
+  BACK (mirrored bleed-through plate), and the domain blocks LIFT on paper
+  planes z ∈ {16,42,68,94,120,146} (gutter 8, sheet at −20) — a real pop-up
+  card under orbit, byte-stable front-on.
+- **Transit, "concrete daylight"** — clean light concrete shell (#d9d6cf →
+  #c4c1ba) with an infinite procedural grain composited as a light overlay
+  (shader value-noise, no tiling); bloom off; edges render in the VIVID
+  street palette. VIVID palette (light environments only, index-aligned with
+  the strands): number #f2a20d taxi gold · algebra #6f4dff electric violet ·
+  geometry #00b3a4 subway teal · data #ff3d6e hot rose. Stations' borders and
+  dots follow it; stations stay a touch brighter than lines (signage-true).
 
 Environment windows are ENDPOINT-GATED (a layer wakes only if its home pose is
 the morph's origin or target — no sheet flash on 0/1→3). On light environments
@@ -283,6 +291,13 @@ edge ribbons never write depth).
 
 Labels: the styles tab reads "Style overrides"; style 0 is "Let it Ride"
 (slug `galaxy` unchanged) — override nothing, let each formation do its thing.
+
+FOCUS EXIT (round 12): every exit path — panel X, Esc, and a genuine click on
+empty canvas (6px click-vs-drag threshold, inactive during stories/tour) —
+runs one unified exitFocus: clear focus, then fly the camera to the current
+pose's home framing (instant under reduced motion). Panel typography rides one
+scale: title 22 · standard text 15 · body/cards/links/worked examples 13 ·
+metadata 11.5 · section caps 11.
 
 ## Art styles
 

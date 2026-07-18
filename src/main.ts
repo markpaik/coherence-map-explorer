@@ -222,7 +222,9 @@ function start(graph: GraphCore): void {
   const panel = createPanel(document.body, graph, {
     focusCode: (code) => machine.focusByCode(code),
     trace: () => machine.trace(),
-    close: () => machine.clearFocus(),
+    // The panel's X is one of the three focus-exit paths (with Esc + click-
+    // outside); all route through exitFocus so the camera flies back home.
+    close: () => exitFocus(),
   });
   // Hover text: search docs prefetched off the critical path (idle callback,
   // shared cache with search/panel). Until they land, tooltips omit the line.
@@ -256,7 +258,9 @@ function start(graph: GraphCore): void {
     hasExample: (nodeId) => hoverDocs?.get(nodeId)?.ex ?? false,
   });
 
-  const picking = createPicking(canvas, rig.camera, nodes, machine);
+  // Click on empty canvas exits an active focus (same path as X / Esc). The
+  // picker owns the click-vs-drag test, so a camera orbit never triggers this.
+  const picking = createPicking(canvas, rig.camera, nodes, machine, () => exitFocus());
   const search = createSearch({ graph, machine });
   const filters = createFilters({ graph, nodes, edges, requestRender });
 
@@ -411,12 +415,30 @@ function start(graph: GraphCore): void {
   };
   window.addEventListener("hashchange", () => routeFromHash(true));
 
-  // -- global Escape: close panel / clear focus (search owns its own Esc) --
+  // -- unified focus-exit: clear focus, then fly home ----------------------
+  // Every way OUT of a focus (the panel's X, Esc, and a click on empty canvas)
+  // routes here. It clears the focus AND returns the camera to the CURRENT
+  // pose's home framing — the exact fit a pose settle uses (head-on for the flat
+  // Blueprint/Transit at pose ≥2, the heroic 3/4 shot otherwise). Reduced motion
+  // cuts instantly (the rig's transition flag). A running story or the guided
+  // tour own their own camera scripts, so their focus is left completely
+  // untouched — the guard sits BEFORE clearFocus so a story's silent focus is
+  // never wiped (its exit paths are unreachable mid-run anyway).
+  function exitFocus(): void {
+    if (machine.focusedIndex === null) return;
+    if (storyPlayer.running || tour.running) return;
+    machine.clearFocus();
+    if (poseDriver.target >= 2) rig.frameHomeFrontOn(!reducedMotion);
+    else rig.frameHome(!reducedMotion);
+    requestRender();
+  }
+
+  // -- global Escape: exit focus (search owns its own Esc) -----------------
   // The story card handles its own Esc (capture-phase, stops propagation), so
-  // this never fires mid-story; the guard is belt-and-suspenders.
+  // this never fires mid-story; exitFocus re-guards as belt-and-suspenders.
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && machine.focusedIndex !== null && !storyPlayer.running) {
-      machine.clearFocus();
+      exitFocus();
     }
   });
 
@@ -509,14 +531,21 @@ function start(graph: GraphCore): void {
       const draftAmt = endpointOwns(2, gate) ? draftFade(pose) : 0;
       const stationAmt = endpointOwns(3, gate) ? stationFadeFor(pose) : 0;
       nodes.setOrbFade(Math.max(stationAmt, draftAmt));
-      // Concrete-daylight amount (Galaxy only; 0 in the paper styles): the Transit
-      // focus grammar dissolves unconnected metro lines + stations toward the live
-      // city background — near-black in the dark baseline, concrete grey at daylight.
-      // environs.update runs just below, so this is last frame's value (a one-frame
-      // lag on a slow ramp — imperceptible).
+      // Light-environment amounts (Galaxy only; 0 in the paper styles). `daylight`
+      // is the concrete-daylight amount alone (the Transit city-dissolve target +
+      // bloom bleed); `envLight` = max(dawn, daylight) drives the VIVID enamel repaint,
+      // live in BOTH light environments. environs.update runs just below, so these are
+      // last frame's values (a one-frame lag on a slow ramp — imperceptible).
       const daylight = artStyle === 0 ? environs.daylight01() : 0;
-      edges.setDaylight(daylight);
-      stations.update(gatedPose(3), daylight); // Transit stations, home 3
+      // envLight drives the VIVID enamel repaint. Gate it on !storyPlayer.running so a
+      // story (which owns the dark baseline) never flips the edges/stations to vivid —
+      // exactly as the env-light chrome below is gated. In steady playback environs
+      // already fades env→0 during a story; this makes the dark baseline bulletproof
+      // (the old code was protected only because it keyed off daylight01, which is 0 at
+      // a dawn-posed story scene — envLight01 folds in the dawn, so it needs the guard).
+      const envLight = artStyle === 0 && !storyPlayer.running ? environs.envLight01() : 0;
+      edges.setEnvLight(envLight);
+      stations.update(gatedPose(3), daylight, envLight); // Transit stations, home 3
       // Blueprint sheet + drafted node symbols (home 2) and Ascent contours (home 1).
       sheet.update(gatedPose(2));
       drafts.update(gatedPose(2));
@@ -536,6 +565,11 @@ function start(graph: GraphCore): void {
       const dayAmt = artStyle === 0 && !storyPlayer.running ? environs.daylight01() : 0;
       document.body.classList.toggle("env-light", dawnAmt + dayAmt > 0.5);
       etches.setEnvLight(Math.max(dawnAmt, dayAmt));
+      // Ascent dawn node boldness: against the bright morning sky the additive-pastel
+      // orbs wash out, so drive them opaque + ×1.15 + pulled toward the deep VIVID
+      // strand hue. Dawn-only (0 at the Transit, where the orbs have already ceded to
+      // stations; 0 in the studio/dark baseline and every art style).
+      nodes.setDawnBold(dawnAmt);
       // Bloom bleeds out as the concrete daylight surfaces (Galaxy only).
       bloom.setDaylight(artStyle === 0 ? environs.daylight01() : 0);
       // Filaments track node positions + visibility every rendered frame (pose
