@@ -1,17 +1,18 @@
 // View toggle — a small glass segmented control (bottom-right, above the nav
-// hints) that switches the scene between the three poses: "Constellation"
-// (pose 0), "Ascent" (pose 1), and "Blueprint" (pose 2). It drives the pose
-// morph ONLY through the driver's public setPose; while a transition plays the
-// control disables itself until the promise settles, so a rapid double-click
-// can't stack morphs.
+// hints) that switches the scene between the four poses: "Constellation"
+// (pose 0), "Ascent" (pose 1), "Blueprint" (pose 2), and "Transit" (pose 3).
+// It drives the pose morph ONLY through the driver's public setPose; while a
+// transition plays the control disables itself until the promise settles, so a
+// rapid double-click can't stack morphs.
 //
 // In the Ascent it also reveals a subtle vertical scale hint on the left edge —
 // "foundations" at the bottom, "30 prerequisites deep" at the top — naming the
 // axis the massif is built on: prerequisite-chain depth. The hint fades in for
-// the Ascent ONLY and is gone in the flat Blueprint (which has no depth axis);
-// it tracks the continuous pose value via main's per-frame reflect().
+// the Ascent ONLY and is gone in the flat Blueprint and the Transit map (neither
+// has a depth axis); it tracks the continuous pose value via main's per-frame
+// reflect() — the triangular fade reads 0 at pose 0, 2, and 3.
 //
-// Accessibility: three real <button>s in a labeled group, the aria-pressed
+// Accessibility: four real <button>s in a labeled group, the aria-pressed
 // toggle pattern (matching the filter chips), 44px touch targets, and the global
 // :focus-visible ring. The scale hint is decorative (aria-hidden).
 
@@ -49,6 +50,7 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
     { btn: makeSegment("Constellation", 0, true), target: 0 },
     { btn: makeSegment("Ascent", 1, false), target: 1 },
     { btn: makeSegment("Blueprint", 2, false), target: 2 },
+    { btn: makeSegment("Transit", 3, false), target: 3 },
   ];
   group.append(...segments.map((s) => s.btn));
 

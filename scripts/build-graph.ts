@@ -141,6 +141,7 @@ interface OutNode {
   pos: [number, number, number]; // pose A: the constellation
   pos2: [number, number, number]; // pose B: the Ascent (y = dependency depth)
   pos3: [number, number, number]; // pose C: the Blueprint (flat grade-column circuit board)
+  pos4: [number, number, number]; // pose D: the Transit Map (octolinear metro, per-line z-levels)
   /** Longest prerequisite chain beneath this standard (0 = foundation). */
   depth: number;
   /** Sub-standard ids (e.g. 4.NF.B.3 -> its .a-.d), code-derived; omitted when none. */
@@ -157,6 +158,7 @@ interface OutEdge {
   c: [number, number, number]; // bezier control, constellation pose
   c2: [number, number, number]; // bezier control, ascent pose
   c3: [number, number, number]; // bezier control, blueprint pose
+  c4: [number, number, number]; // bezier control, transit pose (octolinear elbow, banked z)
 }
 interface GraphCore {
   meta: {
@@ -174,6 +176,7 @@ interface GraphCore {
     marker?: [number, number, number]; // constellation pose etch
     marker2?: [number, number, number]; // ascent pose etch
     marker3?: [number, number, number]; // blueprint pose etch (under the grade column)
+    marker4?: [number, number, number]; // transit pose etch (under the transit column, front-on)
   }[];
   /** HS course arc labels (Appendix A traditional pathway), markers per pose. */
   courses: {
@@ -182,6 +185,7 @@ interface GraphCore {
     marker: [number, number, number];
     marker2: [number, number, number];
     marker3: [number, number, number]; // blueprint pose etch (under the course column)
+    marker4: [number, number, number]; // transit pose etch (under the transit course column, front-on)
   }[];
   strands: Record<Strand, { label: string }>;
   nodes: OutNode[];
@@ -602,6 +606,15 @@ interface Params {
     sameColumnBow: number;
     crossColumnSourceBias: number;
     labelDrop: number;
+  };
+  transit: {
+    zNumber: number;
+    zAlgebra: number;
+    zGeometry: number;
+    zData: number;
+    bandHalfMax: number;
+    childSpacing: number;
+    rowHeightMax: number;
   };
 }
 
@@ -1329,14 +1342,307 @@ export function buildGraph(): BuildResult {
     }
   }
 
-  // Markers, all three poses: constellation etches stand below the bands (as
+  // --- 7d. Pose D: the Transit Map -----------------------------------------
+  // A fourth pose: an octolinear metro network, DERIVED (not force-relaxed) from
+  // the transfer graph, ported faithfully from the approved study in
+  // scripts/formation-previews.mjs transit(). Families contract to UNITS (a
+  // parent stands in for its whole family; edges into/out of any child redirect
+  // to the parent, self-loops dropped) so "co-locate the family" is a property
+  // of the geometry. Per strand the MAIN LINE is the maximum-reach weighted path
+  // (DP longest weighted path over the unit prereq subgraph, weight = descendant
+  // reach); every other unit chains as a BRANCH onto its primary within-strand
+  // prerequisite (trunkless units join the grade-nearest station as spurs).
+  // Heavy cross-strand transfers (>= FLOOR cross-strand prerequisites) are true
+  // multi-line interchanges the guest line routes THROUGH — they enter the
+  // barycenter route graph so crossings minimise around them. x = the SAME 13
+  // blueprint columns (so the poses rhyme), spread within a per-column depth
+  // band; y = 12-pass barycenter crossing-minimisation scaled to pos3's y span.
+  // THE THIRD DIMENSION (the designer's scheme): each LINE has its own z-level —
+  // number +16, algebra +6, geometry -6, data -16, a layered city elevated to
+  // deep. A station's z is its OWN strand's level; interchanges sit at their host
+  // (own-strand) level and the guest line REACHES them via banked edge ramps
+  // (c4). Family children re-expand in a tight row next to the parent station at
+  // the parent's z. Pure function of the DAG — deterministic, byte-identical.
+  const T = params.transit;
+  const STRAND_ORDER: Strand[] = ["number", "algebra", "geometry", "data"];
+  const strandRankOf = (s: Strand): number => STRAND_ORDER.indexOf(s);
+  const LINE_Z: Record<Strand, number> = {
+    number: T.zNumber,
+    algebra: T.zAlgebra,
+    geometry: T.zGeometry,
+    data: T.zData,
+  };
+  const HALF_COL = B.columnWidth / 2; // column half-width for the transit x clamp
+  const T_FLOOR = 3; // >= 3 cross-strand prerequisites ⇒ a true multi-line interchange
+
+  // Transit column = the blueprint column (K,1..8 → 0..8; HS by primary course).
+  const tcolOf = (id: string): number => bpColOf.get(id)!;
+  const tCode = (id: string): string => codeById.get(id)!;
+  const codeLt = (a: string, b: string): number => (tCode(a) < tCode(b) ? -1 : 1);
+  const uStrand = (id: string): Strand => meta.get(id)!.strand;
+  const crossStrand = (e: { s: string; t: string }): boolean =>
+    meta.get(e.s)!.strand !== meta.get(e.t)!.strand;
+
+  // Descendant reach over the prereq DAG (BFS per node) — the flow potential the
+  // main-line DP and branch chaining weight by. A unit's reach is its
+  // representative (parent) node's reach, exactly as the preview reads it.
+  const tReach = new Map<string, number>();
+  {
+    const succ = new Map<string, string[]>();
+    for (const id of sortedIds) succ.set(id, []);
+    for (const e of prereq) succ.get(e.s)!.push(e.t);
+    for (const v of sortedIds) {
+      const seen = new Set<string>([v]);
+      const stack = [v];
+      let c = 0;
+      while (stack.length) {
+        const x = stack.pop()!;
+        for (const k of succ.get(x)!) if (!seen.has(k)) { seen.add(k); c++; stack.push(k); }
+      }
+      tReach.set(v, c);
+    }
+  }
+  const ureach = (u: string): number => tReach.get(u)!;
+
+  // Units: every non-child standard (parents + standalones). childrenOf/parentOf
+  // are the code-derived families computed for the constellation seating above.
+  const tUnitIds = sortedIds.filter((id) => !parentOf.has(id));
+  const tUnitOf = (id: string): string => parentOf.get(id) ?? id;
+
+  // Unit-level prereq adjacency (dedup; intra-family self-loops dropped).
+  const uSucc = new Map<string, Set<string>>();
+  const uPred = new Map<string, Set<string>>();
+  for (const id of tUnitIds) { uSucc.set(id, new Set()); uPred.set(id, new Set()); }
+  for (const e of prereq) {
+    const u = tUnitOf(e.s), v = tUnitOf(e.t);
+    if (u === v) continue;
+    uSucc.get(u)!.add(v); uPred.get(v)!.add(u);
+  }
+
+  // Unit topological order (Kahn; ties by code so the whole derivation is stable).
+  const UTOPO: string[] = [];
+  {
+    const indeg = new Map<string, number>();
+    for (const id of tUnitIds) indeg.set(id, uPred.get(id)!.size);
+    const q = tUnitIds.filter((id) => indeg.get(id) === 0);
+    while (q.length) {
+      q.sort(codeLt);
+      const u = q.shift()!;
+      UTOPO.push(u);
+      for (const v of uSucc.get(u)!) {
+        indeg.set(v, indeg.get(v)! - 1);
+        if (indeg.get(v) === 0) q.push(v);
+      }
+    }
+  }
+
+  // MAIN LINE per strand: DP longest weighted path (weight = descendant reach).
+  const mainSeqOf = new Map<Strand, string[]>();
+  const isMain = new Set<string>();
+  for (const s of STRAND_ORDER) {
+    const sset = new Set(tUnitIds.filter((id) => uStrand(id) === s));
+    const best = new Map<string, number>();
+    const pred = new Map<string, string | null>();
+    for (const u of UTOPO) {
+      if (!sset.has(u)) continue;
+      let b = ureach(u);
+      let p: string | null = null;
+      for (const pr of uPred.get(u)!) {
+        if (!sset.has(pr)) continue;
+        const cand = best.get(pr) ?? 0;
+        if (cand + ureach(u) > b) { b = cand + ureach(u); p = pr; }
+      }
+      best.set(u, b); pred.set(u, p);
+    }
+    let end: string | null = null, bv = -1;
+    for (const u of sset) {
+      const b = best.get(u) ?? 0;
+      if (b > bv || (b === bv && tCode(u) < tCode(end!))) { bv = b; end = u; }
+    }
+    const seq: string[] = [];
+    let c: string | null = end;
+    while (c) { seq.push(c); c = pred.get(c) ?? null; }
+    seq.reverse();
+    mainSeqOf.set(s, seq);
+    for (const mm of seq) isMain.add(mm);
+  }
+
+  // BRANCHES: chain each non-trunk unit onto its primary within-strand
+  // prerequisite (highest-reach ancestor edge); trunkless units become SPURS,
+  // joined to the grade-nearest already-connected station.
+  const parentStation = new Map<string, string>();
+  for (const s of STRAND_ORDER) {
+    const sset = new Set(tUnitIds.filter((id) => uStrand(id) === s));
+    const seq = mainSeqOf.get(s)!;
+    const onTrunk = new Set(seq);
+    const spurs: string[] = [];
+    for (const u of sset) {
+      if (onTrunk.has(u)) continue;
+      let best: string | null = null, bestR = -1;
+      for (const p of uPred.get(u)!) {
+        if (!sset.has(p)) continue;
+        const r = ureach(p);
+        if (r > bestR || (r === bestR && tCode(p) < tCode(best!))) { bestR = r; best = p; }
+      }
+      if (best) parentStation.set(u, best);
+      else spurs.push(u);
+    }
+    const connected = [...sset].filter((id) => onTrunk.has(id) || parentStation.has(id));
+    for (const u of spurs) {
+      const uc = tcolOf(u);
+      let bestM = seq[0], bd = 1e9;
+      for (const mm of connected) {
+        const d = Math.abs(tcolOf(mm) - uc) * 10 + (tcolOf(mm) <= uc ? 0 : 5);
+        if (d < bd) { bd = d; bestM = mm; }
+      }
+      parentStation.set(u, bestM);
+    }
+  }
+
+  // TRANSFERS → interchanges: a unit touched by >= T_FLOOR cross-strand
+  // prerequisites hosts every foreign line, which the barycenter routes through.
+  const tw = new Map<string, number>();
+  const guestOf = new Map<string, Set<Strand>>();
+  for (const id of tUnitIds) guestOf.set(id, new Set());
+  for (const e of prereq) {
+    if (!crossStrand(e)) continue;
+    const u = tUnitOf(e.s), v = tUnitOf(e.t);
+    tw.set(u, (tw.get(u) ?? 0) + 1); tw.set(v, (tw.get(v) ?? 0) + 1);
+    guestOf.get(v)!.add(meta.get(e.s)!.strand);
+    guestOf.get(u)!.add(meta.get(e.t)!.strand);
+  }
+  const guestStops = new Map<Strand, string[]>();
+  for (const s of STRAND_ORDER) guestStops.set(s, []);
+  for (const u of tUnitIds) {
+    if ((tw.get(u) ?? 0) < T_FLOOR) continue;
+    const own = uStrand(u);
+    for (const gs of guestOf.get(u)!) {
+      if (gs === own) continue;
+      guestStops.get(gs)!.push(u);
+    }
+  }
+
+  // Route graph for the barycenter: trunk pairs, branch edges, guest through-stops.
+  const radj = new Map<string, Set<string>>();
+  for (const id of tUnitIds) radj.set(id, new Set());
+  const addRouteEdge = (a: string, b: string): void => {
+    if (a === b) return;
+    radj.get(a)!.add(b); radj.get(b)!.add(a);
+  };
+  for (const s of STRAND_ORDER) {
+    const seq = mainSeqOf.get(s)!;
+    for (let i = 1; i < seq.length; i++) addRouteEdge(seq[i - 1], seq[i]);
+  }
+  for (const [u, p] of parentStation) addRouteEdge(u, p);
+  for (const s of STRAND_ORDER) {
+    const seq = mainSeqOf.get(s)!;
+    for (const v of guestStops.get(s)!) {
+      const vc = tcolOf(v);
+      let lo: string | null = null, hi: string | null = null;
+      for (const mm of seq) {
+        const mc = tcolOf(mm);
+        if (mc <= vc) lo = mm;
+        if (mc > vc && hi === null) hi = mm;
+      }
+      if (lo) addRouteEdge(v, lo);
+      if (hi) addRouteEdge(v, hi);
+    }
+  }
+
+  // BARYCENTER y (12 passes over the derived route graph; ties by code).
+  const tCols: string[][] = Array.from({ length: N_COLS }, () => []);
+  for (const id of tUnitIds) tCols[tcolOf(id)].push(id);
+  for (const arr of tCols) {
+    arr.sort((a, b) => strandRankOf(uStrand(a)) - strandRankOf(uStrand(b)) || codeLt(a, b));
+  }
+  const tCentered = new Map<string, number>();
+  const recenterT = (): void => {
+    for (const arr of tCols) arr.forEach((id, i) => tCentered.set(id, i - (arr.length - 1) / 2));
+  };
+  recenterT();
+  for (let pass = 0; pass < 12; pass++) {
+    const order = pass % 2 ? [...tCols.keys()].reverse() : [...tCols.keys()];
+    for (const ci of order) {
+      const arr = tCols[ci];
+      const key = new Map<string, number>();
+      for (const id of arr) {
+        const nb = [...radj.get(id)!];
+        if (!nb.length) { key.set(id, tCentered.get(id)!); continue; }
+        let sum = 0;
+        for (const mm of nb) sum += tCentered.get(mm)!;
+        key.set(id, sum / nb.length);
+      }
+      arr.sort((a, b) => (key.get(a)! - key.get(b)!) || codeLt(a, b));
+      arr.forEach((id, i) => tCentered.set(id, i - (arr.length - 1) / 2));
+    }
+  }
+  let tMaxCount = 1;
+  for (const arr of tCols) tMaxCount = Math.max(tMaxCount, arr.length);
+
+  // Scale the barycenter rows to pos3's y span so the two flat poses rhyme.
+  let p3ymin = Infinity, p3ymax = -Infinity;
+  for (const p of pos3.values()) { p3ymin = Math.min(p3ymin, p[1]); p3ymax = Math.max(p3ymax, p[1]); }
+  const T_ROWH = Math.min((p3ymax - p3ymin) / Math.max(1, tMaxCount - 1), T.rowHeightMax);
+
+  // Within-grade depth band (spread stations across a column by build depth, so
+  // a dense terminal course reads as a district band, not a razor-thin wall).
+  const tColDepthLo = new Array<number>(N_COLS).fill(Infinity);
+  const tColDepthHi = new Array<number>(N_COLS).fill(-Infinity);
+  for (const id of sortedIds) {
+    const c = tcolOf(id);
+    const d = depthById.get(id)!;
+    if (d < tColDepthLo[c]) tColDepthLo[c] = d;
+    if (d > tColDepthHi[c]) tColDepthHi[c] = d;
+  }
+  const tDepthT = (id: string): number => {
+    const c = tcolOf(id);
+    return tColDepthHi[c] > tColDepthLo[c]
+      ? (depthById.get(id)! - tColDepthLo[c]) / (tColDepthHi[c] - tColDepthLo[c])
+      : 0.5;
+  };
+  const tBandHalf = (c: number): number =>
+    Math.max(5, Math.min(T.bandHalfMax, (tCols[c].length / tMaxCount) * 0.4 * B.columnWidth));
+  const clampCol = (c: number, x: number): number =>
+    Math.min(colCenterX(c) + HALF_COL, Math.max(colCenterX(c) - HALF_COL, x));
+
+  // Station positions per unit: x = column center + depth band; y = barycenter
+  // row; z = the unit's OWN strand line-level.
+  const pos4 = new Map<string, [number, number, number]>();
+  for (const u of tUnitIds) {
+    const c = tcolOf(u);
+    const x = clampCol(c, colCenterX(c) + (tDepthT(u) - 0.5) * 2 * tBandHalf(c));
+    const y = tCentered.get(u)! * T_ROWH;
+    pos4.set(u, [round2(x), round2(y), LINE_Z[uStrand(u)]]);
+  }
+  // Family children re-expand as a tight row next to the parent station, same z.
+  for (const pid of tUnitIds) {
+    const kids = childrenOf.get(pid);
+    if (!kids?.length) continue;
+    const [px, py, pz] = pos4.get(pid)!;
+    const c = tcolOf(pid);
+    kids.forEach((cid, i) => {
+      pos4.set(cid, [round2(clampCol(c, px + (i + 1) * T.childSpacing)), py, pz]);
+    });
+  }
+
+  // Markers, all four poses: constellation etches stand below the bands (as
   // before); ascent etches stand along the ground line of the massif; blueprint
   // etches sit on ONE shared baseline below the deepest column — aligned
-  // headers, like the original map's grade rail — facing the camera front-on.
+  // headers, like the original map's grade rail — facing the camera front-on;
+  // transit etches sit on their own shared baseline below the metro columns,
+  // also front-on (same treatment as the blueprint).
   const bpBaselineY = round2(Math.min(...colMinY) - B.labelDrop);
+  let t4ymin = Infinity;
+  for (const p of pos4.values()) t4ymin = Math.min(t4ymin, p[1]);
+  const transitBaselineY = round2(t4ymin - B.labelDrop);
   const gradeMarkers = new Map<
     Grade,
-    { a: [number, number, number]; b: [number, number, number]; c: [number, number, number] }
+    {
+      a: [number, number, number];
+      b: [number, number, number];
+      c: [number, number, number];
+      d: [number, number, number];
+    }
   >();
   for (const [g, b] of bands) {
     if (g === "HS") continue; // labeled by courses instead
@@ -1345,6 +1651,7 @@ export function buildGraph(): BuildResult {
       a: [round2(b.center), -240, 0],
       b: [round2(b.center), A.yBase - 34, 0],
       c: [round2(colCenterX(bpCol)), bpBaselineY, 0],
+      d: [round2(colCenterX(bpCol)), transitBaselineY, 0],
     });
   }
   const courseMarkers: {
@@ -1353,6 +1660,7 @@ export function buildGraph(): BuildResult {
     marker: [number, number, number];
     marker2: [number, number, number];
     marker3: [number, number, number];
+    marker4: [number, number, number];
   }[] = [];
   {
     const hsBand = bands.get("HS")!;
@@ -1375,23 +1683,34 @@ export function buildGraph(): BuildResult {
         marker: [cx, -240 + yOff, zOff],
         marker2: [cx, A.yBase - 34 + yOff, zOff],
         marker3: [round2(colCenterX(bpCol)), bpBaselineY, 0],
+        marker4: [round2(colCenterX(bpCol)), transitBaselineY, 0],
       });
     });
   }
 
-  // --- 8. Edge control points, all three poses --------------------------------
+  // --- 8. Edge control points, all four poses ---------------------------------
   // Pose A (constellation): bow radially outward from the grade axis, exactly
   // the field the original art gate approved. Pose B (ascent): bow gently
   // upward and forward so arcs read as load paths climbing the structure.
   // Pose C (blueprint): flat on the z=0 plane — same-column edges bow sideways
-  // clear of the stack, cross-column edges gently S-curve rightward. One seeded
-  // jitter value per edge is shared by A and B so the morph never changes an
-  // arc's character, only its frame (the flat pose uses no jitter).
+  // clear of the stack, cross-column edges gently S-curve rightward. Pose D
+  // (transit): octolinear feel from a single quadratic — the control is the
+  // elbow of an axis-aligned L between the endpoints (horizontal-first when
+  // |dx| >= |dy|, else vertical-first), and z is the midpoint of the endpoints'
+  // z so a cross-level edge reads as a banked ramp — the transfer climb between
+  // line levels. Same-station-pair edges (family internal) put the control at the
+  // midpoint. One seeded jitter value per edge is shared by A and B so the morph
+  // never changes an arc's character, only its frame (the flat poses use none).
   function controlPoints(
     s: string,
     t: string,
     srcStrand: Strand,
-  ): { c: [number, number, number]; c2: [number, number, number]; c3: [number, number, number] } {
+  ): {
+    c: [number, number, number];
+    c2: [number, number, number];
+    c3: [number, number, number];
+    c4: [number, number, number];
+  } {
     const jitterU = rng() * 2 - 1; // one draw per edge — POSES MUST SHARE IT
     // Pose A
     const a = pos.get(s)!;
@@ -1455,7 +1774,20 @@ export function buildGraph(): BuildResult {
       const bias = B.crossColumnSourceBias;
       c3 = [round2((a3[0] + b3[0]) / 2), round2(a3[1] * bias + b3[1] * (1 - bias)), 0];
     }
-    return { c, c2, c3 };
+    // Pose D (transit): elbow of an axis-aligned L; z = midpoint of endpoint z's
+    // (cross-level edges bank between line levels). A family-internal edge (both
+    // endpoints in the same station complex) has no elbow — control = midpoint.
+    const a4 = pos4.get(s)!;
+    const b4 = pos4.get(t)!;
+    let c4: [number, number, number];
+    if (tUnitOf(s) === tUnitOf(t)) {
+      c4 = [round2((a4[0] + b4[0]) / 2), round2((a4[1] + b4[1]) / 2), round2((a4[2] + b4[2]) / 2)];
+    } else {
+      const ex = Math.abs(b4[0] - a4[0]) >= Math.abs(b4[1] - a4[1]) ? b4[0] : a4[0];
+      const ey = Math.abs(b4[0] - a4[0]) >= Math.abs(b4[1] - a4[1]) ? a4[1] : b4[1];
+      c4 = [round2(ex), round2(ey), round2((a4[2] + b4[2]) / 2)];
+    }
+    return { c, c2, c3, c4 };
   }
 
   // Display degree: an edgeless parent (deg 0) sizes to the count of distinct
@@ -1509,6 +1841,11 @@ export function buildGraph(): BuildResult {
         for (const v of q) assert(Number.isFinite(v), `non-finite blueprint position on ${id}`);
         return [round2(q[0]), round2(q[1]), round2(q[2])] as [number, number, number];
       })(),
+      pos4: (() => {
+        const q = pos4.get(id)!;
+        for (const v of q) assert(Number.isFinite(v), `non-finite transit position on ${id}`);
+        return [round2(q[0]), round2(q[1]), round2(q[2])] as [number, number, number];
+      })(),
       depth: depthById.get(id)!,
     };
     const kids = childrenOf.get(id);
@@ -1548,6 +1885,7 @@ export function buildGraph(): BuildResult {
         out.marker = m.a;
         out.marker2 = m.b;
         out.marker3 = m.c;
+        out.marker4 = m.d;
       }
       return out;
     }),

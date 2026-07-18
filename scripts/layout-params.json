@@ -48,5 +48,15 @@
     "sameColumnBow": 30,
     "crossColumnSourceBias": 0.65,
     "labelDrop": 40
+  },
+  "transit": {
+    "comment": "Pose D: octolinear metro map, derived from the transfer graph (see scripts/formation-previews.mjs transit(), the approved derivation). Families contract to UNITS; per strand the MAIN LINE is the maximum-reach weighted path (DP+traceback), everything else chains as a branch onto its primary within-strand prerequisite (trunkless standards join the grade-nearest station), and heavy cross-strand transfers (>= 3 cross-strand prerequisites) are multi-line interchanges the guest line routes through. x = the SAME 13 blueprint columns (columnWidth apart, centered on 0) so the poses rhyme, with a per-column depth band up to bandHalfMax; y solved by 12-pass barycenter crossing-minimisation (ties by code), scaled to pos3's y span (rowHeight capped at rowHeightMax). THE THIRD DIMENSION: each LINE runs at its own z-level (number/algebra/geometry/data), a layered city elevated to deep; a station's z is its OWN strand's level and interchanges sit at their host level, the guest line reaching them via banked edge ramps (c4). Family children re-expand in a tight row next to the parent station (childSpacing apart) at the parent's z. Deterministic: derived from the DAG, no Math.random / Date.",
+    "zNumber": 16,
+    "zAlgebra": 6,
+    "zGeometry": -6,
+    "zData": -16,
+    "bandHalfMax": 14,
+    "childSpacing": 5,
+    "rowHeightMax": 15
   }
 }

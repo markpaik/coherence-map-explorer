@@ -1,8 +1,10 @@
-// Tri-pose "unravel" morph driver — the CPU-side animator that carries the
+// Four-pose "unravel" morph driver — the CPU-side animator that carries the
 // scene between pose 0 (the Constellation, node.pos), pose 1 ("the Ascent",
 // node.pos2, a dependency-depth massif where every prerequisite edge points
-// upward), and pose 2 ("the Blueprint", node.pos3, a flat grade-column circuit
-// board echoing the original coherence map). It is deliberately CPU-side (no
+// upward), pose 2 ("the Blueprint", node.pos3, a flat grade-column circuit
+// board echoing the original coherence map), and pose 3 ("the Transit Map",
+// node.pos4, an octolinear metro with per-line z-levels — front-on it collapses
+// to the flat schematic, orbiting reveals the layered city). It is CPU-side (no
 // shader morph) so raycast picking stays correct continuously: the instance
 // matrices themselves move, so the pick proxy moves with them and hover/click
 // keep landing on the dots.
@@ -17,7 +19,8 @@
 // per node. The stagger ORDER depends on where we're going: entering the Ascent
 // (→1) foundations land first (depth·STAGGER_MS); returning to the Constellation
 // (→0) the summit releases first ((maxDepth−depth)·STAGGER_MS); entering the
-// Blueprint (→2) columns assemble left-to-right in reading order (col·COLUMN_MS).
+// Blueprint (→2) or the Transit Map (→3) columns assemble left-to-right in
+// reading order (col·COLUMN_MS).
 // Capturing the live start makes reversals mid-morph continuous. Everything is a
 // pure function of elapsed time + per-node depth/column — deterministic, no
 // Math.random.
@@ -54,7 +57,7 @@ function columnIndexOf(node: GraphNode): number {
   return 9 + (ci < 0 ? COURSE_ORDER.length - 1 : ci);
 }
 
-export type Pose = 0 | 1 | 2;
+export type Pose = 0 | 1 | 2 | 3;
 
 export interface PoseDriverDeps {
   graph: GraphCore;
@@ -71,7 +74,7 @@ export interface PoseDriverDeps {
 }
 
 export interface PoseDriver {
-  /** Global morph progress along the pose axis, 0 … 2 (continuous while morphing). */
+  /** Global morph progress along the pose axis, 0 … 3 (continuous while morphing). */
   readonly pose: number;
   /** The settled/target pose (what aria-pressed and the scale hint key off). */
   readonly target: Pose;
@@ -99,6 +102,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     new Float32Array(n * 3),
     new Float32Array(n * 3),
     new Float32Array(n * 3),
+    new Float32Array(n * 3),
   ];
   const depth = new Int32Array(n);
   const colIndex = new Int32Array(n);
@@ -108,6 +112,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     nodePoses[0].set(node.pos, i * 3);
     nodePoses[1].set(node.pos2, i * 3);
     nodePoses[2].set(node.pos3, i * 3);
+    nodePoses[3].set(node.pos4, i * 3);
     depth[i] = node.depth;
     colIndex[i] = columnIndexOf(node);
     if (node.depth > maxDepth) maxDepth = node.depth;
@@ -124,6 +129,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     new Float32Array(m * 3),
     new Float32Array(m * 3),
     new Float32Array(m * 3),
+    new Float32Array(m * 3),
   ];
   graph.edges.forEach((e, j) => {
     eS[j] = indexById.get(e.s) ?? -1;
@@ -131,6 +137,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     edgeCtrls[0].set(e.c, j * 3);
     edgeCtrls[1].set(e.c2, j * 3);
     edgeCtrls[2].set(e.c3, j * 3);
+    edgeCtrls[3].set(e.c4, j * 3);
   });
 
   // Edge attribute backing arrays (rewritten in place each morph frame).
@@ -148,7 +155,12 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     box.getBoundingSphere(sphere);
     return { box, sphere };
   }
-  const homes = [boundsOf(nodePoses[0]), boundsOf(nodePoses[1]), boundsOf(nodePoses[2])];
+  const homes = [
+    boundsOf(nodePoses[0]),
+    boundsOf(nodePoses[1]),
+    boundsOf(nodePoses[2]),
+    boundsOf(nodePoses[3]),
+  ];
 
   // -- the evolving sky ------------------------------------------------------
   // The generative layer: poses 0/1's TARGET arrays are base + a day-seeded
@@ -191,7 +203,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
   const startCtrl = new Float32Array(edgeCtrls[0]);
   const curCtrl = new Float32Array(edgeCtrls[0]);
 
-  let poseValue = 0; // exposed as `pose` (continuous 0..2)
+  let poseValue = 0; // exposed as `pose` (continuous 0..3)
   let fromPose = 0;
   let targetPose: Pose = 0;
   let morphing = false;
@@ -200,12 +212,12 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
   let pendingResolve: (() => void) | null = null;
 
   function delayFor(dest: Pose, i: number): number {
-    if (dest === 2) return colIndex[i] * COLUMN_MS;
+    if (dest >= 2) return colIndex[i] * COLUMN_MS; // Blueprint + Transit stagger by grade column
     if (dest === 1) return depth[i] * STAGGER_MS;
     return (maxDepth - depth[i]) * STAGGER_MS;
   }
   function maxDelayFor(dest: Pose): number {
-    return dest === 2 ? maxCol * COLUMN_MS : maxDepth * STAGGER_MS;
+    return dest >= 2 ? maxCol * COLUMN_MS : maxDepth * STAGGER_MS;
   }
 
   // -- per-frame writers ---------------------------------------------------
@@ -249,12 +261,13 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
   function settleCamera(target: Pose, transition: boolean): void {
     const home = homes[target];
     rig.setHomeBounds(home.box, home.sphere);
-    // The flat Blueprint reads front-on: quiet the idle sway to a whisper so
-    // the plane breathes without leaning into perspective. Other poses keep
-    // the full ±18° drift.
-    rig.setDriftScale(target === 2 ? 0.18 : 1);
+    // The flat Blueprint and the Transit schematic both read front-on: quiet the
+    // idle sway to a whisper so the plane breathes without leaning into
+    // perspective (Transit's z-layers reveal on deliberate orbit, not drift).
+    // Other poses keep the full ±18° drift.
+    rig.setDriftScale(target >= 2 ? 0.18 : 1);
     if (machine.focusedIndex !== null) machine.reframe();
-    else if (target === 2) rig.frameHomeFrontOn(transition);
+    else if (target >= 2) rig.frameHomeFrontOn(transition);
     else rig.frameHome(transition);
   }
 
@@ -302,7 +315,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
       lastEvolveT = t;
       applyEvolve(t);
       if (morphing) return; // tick() reads the refreshed targets live
-      if (targetPose === 2) return; // the Blueprint holds still (targets stay fresh for the next morph)
+      if (targetPose >= 2) return; // the Blueprint + Transit hold still (only 0/1 evolve; targets stay fresh)
       curPos.set(nodePoses[targetPose]);
       curCtrl.set(edgeCtrls[targetPose]);
       writeAll();

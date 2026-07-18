@@ -23,7 +23,7 @@
 import type { GraphCore } from "../data";
 import type { Machine } from "../state/machine";
 import { nodeBoundingSphere } from "../state/machine";
-import type { PoseDriver } from "../scene/pose";
+import type { Pose, PoseDriver } from "../scene/pose";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
 import type { BeaconsHandle } from "../scene/beacons";
@@ -127,7 +127,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   let running = false;
   let currentStory: Story | null = null;
   let currentIndex = 0;
-  let priorPose: 0 | 1 | 2 = 0;
+  let priorPose: Pose = 0; // widened to the driver's Pose when Transit (3) landed
   let deepLink = false;
   let navToken = 0;
 

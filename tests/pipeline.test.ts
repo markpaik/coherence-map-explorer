@@ -247,6 +247,84 @@ describe("pose C (blueprint)", () => {
   });
 });
 
+describe("pose D (transit)", () => {
+  // Transit column = the blueprint column, EXCEPT a family child re-expands next
+  // to its PARENT station (its transit column is the parent's), so 5 HS children
+  // whose own course differs from the parent (F-BF.B.4.b/c/d, F-IF.C.7.c/d) still
+  // live in the parent's column. Column centers are (c-6)*80, half-width 40.
+  const COURSE_ORDER = ["A1", "G", "A2", "ADV"];
+  const byId = new Map(core.nodes.map((n) => [n.id, n]));
+  const columnOf = (n: OutNode & { grade: string; courses?: string[] }): number =>
+    n.grade === "HS" ? 9 + COURSE_ORDER.indexOf(n.courses![0]) : GRADES.indexOf(n.grade);
+  const transitColumnOf = (n: OutNode & { parent?: string; courses?: string[] }): number =>
+    n.parent ? columnOf(byId.get(n.parent)! as OutNode & { courses?: string[] }) : columnOf(n);
+  const colCenterX = (c: number): number => (c - 6) * 80;
+  const HALF_COL = 40;
+  const LINE_Z = new Set([16, 6, -6, -16]);
+  const tp = core.nodes as (OutNode & { pos4?: number[]; parent?: string; courses?: string[] })[];
+
+  it("every node carries a pos4, all 480, finite", () => {
+    expect(tp.length).toBe(480);
+    for (const n of tp) {
+      expect(n.pos4 && n.pos4.length === 3).toBe(true);
+      for (const v of n.pos4!) expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  it("every node's z sits on a line level: +16 / +6 / -6 / -16", () => {
+    for (const n of tp) expect(LINE_Z.has(n.pos4![2])).toBe(true);
+  });
+
+  it("z is one level per strand (number +16, algebra +6, geometry -6, data -16)", () => {
+    const want: Record<string, number> = { number: 16, algebra: 6, geometry: -6, data: -16 };
+    for (const n of tp) expect(n.pos4![2]).toBe(want[n.strand]);
+  });
+
+  it("every node's x is within its transit column's ±40 extent", () => {
+    for (const n of tp) {
+      const c = transitColumnOf(n);
+      expect(Math.abs(n.pos4![0] - colCenterX(c))).toBeLessThanOrEqual(HALF_COL + 0.01);
+    }
+  });
+
+  it("family children share the parent's z and sit within ~30 units of it", () => {
+    let checked = 0;
+    for (const p of tp) {
+      const kids = (p as { children?: string[] }).children;
+      if (!kids?.length) continue;
+      const pp = p.pos4!;
+      for (const cid of kids) {
+        const c = byId.get(cid)! as OutNode & { pos4?: number[] };
+        expect(c.pos4![2]).toBe(pp[2]); // same line level as the parent station
+        const d = Math.hypot(c.pos4![0] - pp[0], c.pos4![1] - pp[1], c.pos4![2] - pp[2]);
+        expect(d).toBeLessThanOrEqual(30.01);
+        checked++;
+      }
+    }
+    expect(checked).toBe(116); // all sub-standards re-expanded next to their parent
+  });
+
+  it("every edge carries a transit control point c4 (finite)", () => {
+    const edges = core.edges as (OutEdge & { c4?: number[] })[];
+    expect(edges.length).toBe(757 + 142);
+    for (const e of edges) {
+      expect(e.c4 && e.c4.length === 3).toBe(true);
+      for (const v of e.c4!) expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  it("K-8 grade + 4 course etches carry a front-on transit marker4 (z === 0)", () => {
+    const gm = core.grades.filter((g) => (g as { marker4?: number[] }).marker4);
+    expect(gm.map((g) => g.id)).toEqual(["K", "1", "2", "3", "4", "5", "6", "7", "8"]);
+    for (const g of gm) expect((g as { marker4?: number[] }).marker4![2]).toBe(0);
+    const courses = (core as unknown as { courses: { id: string; marker4?: number[] }[] }).courses;
+    for (const c of courses) {
+      expect(c.marker4 && c.marker4.length === 3).toBe(true);
+      expect(c.marker4![2]).toBe(0);
+    }
+  });
+});
+
 describe("HTML sanitization", () => {
   it("emits no <script anywhere", () => {
     for (const f of allHtmlFields) expect(/<script/i.test(f)).toBe(false);

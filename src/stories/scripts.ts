@@ -40,7 +40,7 @@ export interface StoryScene {
    * still needs to find where they were.
    */
   spotlight?: string[];
-  camera?: { fit: "all" | string[]; pose?: 0 | 1 | 2 };
+  camera?: { fit: "all" | string[]; pose?: 0 | 1 | 2 | 3 };
   card: { title: string; body: string; cite?: string; citeUrl?: string };
   /** Auto-advance dwell (ms) once the scene has settled; Next skips ahead. */
   holdMs?: number;
