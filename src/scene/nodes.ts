@@ -271,12 +271,17 @@ export interface NodesHandle {
    */
   setOrbFade(amount: number): void;
   /**
-   * Ascent-dawn boldness (0 normal … 1 full dawn). Orb (Galaxy) material only:
-   * grows each bead ×1.15 and pulls its fill toward the deep vivid strand hue so it
-   * reads against the bright morning sky instead of washing out. 0 everywhere but
-   * the settled Ascent dawn; the paper skins never see it.
+   * Light-environment amount (0 normal … 1 full light) — max(dawn, daylight), the
+   * SAME amount the edges get (main.ts passes environs.envLight01()). Orb (Galaxy)
+   * material only. Against a light field the sphere-shaded bead washes out, so past
+   * the window the orb becomes a SOLID VIVID DISC: full alpha, the full-saturation
+   * STRAND_VIVID hue (aVivid), grown ×1.15 — enamel signage, exactly like the edge
+   * repaint. 0 everywhere but the settled Ascent dawn and (transitionally) the
+   * Transit daylight ramp; the paper skins never see it. NOTE: at the settled
+   * Transit (pose 3) the orbs have already collapsed to nothing under the station
+   * handoff (uPoseFade → 1), so the disc is only meaningfully visible at the dawn.
    */
-  setDawnBold(amount: number): void;
+  setEnvLight(amount: number): void;
   /** Grow the proxy pick radius for touch pointers (idempotent). */
   setTouchPicking(on: boolean): void;
   /**
@@ -381,10 +386,11 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     // Transit station handoff (0 normal … 1 fully stationed). Shared with the
     // art-node materials so every skin crossfades pegs → station marks the same.
     uPoseFade: { value: 0 },
-    // Ascent-dawn boldness (0 normal … 1 full dawn). Orb material only: opaque,
-    // ×1.15, pulled toward the deep VIVID strand hue so the bead reads against the
-    // bright morning sky. 0 everywhere but the settled Ascent dawn (Galaxy).
-    uDawnBold: { value: 0 },
+    // Light-environment amount (0 normal … 1 full light) = max(dawn, daylight).
+    // Orb material only: opaque, ×1.15, repainted to a SOLID VIVID DISC (the full
+    // STRAND_VIVID hue at full saturation) so the bead sits ON the light field
+    // instead of washing out. 0 everywhere but the light environments (Galaxy).
+    uEnvLight: { value: 0 },
   };
 
   material.onBeforeCompile = (shader) => {
@@ -393,7 +399,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     shader.uniforms.uShimmer = uniforms.uShimmer;
     shader.uniforms.uStoryLift = uniforms.uStoryLift;
     shader.uniforms.uPoseFade = uniforms.uPoseFade;
-    shader.uniforms.uDawnBold = uniforms.uDawnBold;
+    shader.uniforms.uEnvLight = uniforms.uEnvLight;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -408,7 +414,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         uniform float uTime;
         uniform float uShimmer;
         uniform float uPoseFade;
-        uniform float uDawnBold;
+        uniform float uEnvLight;
         varying float vColorMul;
         varying float vShim;
         varying float vDim;
@@ -447,9 +453,9 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           // mark fades in (uPoseFade 0→1). At 0 this is a no-op (× 1.0), so poses
           // 0–2 stay byte-identical.
           scl *= mix(1.0, 0.001, uPoseFade);
-          // Ascent-dawn boldness: grow the bead ×1.15 so it holds against the bright
-          // sky. uDawnBold 0 (every pose but the settled dawn) is a no-op.
-          scl *= mix(1.0, 1.15, uDawnBold);
+          // Light-environment boldness: grow the bead ×1.15 so it holds against the
+          // bright field. uEnvLight 0 (every pose but the light environments) is a no-op.
+          scl *= mix(1.0, 1.15, uEnvLight);
           vVivid = aVivid;
           vDim = max(dim, (1.0 - aVisible) * 0.9);
           // Damage rides on top of emphasis: it recolors (fragment) but never
@@ -475,7 +481,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         uniform vec3 uDimColor;
         uniform float uTime;
         uniform float uStoryLift;
-        uniform float uDawnBold;
+        uniform float uEnvLight;
         varying float vColorMul;
         varying float vShim;
         varying float vDim;
@@ -500,11 +506,6 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         float lift = mix(uStoryLift, 1.0, clamp(vDamage * 3.0, 0.0, 1.0));
         float mulTotal = max(vColorMul, lift * vShim);
         diffuseColor.rgb = mix(diffuseColor.rgb * mulTotal, uDimColor, vDim);
-        // Ascent-dawn boldness: pull the fill toward the DEEP vivid strand hue so the
-        // orb reads as a solid coloured bead against the bright sky, not an additive
-        // pastel wash. Applied BEFORE the sphere shading so the limb/key modelling
-        // still rides on top; uDawnBold 0 → untouched (poses 0/2/3, dark baseline).
-        diffuseColor.rgb = mix(diffuseColor.rgb, vVivid * 0.72, uDawnBold * 0.85);
         // --- sphere shading: limb darkening + a soft key light ----------------
         // Bright core, darkened silhouette: each orb reads as a self-luminous
         // sphere, and an orb in front separates visibly from one behind it
@@ -526,6 +527,15 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           float key = 0.5 + 0.5 * pow(nl, 1.6);
           diffuseColor.rgb *= key * (1.0 - 0.55 * limb);
         }
+        // --- light-environment enamel repaint ---------------------------------
+        // Against the bright dawn sky / concrete daylight the sphere-shaded bead
+        // washes out (an additive-pastel smudge), so past the window the orb becomes
+        // a SOLID VIVID DISC — the full-saturation STRAND_VIVID strand hue (aVivid)
+        // at full alpha, replacing the modelling with flat enamel signage exactly
+        // like the edge repaint (edges.ts: col = mix(col, vVivid, enamel)). uEnvLight
+        // is 0 at poses 0/2/3, in the dark story baseline, and in every paper skin,
+        // so the shaded galaxy orb stays byte-identical there.
+        diffuseColor.rgb = mix(diffuseColor.rgb, vVivid, uEnvLight);
         // --- structural damage (composited AFTER emphasis) --------------------
         // 0 = untouched; 1 = ember husk. Damage distinguishes OUTAGE from
         // STRUGGLE: a fully-dead node (d >= 0.95) is a steady dark ember with
@@ -781,8 +791,8 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     setOrbFade(amount) {
       uniforms.uPoseFade.value = amount;
     },
-    setDawnBold(amount) {
-      uniforms.uDawnBold.value = amount;
+    setEnvLight(amount) {
+      uniforms.uEnvLight.value = amount;
     },
     setTouchPicking(on) {
       if (on === touchMode) return;

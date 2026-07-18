@@ -146,12 +146,13 @@ const SHELL_FRAG = /* glsl */ `
       col = mix(bot, top, smoothstep(-0.4, 0.8, e));
     } else {
       // Concrete daylight — clean, light overcast; a material, not a photograph.
-      // Round-12 (user: the old #a8a49b→#cfccc4 shell read "muddy and bleh"):
-      // lighter, closer stops for modern city-daylight concrete, with an infinite
-      // procedural grain overlay so the flat field reads as fine grey stone.
-      vec3 cZ = vec3(0.850980, 0.839216, 0.811765); // #d9d6cf zenith
-      vec3 cM = vec3(0.803922, 0.792157, 0.764706); // #cdcac3 mid
-      vec3 cL = vec3(0.768627, 0.756863, 0.729412); // #c4c1ba low
+      // Round-13 (user: "background more concrete gray"): the round-12 warm-beige
+      // stops read too tan, so the stops are shifted neutral-cool — a fine grey
+      // stone, not sand. The infinite procedural grain overlay below is unchanged
+      // (it operates on luminance), and the cooler grey flatters the vivid palette.
+      vec3 cZ = vec3(0.839216, 0.839216, 0.831373); // #d6d6d4 zenith
+      vec3 cM = vec3(0.788235, 0.788235, 0.780392); // #c9c9c7 mid
+      vec3 cL = vec3(0.741176, 0.741176, 0.733333); // #bdbdbb low
       col = mix(cL, cM, smoothstep(-0.10, 0.42, e));
       col = mix(col, cZ, smoothstep(0.42, 1.00, e));
       // Very-low-frequency mottle (±2.5%) — broad, soft unevenness. Direction-based
@@ -180,6 +181,15 @@ const SHELL_FRAG = /* glsl */ `
 const SHELL_RADIUS = 5200; // inside the 12000 camera far plane, beyond the star shell (3600)
 
 function makeShellMaterial(type: 0 | 1 | 2): THREE.ShaderMaterial {
+  // depthTest (round-13 occlusion fix): the shell is transparent, so it draws in
+  // the transparent phase AFTER the opaque orbs (Galaxy nodes) and the opaque etch
+  // markers. With depthTest OFF the two LIGHT shells (dawn / concrete daylight) at
+  // full opacity PAINTED OVER that opaque geometry — the exact cause of the invisible
+  // dawn orbs AND the invisible dawn/Transit grade labels. depthTest ON lets the near
+  // opaque geometry occlude the far shell (radius 5200), so orbs + markers read on the
+  // bright field while the shell still fills every empty pixel behind them. The DARK
+  // studio shell (type 1, Blueprint) keeps the shipped depthTest:false — its dark
+  // charcoal never washed the markers out and pose 2 must stay byte-identical.
   return new THREE.ShaderMaterial({
     vertexShader: SHELL_VERT,
     fragmentShader: SHELL_FRAG,
@@ -187,7 +197,7 @@ function makeShellMaterial(type: 0 | 1 | 2): THREE.ShaderMaterial {
     side: THREE.BackSide,
     transparent: true,
     depthWrite: false,
-    depthTest: false, // pure background fill, ordered by renderOrder
+    depthTest: type !== 1, // light shells (dawn/daylight) occlude behind opaque geometry; studio stays a pure fill
   });
 }
 

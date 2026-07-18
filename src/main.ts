@@ -564,12 +564,17 @@ function start(graph: GraphCore): void {
       const dawnAmt = artStyle === 0 && !storyPlayer.running ? environs.dawn01() : 0;
       const dayAmt = artStyle === 0 && !storyPlayer.running ? environs.daylight01() : 0;
       document.body.classList.toggle("env-light", dawnAmt + dayAmt > 0.5);
-      etches.setEnvLight(Math.max(dawnAmt, dayAmt));
-      // Ascent dawn node boldness: against the bright morning sky the additive-pastel
-      // orbs wash out, so drive them opaque + ×1.15 + pulled toward the deep VIVID
-      // strand hue. Dawn-only (0 at the Transit, where the orbs have already ceded to
-      // stations; 0 in the studio/dark baseline and every art style).
-      nodes.setDawnBold(dawnAmt);
+      // Per-environment marker ink: the dawn markers sit below the dark horizon band
+      // (need PALE STONE), the daylight markers stand on light concrete (need DARK
+      // WARM ink). etches.setEnvLight takes both effective amounts and picks per env.
+      etches.setEnvLight(dawnAmt, dayAmt);
+      // Light-environment node boldness: against the bright dawn sky / concrete
+      // daylight the sphere-shaded orbs wash out, so paint them as solid vivid discs
+      // (opaque, ×1.15, full-saturation STRAND_VIVID) — the SAME envLight amount the
+      // edges get, so orbs and lines carry matching enamel. At the settled Transit
+      // the orbs have already ceded to stations (orb fade collapses them), so this is
+      // meaningfully visible only at the Ascent dawn; 0 in the dark baseline / paper.
+      nodes.setEnvLight(envLight);
       // Bloom bleeds out as the concrete daylight surfaces (Galaxy only).
       bloom.setDaylight(artStyle === 0 ? environs.daylight01() : 0);
       // Filaments track node positions + visibility every rendered frame (pose

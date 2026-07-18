@@ -27,7 +27,7 @@ import type { GraphNode } from "../data";
 import { RINGERS, FIDENZA } from "./artstyle";
 
 const SHEET_Z = -20; // round-12: back from −8 so it clears the lifted pos3 block planes
-const MARGIN = 120; // world units of sheet around the pos3 content bounds
+const MARGIN = 200; // world units of sheet around the pos3 content bounds (round-13: 120→200 so the K / ADV end columns clear the frame)
 const CANVAS_W = 1600; // texture resolution; height derived from the plane aspect
 
 interface SheetPalette {

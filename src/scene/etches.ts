@@ -19,11 +19,19 @@ const GRADE_FONT_URL = "/fonts/space-grotesk-600.typeface.json";
 const COURSE_FONT_URL = "/fonts/space-grotesk-600-course.typeface.json";
 const FACE_COLOR = 0x34315e;
 const SIDE_COLOR = 0x16142e;
-// Light-environment ink (round-12): on the Sierra dawn / concrete daylight fields
-// the faint-violet extrusion vanishes, so setEnvLight lerps the face/side toward a
-// dark warm ink that reads as an engraved marker standing on the light ground.
-const ENV_LIGHT_FACE = 0x2a2722;
-const ENV_LIGHT_SIDE = 0x6b665c;
+// Light-environment ink — PER ENVIRONMENT (round-13). On a light field the
+// faint-violet extrusion vanishes, so setEnvLight re-inks the markers; but the two
+// light environments need OPPOSITE ink because the marker row sits low in each:
+//   · DAWN — the marker row (y ≈ −124) sits BELOW the horizon line where the dawn
+//     shell is DARK (#232833). A dark ink there is invisible, so the dawn markers
+//     read as PALE STONE (face #ded8ca / side #8a8478): legible against the dark
+//     below-horizon band and acceptable against the low mist.
+//   · DAYLIGHT — concrete is light everywhere, so a dark warm ink (face #2a2722 /
+//     side #6b665c) reads as an engraved marker standing on the light ground.
+const ENV_DAWN_FACE = 0xded8ca; // pale stone — dawn (dark below-horizon band)
+const ENV_DAWN_SIDE = 0x8a8478;
+const ENV_DAY_FACE = 0x2a2722; // dark warm ink — daylight (light concrete)
+const ENV_DAY_SIDE = 0x6b665c;
 
 // Marker ink per art style, index-aligned with ArtStyle (0 Galaxy | 1 Ringers |
 // 2 Fidenza). The etches are engraved monuments in the Galaxy; under an art
@@ -74,12 +82,14 @@ export interface EtchesHandle {
    */
   setArtStyle(style: number): void;
   /**
-   * Re-ink the Galaxy markers for a LIGHT environment: amount 0 = the shipped
-   * faint-violet extrusion, 1 = a dark warm ink that stands legibly on the dawn /
-   * daylight field. main.ts drives it with max(dawn, daylight) in style 0 (and 0
-   * during stories). A NO-OP in art styles 1/2 — their MARKER_INK stands.
+   * Re-ink the Galaxy markers for a LIGHT environment, PER ENVIRONMENT. Both
+   * amounts 0 = the shipped faint-violet extrusion. The dawn re-inks toward PALE
+   * STONE (the marker row sits below the dark horizon band), the daylight toward a
+   * DARK WARM ink (light concrete). The two never overlap, so main.ts passes both
+   * effective amounts (0 during stories / off-Galaxy). A NO-OP in art styles 1/2 —
+   * their MARKER_INK stands.
    */
-  setEnvLight(amount: number): void;
+  setEnvLight(dawnAmt: number, dayAmt: number): void;
   dispose(): void;
 }
 
@@ -100,8 +110,10 @@ export function createEtches(
   let artStyleCur = 0;
   const galaxyFace = new THREE.Color(FACE_COLOR);
   const galaxySide = new THREE.Color(SIDE_COLOR);
-  const envLightFace = new THREE.Color(ENV_LIGHT_FACE);
-  const envLightSide = new THREE.Color(ENV_LIGHT_SIDE);
+  const dawnFace = new THREE.Color(ENV_DAWN_FACE);
+  const dawnSide = new THREE.Color(ENV_DAWN_SIDE);
+  const dayFace = new THREE.Color(ENV_DAY_FACE);
+  const daySide = new THREE.Color(ENV_DAY_SIDE);
 
   // Each marker remembers all three pose positions so setPose can lerp it.
   interface Marker {
@@ -242,14 +254,19 @@ export function createEtches(
       faceMat.color.setHex(ink.face);
       sideMat.color.setHex(ink.side);
     },
-    setEnvLight(amount) {
+    setEnvLight(dawnAmt, dayAmt) {
       // Only the Galaxy etch re-inks for a light environment; art styles 1/2 keep
-      // their MARKER_INK (setArtStyle owns them). amount 0 restores the exact
+      // their MARKER_INK (setArtStyle owns them). Both amounts 0 restores the exact
       // shipped faint-violet extrusion, so no-environment Galaxy is unchanged.
       if (artStyleCur !== 0) return;
-      const a = amount < 0 ? 0 : amount > 1 ? 1 : amount;
-      faceMat.color.lerpColors(galaxyFace, envLightFace, a);
-      sideMat.color.lerpColors(galaxySide, envLightSide, a);
+      const clamp = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+      const dw = clamp(dawnAmt);
+      const dy = clamp(dayAmt);
+      // Start from the shipped ink and lerp toward each environment's target. The
+      // dawn and daylight windows never overlap, so the sequential lerps compose
+      // cleanly (only one is ever non-zero): dawn → PALE STONE, daylight → DARK WARM.
+      faceMat.color.copy(galaxyFace).lerp(dawnFace, dw).lerp(dayFace, dy);
+      sideMat.color.copy(galaxySide).lerp(dawnSide, dw).lerp(daySide, dy);
     },
     dispose() {
       for (const g of geometries) g.dispose();
