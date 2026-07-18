@@ -102,7 +102,25 @@ alive without searing.
 Quadratic bezier arcs (control points baked in `graph-core.json`), rendered as
 one instanced ribbon mesh, camera-facing, screen-space width.
 
-## Grade bands
+### Fidelity to the original renderer (2026-07 third-line QA)
+
+The original site's own drawing code was deconstructed and its algorithm
+ported and diffed against ours for all 480 standards: our reading of the data
+(from is the prerequisite of to; builds-on is incoming, leads-to outgoing;
+related pairs undirected and dashed; ELA excluded; families roll up their
+children's connections with family-internal edges excluded) reproduces the
+original's rendered connections exactly for 386 of 480 standards, and every
+live-DOM spot check matched. The 94 differences are three CONSCIOUS choices,
+never a missing or fabricated edge:
+
+1. HS families (6 standards, e.g. F-IF.C.7, A-REI.B.4): the original skips
+   its own roll-up for high school and renders these as isolated dead-end
+   cards. We roll them up, so we show real connections the original hides.
+2. Neighbour grain (52): where a connection lands on a lettered sub-standard,
+   the original collapses the neighbour card to its parent family; we show
+   the exact sub-standard the edge touches. Identical at the family level.
+3. Sub-standard focus (36): the original has no detail view for a non-HS
+   sub-standard at all; ours makes every node focusable. Purely additive.
 
 Faint vertical structure, not boxes: each band gets (a) a 1px hairline ring or
 soft fog plane at its x-center is too heavy; use instead (b) a floor: grade
