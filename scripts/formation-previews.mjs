@@ -5,16 +5,25 @@
 // children[]) is co-located as one body.
 //
 //   WATERSHED — top-down river map, K (headwaters) left → HS (delta/sea) right.
-//     Edges ARE the rivers; stroke width = target's descendant reach (discharge).
+//     STRUCTURE from the drainage tree: each standard flows to its highest-reach
+//     dependent; channel width = accumulated upstream discharge; confluences,
+//     branching and y-stacking all EMERGE from that tree (no lanes, no jitter).
 //   REEF      — cross-section growing upward, K seabed → HS sunlit surface.
-//     Accretion coloring (calcified base); families are coral heads.
-//   TRANSIT   — octolinear metro map; strands are lines, standards stations,
-//     families station complexes, interchanges = cross-strand touch points.
+//     STRUCTURE from accretion: x = flow-weighted centroid of a standard's
+//     prerequisites (roots anchor at their strand zone), so colonies cluster.
+//   TRANSIT   — octolinear metro map; strands are lines, standards stations.
+//     STRUCTURE from the transfer graph: each line's MAIN LINE is the max-reach
+//     path through its prereq subgraph, everything else attaches as a derived
+//     branch; heavy cross-strand transfers become TRUE multi-line interchanges
+//     the guest line routes through; y solved by barycenter crossing-min.
 //
-// Deterministic: no Math.random / Date; all variation hashed from ids. Reads
-// public/data/graph-core.json; writes docs/previews/formation-*.svg. Geometry
-// is derived from grade / strand / depth / reach (NOT the pos/pos2/pos3 poses).
-// Nothing imports this file.
+// THE LAW (Mark): hash() may only TEXTURE (fractal micro-kink amplitude,
+// bubble placement). It may NEVER decide a node's POSITION or a line's ROUTE.
+// All structure is derived from the DAG — prereq edges (k=0), descendant reach,
+// grade order, families. Deterministic: no Math.random / Date. Reads
+// public/data/graph-core.json; writes docs/previews/formation-*.svg. Geometry is
+// derived from the dependency data, NOT the pos/pos2/pos3 poses. Nothing imports
+// this file.
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -38,7 +47,7 @@ const STRAND_ORDER = ["number", "algebra", "geometry", "data"]; // number topmos
 // FNV-1a plus an avalanche mix. A plain polynomial hash with a shared prefix
 // (e.g. "rx"+id) barely perturbs the low bits between adjacent ids, collapsing
 // the [0,1) spread into a narrow band; the mix restores uniform distribution so
-// the id-hash scatter actually scatters.
+// the id-hash scatter actually scatters. USED FOR TEXTURE ONLY (see THE LAW).
 const hash = (s) => {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < s.length; i++) {
@@ -117,6 +126,49 @@ const interchange = new Set();
 for (const e of g.edges) if (crossStrand(e)) { interchange.add(e.s); interchange.add(e.t); }
 
 // ===========================================================================
+// UNIT MODEL — families contract to a single body. Every structural algorithm
+// runs on UNITS (a family's parent stands in for the whole family; edges into
+// or out of any child redirect to the parent, self-loops dropped). This is what
+// makes "co-locate the family, always" a property of the geometry rather than a
+// post-hoc nudge: the family occupies one point in the derived layout, and only
+// its rendering fans the members apart. 364 units (480 standards − 116 children).
+// ===========================================================================
+const unitOf = (id) => childOf.get(id) ?? id;
+const unitNodes = g.nodes.filter((n) => !isChild(n.id)); // parents + standalones
+const unitIds = unitNodes.map((n) => n.id);
+// unit-level prereq adjacency (dedup; self-loops from intra-family edges dropped)
+const uSucc = new Map(unitIds.map((id) => [id, new Set()]));
+const uPred = new Map(unitIds.map((id) => [id, new Set()]));
+for (const e of prereq) {
+  const u = unitOf(e.s), v = unitOf(e.t);
+  if (u === v) continue;
+  uSucc.get(u).add(v); uPred.get(v).add(u);
+}
+// unit reach = representative (parent) node reach — "already computed", and it
+// strictly decreases downstream (a prerequisite owns all its dependents' reach),
+// so it is a valid flow potential for every DP below.
+const ureach = (u) => reach(u);
+const codeLt = (a, b) => (byId.get(a).code < byId.get(b).code ? -1 : 1);
+const ucol = (u) => colOf(byId.get(u));
+// unit topological order (Kahn; ties by code so the whole pipeline is stable)
+function topoUnits() {
+  const indeg = new Map(unitIds.map((id) => [id, uPred.get(id).size]));
+  const q = unitIds.filter((id) => indeg.get(id) === 0);
+  const order = [];
+  while (q.length) {
+    q.sort(codeLt);
+    const u = q.shift();
+    order.push(u);
+    for (const v of uSucc.get(u)) {
+      indeg.set(v, indeg.get(v) - 1);
+      if (indeg.get(v) === 0) q.push(v);
+    }
+  }
+  return order;
+}
+const UTOPO = topoUnits(); // length === unitIds.length (unit DAG is acyclic)
+
+// ===========================================================================
 function svg(W, H, el, caption) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <rect width="${W}" height="${H}" fill="${BG}"/>
@@ -126,20 +178,23 @@ ${el.join("\n")}
 }
 
 // ===========================================================================
-// 1 · THE WATERSHED — a top-down river map. Grade flows left→right; strand is
-// the river system (lane); prerequisite edges are the rivers themselves, their
-// width the discharge volume (target's descendant reach). Families are
-// tributary mouths clustered just upstream of the parent.
+// 1 · THE WATERSHED — a top-down river map whose CHANNELS ARE A REAL DRAINAGE
+// TREE. Every standard flows to a single primary downstream (its highest-reach
+// dependent); those pointers form a spanning forest whose roots are the terminal
+// standards at the delta. Discharge accumulates downstream (a channel's width is
+// the total flow of everything upstream of it), so trunks fatten toward the sea
+// and the Sacramento-style branching EMERGES from the data. y comes from
+// recursive tributary stacking (a confluence sits at the flow-weighted centroid
+// of its tributaries' mouths); x from grade / longest-path progression. Strand
+// is only the initial ordering of subtrees — a soft tendency, not a hard lane.
 // ===========================================================================
 function watershed() {
   const W = 1960, H = 1020;
   const padL = 118, padR = 150, padT = 96, padB = 70;
   const usableW = W - padL - padR;
-  const laneH = (H - padT - padB) / 4;
-  const laneCenter = (strand) => padT + (STRAND_ORDER.indexOf(strand) + 0.5) * laneH;
 
-  // 13 grade bands with gentle irregular widths (deterministic); HS delta bands
-  // (9–12) run a touch wider — the river mouth opens.
+  // 13 grade bands with gentle irregular widths (geometry of the COLUMNS, from
+  // grade — a structural axis, not a node position); HS delta bands run wider.
   const rawW = [];
   for (let c = 0; c < 13; c++) {
     const jitter = 1 + 0.14 * Math.sin(c * 1.7 + 0.6);
@@ -149,44 +204,68 @@ function watershed() {
   const bandX = [padL];
   for (let c = 0; c < 13; c++) bandX.push(bandX[c] + (rawW[c] / sumW) * usableW);
   const seaX = bandX[13]; // right edge of the delta = shoreline
-
-  // low-frequency meander per lane (seeded), evaluated on normalized x
-  const meander = (strand, xNorm) => {
-    const s = STRAND_ORDER.indexOf(strand);
-    const A = laneH * 0.19;
-    const f1 = 1.3 + hash("mf" + s) * 0.9, p1 = hash("mp" + s) * 6.283;
-    const f2 = 2.4 + hash("mg" + s) * 1.2, p2 = hash("mq" + s) * 6.283;
-    return A * (0.72 * Math.sin(6.283 * f1 * xNorm + p1) + 0.28 * Math.sin(6.283 * f2 * xNorm + p2));
-  };
-
-  // node positions ----------------------------------------------------------
-  const pos = new Map();
-  for (const n of g.nodes) {
-    if (isChild(n.id)) continue; // placed with its parent below
+  const xOf = (n) => {
     const c = colOf(n);
     const bx0 = bandX[c] + 6, bx1 = bandX[c + 1] - 6;
-    const x = bx0 + depthT(n) * (bx1 - bx0);
-    const xNorm = (x - padL) / usableW;
-    const hs = n.grade === "HS";
-    const spread = laneH * (hs ? 0.62 : 0.42); // the delta fans wider
-    const y = laneCenter(n.strand) + meander(n.strand, xNorm) * (hs ? 0.5 : 1)
-      + (hash("wy" + n.id) - 0.5) * spread;
-    pos.set(n.id, [x, clamp(y, padT - 8, H - padB + 8)]);
+    return bx0 + depthT(n) * (bx1 - bx0);
+  };
+
+  // ---- DRAINAGE FOREST ------------------------------------------------------
+  // primaryDown(u) = the dependent of u with the greatest descendant reach
+  // (ties by code). Flow runs u → primaryDown(u) → … → a sink (the delta).
+  const primaryDown = new Map();
+  const dChildren = new Map(unitIds.map((id) => [id, []]));
+  for (const u of unitIds) {
+    let best = null, bestR = -1;
+    for (const v of uSucc.get(u)) {
+      const r = ureach(v);
+      if (r > bestR || (r === bestR && byId.get(v).code < byId.get(best).code)) { bestR = r; best = v; }
+    }
+    primaryDown.set(u, best);
+    if (best) dChildren.get(best).push(u);
   }
-  // families: children a few px upstream (left) of the parent, snug in y
+  // discharge: subtree flow accumulates downstream (topo order = children first)
+  const flow = new Map(unitIds.map((id) => [id, 1]));
+  for (const u of UTOPO) { const p = primaryDown.get(u); if (p) flow.set(p, flow.get(p) + flow.get(u)); }
+  let maxEdgeFlow = 1;
+  for (const u of unitIds) if (primaryDown.get(u)) maxEdgeFlow = Math.max(maxEdgeFlow, flow.get(u));
+
+  // order tributaries by strand tendency, then code — strands stay in soft bands
+  const strandRank = (id) => STRAND_ORDER.indexOf(byId.get(id).strand);
+  const byTrib = (a, b) => strandRank(a) - strandRank(b) || codeLt(a, b);
+  for (const arr of dChildren.values()) arr.sort(byTrib);
+
+  // recursive tributary stacking → a vertical slot per unit. Leaves (headwaters)
+  // take sequential slots; a confluence sits at the flow-weighted mean of its
+  // tributaries' slots. This is the classic river-map post-order extent layout.
+  const slotY = new Map();
+  let slot = 0;
+  const assignY = (u) => {
+    const ch = dChildren.get(u);
+    if (!ch.length) { slotY.set(u, slot); slot += 1; return slotY.get(u); }
+    let num = 0, den = 0;
+    for (const c of ch) { const cy = assignY(c); num += cy * flow.get(c); den += flow.get(c); }
+    const y = num / den; slotY.set(u, y); return y;
+  };
+  const roots = unitIds.filter((id) => !primaryDown.get(id)).sort(byTrib);
+  for (const r of roots) assignY(r);
+  const maxSlot = Math.max(1, slot - 1);
+  const yOf = (u) => padT + (slotY.get(u) / maxSlot) * (H - padT - padB);
+
+  const pos = new Map();
+  for (const n of unitNodes) pos.set(n.id, [xOf(n), clamp(yOf(n.id), padT - 8, H - padB + 8)]);
+  // families: children ride as tributary mouths just upstream (left) of parent
   for (const p of families) {
     const [px, py] = pos.get(p.id);
+    const m = p.children.length;
     p.children.forEach((cid, i) => {
-      const m = p.children.length;
-      const up = 9 + hash("wu" + cid) * 5;
-      const yy = py + (i - (m - 1) / 2) * 6.5 + (hash("wc" + cid) - 0.5) * 4;
+      const up = 9 + (i % 3) * 2.4;
+      const yy = py + (i - (m - 1) / 2) * 6.5;
       pos.set(cid, [px - up, yy]);
     });
   }
 
   const el = [];
-  // the sea: a soft vertical gradient band beyond the delta shoreline, and a
-  // painterly rough-edge filter for the whole river layer (ink on wet paper).
   el.push(`<defs>
 <linearGradient id="sea" x1="0" y1="0" x2="1" y2="0">
 <stop offset="0%" stop-color="#16324a" stop-opacity="0"/>
@@ -207,13 +286,9 @@ function watershed() {
     el.push(`<text x="${f(mx)}" y="${padT - 40}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12.5" fill="#4a4770" letter-spacing="0.1em">${COL_LABELS[c]}</text>`);
   }
 
-  // rivers: prereq edges as FRACTAL channels (Mark's Sacramento reference:
-  // kinks, curves, randomness — real hydrology, not smooth silk). Each river
-  // samples the downstream-leaning cubic as its spine, then displaces every
-  // interior vertex perpendicular with two scales of id-hashed noise. Creeks
-  // kink sharply; trunk rivers meander broad and slow (kink damped by width).
-  // Width = target discharge (sqrt of descendant reach, ~0.8→7px), colored by
-  // the river system fed. Thick first so fine tributaries lie on top.
+  // channel(): the derived course between two points, textured with two scales
+  // of fractal micro-kink (hash TEXTURES the amplitude only — the endpoints and
+  // the spine are the data's). Creeks kink sharply; trunk rivers meander slow.
   function channel(A, B, seedKey, w) {
     const cx = (B[0] - A[0]) * 0.42;
     const c1x = A[0] + Math.max(cx, 30);
@@ -229,64 +304,77 @@ function watershed() {
     const segs = clamp(Math.round(len / 20), 7, 30);
     const pts = [];
     for (let i = 0; i <= segs; i++) pts.push(spine(i / segs));
-    const kink = clamp(11 / (1 + w * 0.85), 1.8, 9.5); // creeks kink harder than trunks
+    const kink = clamp(13 / (1 + w * 0.6), 2.4, 11);
+    // one slow, wide meander over the whole course (amplitude grows with length,
+    // barely damped by width so even trunks wander) plus the two-scale micro-kink
+    const mAmp = Math.min(len * 0.09, 46) / (1 + w * 0.14);
+    const mFreq = 1.15 + hash(seedKey + "mf") * 1.5;
+    const mPh = hash(seedKey + "mp") * 6.283;
     for (let i = 1; i < segs; i++) {
       const [ax, ay] = pts[i - 1];
       const [bx2, by2] = pts[i + 1];
       let dx = bx2 - ax, dy = by2 - ay;
       const L = Math.hypot(dx, dy) || 1;
       const nx = -dy / L, ny = dx / L;
-      const env = Math.sin(Math.PI * (i / segs)); // endpoints stay pinned
+      const t = i / segs;
+      const env = Math.sin(Math.PI * t);
+      const meander = (Math.sin(6.283 * mFreq * t + mPh) * 0.7 + Math.sin(6.283 * mFreq * 2.3 * t + mPh * 1.7) * 0.3) * mAmp * env;
       const coarse = (hash(seedKey + "k" + Math.floor(i / 3)) - 0.5) * 2;
       const fine = (hash(seedKey + "j" + i) - 0.5) * 2;
-      const off = (coarse * 0.62 + fine * 0.38) * kink * env * (0.7 + Math.min(1.6, len / 420));
+      const off = meander + (coarse * 0.62 + fine * 0.38) * kink * env * (0.7 + Math.min(1.6, len / 420));
       pts[i] = [pts[i][0] + nx * off, pts[i][1] + ny * off];
     }
     return "M" + pts.map(([x, y]) => `${f(x)},${f(y)}`).join(" L");
   }
-  // Painterly hierarchy (Mark: rough, textured, with character — not messy).
-  // The Sacramento map is legible because almost everything is a HAIRLINE and
-  // only the main stem carries weight. Gamma-crushed widths give that
-  // hierarchy; each river then paints in passes: a soft bleeding wash under,
-  // the ink stroke over, and a wet highlight down the trunk rivers' centers.
-  // Cross-lane distributaries paint fainter and slimmer so the lane trunks
-  // own the composition. The whole layer runs through the rough-brush filter.
-  const rivers = prereq.map((e) => {
-    const t = Math.pow(reach(e.t) / MAXREACH, 0.78);
-    const cross = crossStrand(e);
-    const w = (0.55 + t * 6.6) * (cross ? 0.7 : 1);
-    return { e, w, t, cross };
-  }).sort((a, b) => b.w - a.w);
-  const washes = [];
-  const strokes = [];
-  const highlights = [];
-  for (const { e, w, t, cross } of rivers) {
-    const A = pos.get(e.s), B = pos.get(e.t);
+
+  // distributary canals — every prereq edge that is NOT the primary (tree) edge.
+  // Painted first, faint and thin, beneath the true rivers.
+  const treeEdge = new Set();
+  for (const u of unitIds) { const p = primaryDown.get(u); if (p) treeEdge.add(u + ">" + p); }
+  const distrib = [];
+  for (const u of unitIds) for (const v of uSucc.get(u)) {
+    if (treeEdge.has(u + ">" + v)) continue;
+    const A = pos.get(u), B = pos.get(v);
     if (!A || !B) continue;
-    const col = STRAND[byId.get(e.t).strand];
-    const d = channel(A, B, e.s + "→" + e.t, w);
-    const op = clamp(0.2 + t * 0.62, 0.2, 0.85) * (cross ? 0.55 : 1);
-    if (w > 1.6) {
-      washes.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w * 1.9)}" stroke-opacity="${f(op * 0.16)}" stroke-linecap="round" stroke-linejoin="round"/>`);
-    }
-    strokes.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w)}" stroke-opacity="${f(op)}" stroke-linecap="round" stroke-linejoin="round"/>`);
-    if (w > 3.4) {
-      highlights.push(`<path d="${d}" fill="none" stroke="${mixHex(col, "#ffffff", 0.45)}" stroke-width="${f(w * 0.32)}" stroke-opacity="${f(op * 0.5)}" stroke-linecap="round" stroke-linejoin="round"/>`);
-    }
+    const d = channel(A, B, u + "~" + v, 1.0);
+    distrib.push(`<path d="${d}" fill="none" stroke="${mixHex(STRAND[byId.get(u).strand], BG, 0.35)}" stroke-width="0.85" stroke-opacity="0.28" stroke-linecap="round"/>`);
   }
-  el.push(`<g filter="url(#brush)">`, ...washes, ...strokes, ...highlights, `</g>`);
+
+  // the rivers themselves — tree edges, width = accumulated discharge (√flow),
+  // colored by the tributary's own strand so ribbons stay legible until they
+  // merge. Thick first so fine creeks lie on top. Three painterly passes: a
+  // soft bleeding wash, the ink stroke, a wet highlight down the trunk centers.
+  const rivers = [];
+  for (const u of unitIds) {
+    const p = primaryDown.get(u);
+    if (!p) continue;
+    const A = pos.get(u), B = pos.get(p);
+    if (!A || !B) continue;
+    const t = Math.pow(flow.get(u) / maxEdgeFlow, 0.6);
+    const w = 0.6 + t * 7.2;
+    rivers.push({ u, p, A, B, w, t });
+  }
+  rivers.sort((a, b) => b.w - a.w);
+  const washes = [], strokes = [], highlights = [];
+  for (const { u, p, A, B, w, t } of rivers) {
+    const col = STRAND[byId.get(u).strand];
+    const d = channel(A, B, u + ">" + p, w);
+    const op = clamp(0.24 + t * 0.6, 0.24, 0.86);
+    if (w > 1.8) washes.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w * 1.9)}" stroke-opacity="${f(op * 0.16)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    strokes.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w)}" stroke-opacity="${f(op)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    if (w > 3.6) highlights.push(`<path d="${d}" fill="none" stroke="${mixHex(col, "#ffffff", 0.45)}" stroke-width="${f(w * 0.32)}" stroke-opacity="${f(op * 0.5)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+  }
+  el.push(`<g filter="url(#brush)">`, ...distrib, ...washes, ...strokes, ...highlights, `</g>`);
 
   // related pairs: faint dotted cross-channels
   for (const e of related) {
-    const A = pos.get(e.s), B = pos.get(e.t);
+    const A = pos.get(unitOf(e.s)), B = pos.get(unitOf(e.t));
     if (!A || !B) continue;
-    el.push(`<line x1="${f(A[0])}" y1="${f(A[1])}" x2="${f(B[0])}" y2="${f(B[1])}" stroke="${INK}" stroke-width="0.8" stroke-opacity="0.22" stroke-dasharray="1.5 4"/>`);
+    el.push(`<line x1="${f(A[0])}" y1="${f(A[1])}" x2="${f(B[0])}" y2="${f(B[1])}" stroke="${INK}" stroke-width="0.8" stroke-opacity="0.2" stroke-dasharray="1.5 4"/>`);
   }
 
-  // nodes: small (rivers carry the composition). WAP standards render as
-  // RESERVOIRS — irregular lake blobs, the Sacramento map's dark pools:
-  // stored water released to everything downstream, which is exactly what a
-  // widely applicable prerequisite is. Blob size grows with reach.
+  // reservoirs — the top-16 reach standards as irregular dark lakes (hash
+  // TEXTURES the blob outline only, never its placement, which is the node's).
   function reservoir(x, y, r, key) {
     const nSides = 9;
     const pts = [];
@@ -297,41 +385,39 @@ function watershed() {
     }
     return "M" + pts.map(([px, py]) => `${f(px)},${f(py)}`).join(" L") + " Z";
   }
-  // Reservoirs are RARE, like on a real map: a handful of NAMED lakes. The
-  // early grades are a plateau of enormous reach (54 standards clear 185), so
-  // no threshold stays rare — take the top 16 by reach, full stop. (K-8
-  // wap=1 is a source artifact and must never gate a visual.)
-  const reservoirIds = new Set(
-    [...g.nodes].sort((a, b) => reach(b.id) - reach(a.id)).slice(0, 16).map((n) => n.id),
-  );
+  const reservoirIds = new Set([...g.nodes].sort((a, b) => reach(b.id) - reach(a.id)).slice(0, 16).map((n) => n.id));
   for (const n of g.nodes) {
     const p = pos.get(n.id);
     if (!p) continue;
     const r = 1.8 + Math.sqrt(n.deg) * 0.9;
-    const isReservoir = reservoirIds.has(n.id);
-    if (isReservoir) {
+    if (reservoirIds.has(n.id)) {
       const rr = r + 3 + Math.sqrt(reach(n.id) / MAXREACH) * 6;
       el.push(`<path d="${reservoir(p[0], p[1], rr, "rv" + n.id)}" fill="#1d4256" fill-opacity="0.62" stroke="#ffd27a" stroke-width="0.8" stroke-opacity="0.45" stroke-linejoin="round"/>`);
     }
     el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r)}" fill="${STRAND[n.strand]}" fill-opacity="0.95"/>`);
   }
 
-  // lane labels at the headwaters (left)
+  // strand labels ride at the vertical centroid of their own headwaters (left)
   for (const s of STRAND_ORDER) {
-    el.push(`<text x="26" y="${f(laneCenter(s) + 4)}" font-family="ui-monospace, monospace" font-size="13" fill="${mixHex(STRAND[s], BG, 0.15)}" letter-spacing="0.08em">${s.toUpperCase()}</text>`);
+    const ys = unitIds.filter((id) => byId.get(id).strand === s && ucol(id) <= 1).map((id) => pos.get(id)[1]);
+    const cy = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : padT + 40;
+    el.push(`<text x="26" y="${f(cy + 4)}" font-family="ui-monospace, monospace" font-size="13" fill="${mixHex(STRAND[s], BG, 0.15)}" letter-spacing="0.08em">${s.toUpperCase()}</text>`);
   }
   el.push(`<text x="${f(seaX + 14)}" y="${padT - 40}" font-family="ui-monospace, monospace" font-size="12.5" fill="#4a7a90" letter-spacing="0.1em">SEA</text>`);
   el.push(`<text x="28" y="52" font-family="ui-monospace, monospace" font-size="20" fill="#e8e6f6" letter-spacing="0.06em">THE WATERSHED · prerequisite knowledge as a river system</text>`);
 
   return svg(W, H, el,
-    "Grade flows K (headwaters, left) → high school (delta and sea, right); 4 strand lanes braid and meander · rivers kink and meander like real hydrology (fractal channels) · river WIDTH = the target standard's descendant reach (discharge volume, √-scaled 0.8–7px) · cross-lane rivers are distributaries · steel-blue reservoir = widely applicable prerequisite (stored water, released downstream) · dotted = related pair · families cluster as tributary mouths just upstream of the parent · 480 standards, 757 prerequisite rivers, real data, deterministic");
+    "STRUCTURE from a real drainage tree: every standard flows to its highest-reach dependent, those pointers form a spanning forest to the delta · channel WIDTH = accumulated upstream discharge (√ subtree flow) so trunks fatten downstream as tributaries confluence · y from recursive tributary stacking (a confluence sits at the flow-weighted centroid of its tributaries' mouths); x from grade / longest-path · faint canals = non-tree prerequisites (distributaries) · steel-blue lakes = top-16 descendant reach · dotted = related pair · strand is only the initial subtree order, a soft tendency · families ride as tributary mouths just upstream · 480 standards, 757 prerequisites, deterministic");
 }
 
 // ===========================================================================
 // 2 · THE REEF — a cross-section growing upward by accretion. K at the seabed,
-// HS at the sunlit surface. Grade is the shelf (y), strand the zone (x). The
-// calcified base (K–2) is desaturated toward bone; families are coral heads,
-// children budding directly on the parent as one colony.
+// HS at the sunlit surface (grade is the shelf, y). STRUCTURE from accretion:
+// processing standards in topological order, each one's x is the flow-weighted
+// centroid of its prerequisites' x (roots anchor at their strand zone), so a
+// dependency cluster physically converges into a visible colony. A deterministic
+// collision relax spreads overlapping heads within each shelf while preserving
+// order. Families accrete ON the parent (children bud as one colony).
 // ===========================================================================
 function reef() {
   const W = 1960, H = 1280;
@@ -345,7 +431,6 @@ function reef() {
   const shelfCenterY = (col) => H - padB - (col + 0.5) * shelfH; // col 0 (K) at seabed
   const zoneCenterX = (strand) => padL + (STRAND_ORDER.indexOf(strand) + 0.5) * zoneW;
 
-  // accretion tint: K–2 calcified toward bone; 3–8 full color; HS brightened.
   const reefColor = (n) => {
     const c = colOf(n);
     const base = STRAND[n.strand];
@@ -353,23 +438,63 @@ function reef() {
     if (c >= 9) return mixHex(base, "#ffffff", 0.24); // sunlit surface
     return base;
   };
-
-  const pos = new Map();
-  for (const n of g.nodes) {
-    if (isChild(n.id)) continue;
-    const c = colOf(n);
-    const x = zoneCenterX(n.strand) + (hash("rx" + n.id) - 0.5) * zoneW * 1.06; // soft overlap
-    const y = shelfCenterY(c) + (hash("ry" + n.id) - 0.5) * shelfH * 0.68;
-    pos.set(n.id, [clamp(x, padL - 40, W - padR + 20), y]);
-  }
   const headR = (n) => 2.6 + Math.sqrt(n.deg) * 1.05 + Math.sqrt(reach(n.id) / MAXREACH) * 3.0;
-  // coral heads: children bud directly ON the parent, touching, hashed angle
+
+  // ---- ACCRETION x: flow-weighted centroid of prerequisites' x --------------
+  // Roots have no prerequisite to inherit from, so they anchor in their strand
+  // zone — spread across it by code order (derived) rather than piled on one x.
+  const strandRoots = new Map(STRAND_ORDER.map((s) => [s, []]));
+  for (const u of UTOPO) if (![...uPred.get(u)].length) strandRoots.get(byId.get(u).strand).push(u);
+  const rootX = new Map();
+  for (const [s, arr] of strandRoots) {
+    arr.sort((a, b) => ucol(a) - ucol(b) || codeLt(a, b));
+    const zc = zoneCenterX(s);
+    arr.forEach((u, i) => { const t = arr.length > 1 ? i / (arr.length - 1) : 0.5; rootX.set(u, zc + (t - 0.5) * zoneW * 0.82); });
+  }
+  // Every other standard drifts to the flow-weighted centroid of its
+  // prerequisites, kept partly home in its own strand zone so the four reef
+  // zones stay legible while dependency clusters still converge into colonies.
+  const ux = new Map();
+  for (const u of UTOPO) {
+    const preds = [...uPred.get(u)];
+    if (!preds.length) { ux.set(u, rootX.get(u)); continue; }
+    let num = 0, den = 0;
+    for (const p of preds) { const w = ureach(p) + 1; num += ux.get(p) * w; den += w; }
+    ux.set(u, (num / den) * 0.66 + zoneCenterX(byId.get(u).strand) * 0.34);
+  }
+  // y = grade shelf + a within-shelf offset derived from build depth (structure,
+  // not hash) so heads at the same accretion x still separate vertically.
+  const pos = new Map();
+  for (const n of unitNodes) {
+    const y = shelfCenterY(colOf(n)) + (depthT(n) - 0.5) * shelfH * 0.5;
+    pos.set(n.id, [ux.get(n.id), y]);
+  }
+  // collision relax within each shelf on x — spread with a radius-aware gap,
+  // preserve topological/accretion order, fit-scale a too-wide shelf to bounds.
+  const shelves = Array.from({ length: 13 }, () => []);
+  for (const n of unitNodes) shelves[colOf(n)].push(n);
+  const minX = padL - 40, maxX = W - padR + 20, midX = (minX + maxX) / 2, avail = maxX - minX;
+  for (const arr of shelves) {
+    arr.sort((a, b) => pos.get(a.id)[0] - pos.get(b.id)[0] || codeLt(a.id, b.id));
+    for (let i = 1; i < arr.length; i++) {
+      const a = arr[i - 1], b = arr[i];
+      const gap = headR(a) + headR(b) + 3;
+      if (pos.get(b.id)[0] < pos.get(a.id)[0] + gap) pos.get(b.id)[0] = pos.get(a.id)[0] + gap;
+    }
+    if (arr.length > 1) {
+      const L = pos.get(arr[0].id)[0], R = pos.get(arr[arr.length - 1].id)[0], span = R - L;
+      if (span > avail) { const s = avail / span; for (const n of arr) pos.get(n.id)[0] = midX + (pos.get(n.id)[0] - (L + R) / 2) * s; }
+      else { const shift = clamp((L + R) / 2, midX - (avail - span) / 2, midX + (avail - span) / 2) - (L + R) / 2; for (const n of arr) pos.get(n.id)[0] += shift; }
+    }
+    for (const n of arr) pos.get(n.id)[0] = clamp(pos.get(n.id)[0], minX, maxX);
+  }
+  // families bud directly ON the parent — golden-angle spacing (derived, no hash)
   for (const p of families) {
     const [px, py] = pos.get(p.id);
     const pr = headR(p);
     p.children.forEach((cid, i) => {
       const cr = 2.4 + Math.sqrt(byId.get(cid).deg) * 0.8;
-      const ang = hash("ra" + cid) * 6.283 + i * 1.1;
+      const ang = i * 2.399963 + strandRankOf(p.strand);
       const dist = pr + cr * 0.7;
       pos.set(cid, [px + Math.cos(ang) * dist, py + Math.sin(ang) * dist]);
     });
@@ -388,26 +513,23 @@ function reef() {
 <stop offset="100%" stop-color="#bfe8e0" stop-opacity="0"/>
 </linearGradient></defs>`);
   el.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#water)"/>`);
-  // light shafts raking down from the surface — thin, slanted, barely there
   for (let i = 0; i < 4; i++) {
     const sx = padL + (0.16 + 0.66 * (i / 3) + (hash("sh" + i) - 0.5) * 0.05) * usableW;
     const sw = 26 + hash("sw" + i) * 34;
-    const slant = 130 + hash("sl" + i) * 90; // rake so shafts read as light, not columns
+    const slant = 130 + hash("sl" + i) * 90;
     el.push(`<polygon points="${f(sx)},${padT - 20} ${f(sx + sw)},${padT - 20} ${f(sx + slant + sw * 0.5)},${f(H - padB)} ${f(sx + slant - sw * 0.5)},${f(H - padB)}" fill="url(#shaft)"/>`);
   }
 
-  // shelf guides + grade labels (left)
   for (let c = 0; c < 13; c++) {
     const y = shelfCenterY(c);
     el.push(`<line x1="${padL - 46}" y1="${f(y)}" x2="${f(W - padR)}" y2="${f(y)}" stroke="#151c22" stroke-width="1"/>`);
     el.push(`<text x="${padL - 56}" y="${f(y + 4)}" text-anchor="end" font-family="ui-monospace, monospace" font-size="12.5" fill="#3f5560" letter-spacing="0.08em">${COL_LABELS[c]}</text>`);
   }
-  // strand zone labels (top)
   for (const s of STRAND_ORDER) {
     el.push(`<text x="${f(zoneCenterX(s))}" y="${padT - 34}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="13" fill="${mixHex(STRAND[s], BG, 0.15)}" letter-spacing="0.08em">${s.toUpperCase()}</text>`);
   }
 
-  // deterministic rising bubbles (life)
+  // deterministic rising bubbles — pure texture, hash-placed (allowed)
   for (let i = 0; i < 150; i++) {
     const bx = padL + hash("bx" + i) * usableW;
     const by = padT + hash("by" + i) * usableH;
@@ -415,48 +537,38 @@ function reef() {
     el.push(`<circle cx="${f(bx)}" cy="${f(by)}" r="${f(br)}" fill="#bfe8e0" fill-opacity="0.15"/>`);
   }
 
-  // prereq as slender upward current wisps (curved, faint, only lightly
-  // reach-scaled — the reef is about accretion, not flow)
+  // prereq as slender upward current wisps — derived endpoints, derived bow
   for (const e of prereq) {
-    const A = pos.get(e.s), B = pos.get(e.t);
+    const A = pos.get(e.s) || pos.get(unitOf(e.s)), B = pos.get(e.t) || pos.get(unitOf(e.t));
     if (!A || !B) continue;
     const w = 0.5 + Math.sqrt(reach(e.t) / MAXREACH) * 1.3;
     const midY = (A[1] + B[1]) / 2;
-    const bow = (hash("rb" + e.s + e.t) - 0.5) * 40;
+    const bow = (A[1] < B[1] ? 1 : -1) * Math.min(26, Math.abs(B[0] - A[0]) * 0.18 + 6);
     const d = `M${f(A[0])},${f(A[1])} Q${f((A[0] + B[0]) / 2 + bow)},${f(midY)} ${f(B[0])},${f(B[1])}`;
-    el.push(`<path d="${d}" fill="none" stroke="${mixHex(STRAND[byId.get(e.t).strand], "#8fd0c8", 0.4)}" stroke-width="${f(w)}" stroke-opacity="0.2" stroke-linecap="round"/>`);
+    el.push(`<path d="${d}" fill="none" stroke="${mixHex(STRAND[byId.get(e.t).strand], "#8fd0c8", 0.4)}" stroke-width="${f(w)}" stroke-opacity="0.18" stroke-linecap="round"/>`);
   }
-  // related: short dotted lateral ties
   for (const e of related) {
-    const A = pos.get(e.s), B = pos.get(e.t);
+    const A = pos.get(e.s) || pos.get(unitOf(e.s)), B = pos.get(e.t) || pos.get(unitOf(e.t));
     if (!A || !B) continue;
     el.push(`<line x1="${f(A[0])}" y1="${f(A[1])}" x2="${f(B[0])}" y2="${f(B[1])}" stroke="${INK}" stroke-width="0.8" stroke-opacity="0.2" stroke-dasharray="1.5 4"/>`);
   }
 
-  // seabed line (slightly wavy), calcified stone
   {
     const y0 = H - padB - shelfH * 0.02;
     let d = `M${padL - 46},${f(y0)}`;
-    for (let x = padL - 46; x <= W - padR; x += 40) {
-      d += ` L${f(x)},${f(y0 + Math.sin(x * 0.03) * 3)}`;
-    }
+    for (let x = padL - 46; x <= W - padR; x += 40) d += ` L${f(x)},${f(y0 + Math.sin(x * 0.03) * 3)}`;
     el.push(`<path d="${d}" fill="none" stroke="${mixHex(BONE, BG, 0.35)}" stroke-width="2.2" stroke-opacity="0.55"/>`);
   }
 
-  // nodes: coral heads. Parents drawn first (larger), children bud on top —
-  // one colony. Non-family nodes are polyps of the reef.
-  const drawNode = (n, r, colOverride) => {
+  const drawNode = (n, r) => {
     const p = pos.get(n.id);
-    const col = colOverride ?? reefColor(n);
-    el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r)}" fill="${col}" fill-opacity="0.95"/>`);
+    el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r)}" fill="${reefColor(n)}" fill-opacity="0.95"/>`);
     if (n.wap) el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r + 2)}" fill="none" stroke="#ffd27a" stroke-width="1" stroke-opacity="0.7"/>`);
   };
-  // colonies first (parent head then buds)
   for (const p of families) {
     drawNode(p, headR(p));
     for (const cid of p.children) drawNode(byId.get(cid), 2.4 + Math.sqrt(byId.get(cid).deg) * 0.8);
   }
-  // remaining polyps
   for (const n of g.nodes) {
     if (isChild(n.id) || (n.children && n.children.length)) continue;
     drawNode(n, 2.4 + Math.sqrt(n.deg) * 1.0);
@@ -464,60 +576,34 @@ function reef() {
 
   el.push(`<text x="28" y="52" font-family="ui-monospace, monospace" font-size="20" fill="#e8e6f6" letter-spacing="0.06em">THE REEF · prerequisite knowledge as accretion</text>`);
   return svg(W, H, el,
-    "Grows upward by accretion: K on the seabed → high school at the sunlit surface (13 shelves) · 4 strand zones across (soft overlap) · K–2 renders calcified toward bone, grades 3–8 full color, HS brightened by the light shafts · families are CORAL HEADS — children bud directly on the parent as one colony · wisps = prerequisite currents (lightly reach-scaled) · dotted = related pair · gold ring = widely applicable prerequisite · 480 standards, real data, deterministic");
+    "STRUCTURE from accretion: in topological order, each standard's x is the flow-weighted centroid of its prerequisites' x (roots anchor at their strand zone), so a dependency cluster physically converges into a colony · y = grade shelf (K seabed → HS sunlit surface), within-shelf offset from build depth · a deterministic collision relax spreads overlapping heads while preserving order · K–2 calcified toward bone, HS brightened · families are CORAL HEADS, children budding on the parent as one colony · wisps = prerequisite currents · gold ring = widely applicable prerequisite · 480 standards, deterministic");
 }
+const strandRankOf = (s) => STRAND_ORDER.indexOf(s);
 
 // ===========================================================================
-// 3 · THE TRANSIT MAP — a real city metro, not a lane diagram. A downtown LOOP
-// (CTA-style elevated ring) holds the dense cross-strand core (grades ~3–7, the
-// fraction·ratio·expression spine, where 86 of the map's 159 cross-strand
-// transfers live). The four strand lines RADIATE in from four compass origins as
-// K, converge and weave through the Loop, then peel off EAST and BRANCH into
-// their high-school course termini (A1/G/A2/ADV) along the water — the same sea
-// the Watershed empties into (one world, two maps). Rules distilled from the
-// CTA (a true downtown Loop with radial branches), the Tube & Vignelli NYC
-// (octolinear 0/45/90°, long straights, trunk-sharing that splits near the
-// periphery), and BART (radial spokes meeting through a single core). Number is
-// the hub strand (heaviest transfers to everyone); Algebra shadows it on the
-// ring as a shared trunk so their 86 transfers become co-located interchanges
-// rather than drawn connectors — which is exactly what real maps do. Within-
-// strand sequence is carried by the line itself (grade→depth→code sort), not the
-// literal prerequisite chain — the honest stylization noted in the caption.
+// 3 · THE TRANSIT MAP — a real metro network whose ROUTES ARE DERIVED. Per
+// strand, the MAIN LINE is the maximum-reach path through the strand's prereq
+// subgraph (DP longest weighted path, weight = descendant reach); every other
+// standard attaches as a BRANCH at its nearest main-line ancestor (a downstream
+// BFS from the trunk), and standards with no trunk path hang as short spurs at
+// their grade column. Heavy cross-strand transfers (a station touched by ≥ FLOOR
+// cross-strand prerequisites) become TRUE multi-line interchanges: the guest
+// line is routed THROUGH the station, so it earns a real multi-colour capsule
+// (one dot per line). Families are a single elongated lozenge — one marker, one
+// label — never a stack of same-line dots (they are not interchanges). Grade is
+// the column (topological left→right); y is solved by barycenter crossing-min;
+// segments snap octolinear; trunk width tracks the reach flowing through it.
 // ===========================================================================
 function transit() {
   const W = 1960, H = 1120;
-  const seaX = 1756;
+  const padL = 150, padR = 300, padT = 122, padB = 66;
+  const usableW = W - padL - padR;
+  const usableH = H - padT - padB;
+  const midH = padT + usableH / 2;
+  const colX = (c) => padL + (usableW) * (c / 12);
+  const seaX = colX(12) + 96;
+  const FLOOR = 3; // ≥3 cross-strand prereqs ⇒ a true multi-line interchange (42)
 
-  // ---- downtown Loop rectangle + the eastern sea (geographic anchor) --------
-  const LOOP = { x0: 560, y0: 384, x1: 1000, y1: 804 };
-  const cxM = (LOOP.x0 + LOOP.x1) / 2, cyM = (LOOP.y0 + LOOP.y1) / 2;
-  const corner = [[LOOP.x0, LOOP.y0], [LOOP.x1, LOOP.y0], [LOOP.x1, LOOP.y1], [LOOP.x0, LOOP.y1]];
-  // perimeter param t∈[0,4): 0–1 top L→R · 1–2 right T→B · 2–3 bottom R→L · 3–4 left B→T
-  const perim = (t) => {
-    t = ((t % 4) + 4) % 4;
-    const s = Math.floor(t), fr = t - s;
-    const a = corner[s], b = corner[(s + 1) % 4];
-    return [a[0] + (b[0] - a[0]) * fr, a[1] + (b[1] - a[1]) * fr];
-  };
-  const perimNormal = (t) => [[0, -1], [1, 0], [0, 1], [-1, 0]][Math.floor((((t % 4) + 4) % 4))];
-  const perimPt = (t, off) => { const p = perim(t), n = perimNormal(t); return [p[0] + n[0] * off, p[1] + n[1] * off]; };
-  // ordered edge-following points from t0 to t1 in direction dir (+1/−1),
-  // bundled outward by off px so co-running lines nest visibly (NYC trunk).
-  const perimWalk = (t0, t1, dir, off) => {
-    const total = dir > 0 ? (((t1 - t0) % 4) + 4) % 4 : (((t0 - t1) % 4) + 4) % 4;
-    const raw = [t0];
-    let t = t0, acc = 0, guard = 0;
-    while (guard++ < 12) {
-      const c = dir > 0 ? Math.floor(t + 1e-6) + 1 : Math.ceil(t - 1e-6) - 1;
-      const dt = dir > 0 ? c - t : t - c;
-      if (dt >= total - acc - 1e-6) break;
-      raw.push(c); acc += dt; t = c;
-    }
-    raw.push(t1);
-    return raw.map((tt) => perimPt(tt, off));
-  };
-
-  // octolinear elbow a→b: straight run then a 45° final segment into b.
   const elbow = (a, b) => {
     const dx = b[0] - a[0], dy = b[1] - a[1], adx = Math.abs(dx), ady = Math.abs(dy);
     if (adx < 1 || ady < 1) return [a, b];
@@ -525,215 +611,327 @@ function transit() {
     return adx > ady ? [a, [b[0] - sx * ady, a[1]], b] : [a, [a[0], b[1] - sy * adx], b];
   };
   const toPath = (pts) => "M" + pts.map((p) => `${f(p[0])},${f(p[1])}`).join(" L");
-  const plen = (pts) => { const seg = [0]; let L = 0; for (let i = 1; i < pts.length; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(L); } return { L, seg }; };
-  const at = (pts, seg, L, fr) => {
-    const d = clamp(fr, 0, 1) * L;
-    let i = 1; while (i < seg.length - 1 && seg[i] < d) i++;
-    const p0 = pts[i - 1], p1 = pts[i], sl = (seg[i] - seg[i - 1]) || 1, u = (d - seg[i - 1]) / sl;
-    const tx = (p1[0] - p0[0]) / sl, ty = (p1[1] - p0[1]) / sl;
-    return [p0[0] + (p1[0] - p0[0]) * u, p0[1] + (p1[1] - p0[1]) * u, tx, ty];
-  };
-
-  const BUNDLE = 11;
-  // per-strand routing, CTA-style: the four Loop sides are each OWNED by a
-  // line's downtown stretch (like Wells/Lake/Wabash/Van Buren), handing off at
-  // corner interchanges. Number (the hub, most downtown stations) runs the WEST
-  // then NORTH sides; Algebra shadows it on NORTH then turns down the EAST;
-  // Geometry runs the SOUTH; Data is the cross-town diagonal (a subway cutting
-  // through the core). entryT/exitT are Loop perimeter params; dir the way
-  // around; lane the bundle offset; junc the branch split east of the Loop;
-  // tx/ty0/ty1 the eastern terminus fan (toward the water).
-  const CFG = {
-    number:  { origin: [70, 706], entryT: 3.0, exitT: 1.0, dir: +1, lane: 0, junc: [1150, 300], tx: 1470, ty0: 200, ty1: 380 },
-    algebra: { origin: [150, 150], entryT: 0.06, exitT: 1.5, dir: +1, lane: 1, junc: [1150, 470], tx: 1500, ty0: 400, ty1: 560 },
-    geometry:{ origin: [150, H - 150], entryT: 3.0, exitT: 2.0, dir: -1, lane: 0, junc: [1150, 840], tx: 1500, ty0: 804, ty1: 904 },
-    data:    { diagonal: true, origin: [700, 86], enter: [700, LOOP.y0], exit: [LOOP.x1, LOOP.y0 + (LOOP.x1 - 700)], junc: [1185, 700], tx: 1545, ty0: 628, ty1: 788 },
-  };
-  const HORDER = ["A1", "G", "A2", "ADV"];
-  const HNAME = { A1: "ALGEBRA I", G: "GEOMETRY", A2: "ALGEBRA II", ADV: "ADVANCED" };
-
-  const el = [];
-  const stationPos = new Map(); // node id → [x, y]
-  const mainStrokes = [];       // { strand, d }
-  const branchStrokes = [];     // { strand, d, term, course }
-  const complexes = [];         // { strand, pts, cx, cy }
-
-  const bySort = (a, b) => a.col - b.col || a.key.depth - b.key.depth || (a.key.code < b.key.code ? -1 : 1);
-  // lay a phase's units along a polyline; families fan perpendicular into a pill
-  const distribute = (path, units, m0, m1) => {
-    if (!units.length) return;
-    const { L, seg } = plen(path);
-    const n = units.length;
-    units.forEach((u, i) => {
-      const fr = n === 1 ? m0 + (1 - m0 - m1) * 0.5 : m0 + ((i + 0.5) / n) * (1 - m0 - m1);
-      const [x, y, tx, ty] = at(path, seg, L, fr);
-      const px = -ty, py = tx; // perpendicular
-      const m = u.members, gap = m.length > 1 ? 8.5 : 0;
-      const mp = m.map((mn, j) => {
-        const o = (j - (m.length - 1) / 2) * gap;
-        const pt = [x + px * o, y + py * o];
-        stationPos.set(mn.id, pt);
-        return pt;
-      });
-      if (m.length > 1) complexes.push({ strand: u.strand, pts: mp, cx: x, cy: y });
-    });
-  };
-
-  for (const strand of STRAND_ORDER) {
-    const c = CFG[strand];
-    const mine = g.nodes.filter((n) => n.strand === strand && !isChild(n.id));
-    const units = mine.map((n) => ({
-      strand, key: n, col: colOf(n),
-      members: n.children && n.children.length ? [n, ...n.children.map((k) => byId.get(k))] : [n],
-    }));
-    const approach = [], loop = [], branch = {};
-    for (const u of units) {
-      if (u.col <= 3) approach.push(u);
-      else if (u.col <= 8) loop.push(u);
-      else (branch[u.key.courses[0]] = branch[u.key.courses[0]] || []).push(u);
+  const octoChain = (stations) => { // octolinear polyline through station points
+    const out = [];
+    for (let i = 0; i < stations.length - 1; i++) {
+      const e = elbow(stations[i], stations[i + 1]);
+      for (let k = i === 0 ? 0 : 1; k < e.length; k++) out.push(e[k]);
     }
-    approach.sort(bySort); loop.sort(bySort);
+    return out.length ? out : stations;
+  };
 
-    // build the three-phase spine
-    let approachPath, loopPath, egressPath;
-    if (c.diagonal) {
-      approachPath = [c.origin, c.enter];
-      loopPath = [c.enter, c.exit];
-      egressPath = elbow(c.exit, c.junc);
-    } else {
-      approachPath = elbow(c.origin, perimPt(c.entryT, c.lane * BUNDLE));
-      loopPath = perimWalk(c.entryT, c.exitT, c.dir, c.lane * BUNDLE);
-      egressPath = elbow(perimPt(c.exitT, c.lane * BUNDLE), c.junc);
+  // ---- MAIN LINE per strand: DP longest weighted path (weight = reach) -------
+  const mainSeqOf = new Map();
+  const isMain = new Set();
+  for (const s of STRAND_ORDER) {
+    const sset = new Set(unitIds.filter((id) => byId.get(id).strand === s));
+    const best = new Map(), pred = new Map();
+    for (const u of UTOPO) {
+      if (!sset.has(u)) continue;
+      let b = ureach(u), p = null;
+      for (const pr of uPred.get(u)) {
+        if (!sset.has(pr)) continue;
+        const cand = best.get(pr) || 0;
+        if (cand + ureach(u) > b) { b = cand + ureach(u); p = pr; }
+      }
+      best.set(u, b); pred.set(u, p);
     }
-    distribute(approachPath, approach, 0.05, 0.05);
-    distribute(loopPath, loop, 0.015, 0.015);
-
-    const main = approachPath.concat(loopPath.slice(1), egressPath.slice(1));
-    mainStrokes.push({ strand, d: toPath(main) });
-
-    const present = HORDER.filter((cr) => branch[cr] && branch[cr].length);
-    present.forEach((cr, i) => {
-      const ty = present.length === 1 ? (c.ty0 + c.ty1) / 2 : c.ty0 + (c.ty1 - c.ty0) * (i / (present.length - 1));
-      const long = branch[cr].length > 15; // dense yards reach further east
-      const term = [c.tx + (long ? 150 : 0), ty];
-      const bpath = elbow(c.junc, term);
-      distribute(bpath, branch[cr].sort(bySort), 0.07, 0.10);
-      branchStrokes.push({ strand, d: toPath(bpath), term, course: cr });
-    });
+    let end = null, bv = -1;
+    for (const u of sset) { const b = best.get(u) || 0; if (b > bv || (b === bv && byId.get(u).code < byId.get(end).code)) { bv = b; end = u; } }
+    const seq = []; let c = end; while (c) { seq.push(c); c = pred.get(c); } seq.reverse();
+    mainSeqOf.set(s, seq);
+    for (const m of seq) isMain.add(m);
   }
 
-  // ---- draw order: back → front --------------------------------------------
-  // the sea beyond the eastern shoreline (the delta the Watershed empties into)
+  // ---- BRANCHES: chain each standard onto its primary within-strand
+  // prerequisite (its highest-reach ancestor edge), so genuine branch lines grow
+  // upstream and root on the trunk — walking any standard's chain up eventually
+  // reaches the main line. A standard with NO within-strand prerequisite is a
+  // SPUR, joined to the grade-nearest station already on the line.
+  const parentOf = new Map(); // non-trunk unit → its parent station (one hop upstream)
+  for (const s of STRAND_ORDER) {
+    const sset = new Set(unitIds.filter((id) => byId.get(id).strand === s));
+    const seq = mainSeqOf.get(s);
+    const onTrunk = new Set(seq);
+    const spurs = [];
+    for (const u of sset) {
+      if (onTrunk.has(u)) continue;
+      let best = null, bestR = -1;
+      for (const p of uPred.get(u)) {
+        if (!sset.has(p)) continue;
+        const r = ureach(p);
+        if (r > bestR || (r === bestR && byId.get(p).code < byId.get(best).code)) { bestR = r; best = p; }
+      }
+      if (best) parentOf.set(u, best);
+      else spurs.push(u);
+    }
+    const connected = [...sset].filter((id) => onTrunk.has(id) || parentOf.has(id));
+    for (const u of spurs) {
+      const uc = ucol(u);
+      let bestM = seq[0], bd = 1e9;
+      for (const m of connected) { const d = Math.abs(ucol(m) - uc) * 10 + (ucol(m) <= uc ? 0 : 5); if (d < bd) { bd = d; bestM = m; } }
+      parentOf.set(u, bestM);
+    }
+  }
+
+  // ---- TRANSFERS → interchanges --------------------------------------------
+  const tw = new Map(); // unit → cross-strand prereq degree (in + out)
+  const guestOf = new Map(unitIds.map((id) => [id, new Set()])); // station → guest strands
+  for (const e of prereq) {
+    if (!crossStrand(e)) continue;
+    const u = unitOf(e.s), v = unitOf(e.t);
+    tw.set(u, (tw.get(u) || 0) + 1); tw.set(v, (tw.get(v) || 0) + 1);
+    guestOf.get(v).add(byId.get(u).strand);
+    guestOf.get(u).add(byId.get(v).strand);
+  }
+  // true multi-line stations route each guest line THROUGH them
+  const linesAt = new Map(unitIds.map((id) => [id, new Set([byId.get(id).strand])]));
+  const guestStops = new Map(STRAND_ORDER.map((s) => [s, []])); // strand → foreign stations routed onto it
+  const multiStations = new Set();
+  for (const u of unitIds) {
+    if ((tw.get(u) || 0) < FLOOR) continue;
+    multiStations.add(u);
+    const own = byId.get(u).strand;
+    for (const gs of guestOf.get(u)) {
+      if (gs === own) continue;
+      linesAt.get(u).add(gs);
+      guestStops.get(gs).push(u);
+    }
+  }
+
+  // ---- route graph (for barycenter): trunk pairs, branch edges, through-stops
+  const radj = new Map(unitIds.map((id) => [id, new Set()]));
+  const addEdge = (a, b) => { if (a === b) return; radj.get(a).add(b); radj.get(b).add(a); };
+  for (const s of STRAND_ORDER) { const seq = mainSeqOf.get(s); for (let i = 1; i < seq.length; i++) addEdge(seq[i - 1], seq[i]); }
+  for (const [u, p] of parentOf) addEdge(u, p);
+  for (const s of STRAND_ORDER) {
+    const seq = mainSeqOf.get(s);
+    for (const v of guestStops.get(s)) {
+      const vc = ucol(v);
+      let lo = null, hi = null;
+      for (const m of seq) { const mc = ucol(m); if (mc <= vc) lo = m; if (mc > vc && hi === null) hi = m; }
+      if (lo) addEdge(v, lo);
+      if (hi) addEdge(v, hi);
+    }
+  }
+
+  // ---- BARYCENTER y (crossing minimisation over the derived route graph) ----
+  const cols = Array.from({ length: 13 }, () => []);
+  for (const n of unitNodes) cols[colOf(n)].push(n.id);
+  for (const arr of cols) arr.sort((a, b) => strandRankOf(byId.get(a).strand) - strandRankOf(byId.get(b).strand) || codeLt(a, b));
+  const centered = new Map();
+  const recenter = () => { for (const arr of cols) arr.forEach((id, i) => centered.set(id, i - (arr.length - 1) / 2)); };
+  recenter();
+  for (let pass = 0; pass < 12; pass++) {
+    const seqCols = pass % 2 ? [...cols.keys()].reverse() : [...cols.keys()];
+    for (const ci of seqCols) {
+      const arr = cols[ci];
+      const key = new Map();
+      for (const id of arr) {
+        const nb = [...radj.get(id)];
+        if (!nb.length) { key.set(id, centered.get(id)); continue; }
+        let sum = 0; for (const m of nb) sum += centered.get(m);
+        key.set(id, sum / nb.length);
+      }
+      arr.sort((a, b) => key.get(a) - key.get(b) || codeLt(a, b));
+      arr.forEach((id, i) => centered.set(id, i - (arr.length - 1) / 2));
+    }
+  }
+  let maxCount = 1; for (const arr of cols) maxCount = Math.max(maxCount, arr.length);
+  const ROWH = Math.min(usableH / Math.max(1, maxCount - 1), 15);
+  // within a grade column, spread stations horizontally by build depth (still
+  // topological left→right) so a dense terminal course reads as a district band
+  // instead of a razor-thin wall, and same-column branch ladders gain a natural
+  // diagonal. Band width grows with the column's load.
+  const colGap = colX(1) - colX(0);
+  const stationPos = new Map();
+  for (const n of unitNodes) {
+    const c = colOf(n);
+    const bandHalf = clamp((cols[c].length / maxCount) * 0.4 * colGap, 5, 0.4 * colGap);
+    stationPos.set(n.id, [colX(c) + (depthT(n) - 0.5) * 2 * bandHalf, midH + centered.get(n.id) * ROWH]);
+  }
+
+  // ---- LOAD widths: reach flowing through each trunk / branch segment --------
+  const carried = new Map();          // non-main unit → subtree reach it carries
+  const trunkLoadAt = new Map();      // main unit → reach entering the trunk here
+  for (const id of unitIds) if (!isMain.has(id)) carried.set(id, ureach(id));
+  for (let i = UTOPO.length - 1; i >= 0; i--) {
+    const u = UTOPO[i];
+    if (isMain.has(u)) continue;
+    const p = parentOf.get(u);
+    if (p == null) continue;
+    if (isMain.has(p)) trunkLoadAt.set(p, (trunkLoadAt.get(p) || 0) + carried.get(u));
+    else carried.set(p, (carried.get(p) || 0) + carried.get(u));
+  }
+  const loadRightOf = new Map(); // strand → array aligned with mainSeq
+  let maxLoad = 1;
+  for (const s of STRAND_ORDER) {
+    const seq = mainSeqOf.get(s);
+    const lr = new Array(seq.length).fill(0);
+    for (let i = seq.length - 1; i >= 0; i--) {
+      const own = ureach(seq[i]) + (trunkLoadAt.get(seq[i]) || 0);
+      lr[i] = own + (i + 1 < seq.length ? lr[i + 1] : 0);
+    }
+    loadRightOf.set(s, lr);
+    if (lr.length) maxLoad = Math.max(maxLoad, lr[0]);
+  }
+  const trunkW = (load) => 2.2 + Math.sqrt(load / maxLoad) * 6.6;
+  const branchW = (load) => 1.3 + Math.sqrt(load / maxLoad) * 3.0;
+
+  // ===========================================================================
+  const el = [];
   el.push(`<defs>
 <linearGradient id="tsea" x1="0" y1="0" x2="1" y2="0">
 <stop offset="0%" stop-color="#16324a" stop-opacity="0"/>
 <stop offset="55%" stop-color="#16324a" stop-opacity="0.5"/>
 <stop offset="100%" stop-color="#1d4a63" stop-opacity="0.85"/>
 </linearGradient>
-<radialGradient id="tdown" cx="50%" cy="50%" r="62%">
-<stop offset="0%" stop-color="#1a1838" stop-opacity="0.9"/>
-<stop offset="100%" stop-color="#12102a" stop-opacity="0"/>
-</radialGradient></defs>`);
+<linearGradient id="tdown" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#1a1838" stop-opacity="0"/>
+<stop offset="50%" stop-color="#201d44" stop-opacity="0.72"/>
+<stop offset="100%" stop-color="#1a1838" stop-opacity="0"/>
+</linearGradient></defs>`);
+  // the sea, east of the high-school columns (the delta the Watershed empties to)
   el.push(`<rect x="${f(seaX)}" y="0" width="${f(W - seaX)}" height="${H}" fill="url(#tsea)"/>`);
   el.push(`<line x1="${f(seaX)}" y1="0" x2="${f(seaX)}" y2="${H}" stroke="#2a5a72" stroke-width="1" stroke-opacity="0.5"/>`);
-  el.push(`<text x="${f(seaX + 16)}" y="60" font-family="ui-monospace, monospace" font-size="12.5" fill="#4a7a90" letter-spacing="0.14em">SEA</text>`);
+  el.push(`<text x="${f(seaX + 16)}" y="${f(padT - 44)}" font-family="ui-monospace, monospace" font-size="12.5" fill="#4a7a90" letter-spacing="0.14em">SEA</text>`);
 
-  // downtown district: a soft glow + the LOOP track guide (a faint dotted
-  // rectangle, like the CTA's elevated Loop) + labels, so the core reads as a
-  // real downtown ring even where a colored line doesn't cover a full side.
-  el.push(`<rect x="${f(LOOP.x0 - 70)}" y="${f(LOOP.y0 - 70)}" width="${f(LOOP.x1 - LOOP.x0 + 140)}" height="${f(LOOP.y1 - LOOP.y0 + 140)}" fill="url(#tdown)"/>`);
-  el.push(`<rect x="${f(LOOP.x0)}" y="${f(LOOP.y0)}" width="${f(LOOP.x1 - LOOP.x0)}" height="${f(LOOP.y1 - LOOP.y0)}" rx="3" fill="none" stroke="#3c3960" stroke-width="2" stroke-opacity="0.7" stroke-dasharray="2 7"/>`);
-  el.push(`<text x="${f(cxM)}" y="${f(cyM - 4)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="15" fill="#3a3760" letter-spacing="0.46em">THE LOOP</text>`);
-  el.push(`<text x="${f(cxM)}" y="${f(cyM + 18)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" fill="#302d4c" letter-spacing="0.2em">DOWNTOWN · GRADES 3 – 7 · THE FRACTION–RATIO CORE</text>`);
+  // DOWNTOWN — the dense grade 3–7 core where the cross-strand transfers cluster
+  const dx0 = colX(3) - (colX(1) - colX(0)) * 0.45, dx1 = colX(7) + (colX(1) - colX(0)) * 0.45;
+  el.push(`<rect x="${f(dx0)}" y="${f(padT - 8)}" width="${f(dx1 - dx0)}" height="${f(usableH + 16)}" fill="url(#tdown)"/>`);
+  el.push(`<text x="${f((dx0 + dx1) / 2)}" y="${f(padT - 44)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12.5" fill="#4a4674" letter-spacing="0.4em">DOWNTOWN</text>`);
+  el.push(`<text x="${f((dx0 + dx1) / 2)}" y="${f(H - padB + 34)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" fill="#37345a" letter-spacing="0.22em">THE FRACTION · RATIO CORE — WHERE THE LINES INTERCHANGE</text>`);
 
-  // transfers: cross-strand prereq edges as faint connector arcs — drawn ONLY
-  // where the two stations are not already co-located (a shared interchange).
+  // grade column labels (top)
+  for (let c = 0; c < 13; c++) {
+    el.push(`<line x1="${f(colX(c))}" y1="${f(padT - 30)}" x2="${f(colX(c))}" y2="${f(H - padB + 12)}" stroke="#151330" stroke-width="1"/>`);
+    el.push(`<text x="${f(colX(c))}" y="${f(padT - 40)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="#4a4770" letter-spacing="0.08em">${COL_LABELS[c]}</text>`);
+  }
+
+  // light connectors: cross-strand transfers below the interchange floor —
+  // a thin arc between the two stations, so lighter transfers still read.
   for (const e of prereq) {
     if (!crossStrand(e)) continue;
-    const A = stationPos.get(e.s), B = stationPos.get(e.t);
+    const u = unitOf(e.s), v = unitOf(e.t);
+    if (multiStations.has(u) || multiStations.has(v)) continue; // carried by a real interchange
+    const A = stationPos.get(u), B = stationPos.get(v);
     if (!A || !B) continue;
-    const dist = Math.hypot(A[0] - B[0], A[1] - B[1]);
-    if (dist < 26) continue;   // already a shared interchange — no connector needed
-    if (dist > 430) continue;  // cross-map hauls read as haze; the shared trunk carries them
-    const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2 + (hash("tf" + e.s + e.t) - 0.5) * 20;
-    el.push(`<path d="M${f(A[0])},${f(A[1])} Q${f(mx)},${f(my)} ${f(B[0])},${f(B[1])}" fill="none" stroke="#6f6aa2" stroke-width="0.9" stroke-opacity="0.16"/>`);
+    const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2 + (hash("tf" + e.s + e.t) - 0.5) * 16;
+    el.push(`<path d="M${f(A[0])},${f(A[1])} Q${f(mx)},${f(my)} ${f(B[0])},${f(B[1])}" fill="none" stroke="#6f6aa2" stroke-width="0.8" stroke-opacity="0.15"/>`);
   }
 
-  // the lines: branches first (thinner tail), then the trunks over them.
-  for (const { strand, d } of branchStrokes) {
-    el.push(`<path d="${d}" fill="none" stroke="${STRAND[strand]}" stroke-width="4.4" stroke-opacity="0.9" stroke-linecap="round" stroke-linejoin="round"/>`);
+  // ---- draw the lines: branches first (thin), then trunks with load taper ----
+  for (const s of STRAND_ORDER) {
+    for (const [u, p] of parentOf) {
+      if (byId.get(u).strand !== s) continue;
+      const A = stationPos.get(p), B = stationPos.get(u);
+      if (!A || !B) continue;
+      el.push(`<path d="${toPath(octoChain([A, B]))}" fill="none" stroke="${STRAND[s]}" stroke-width="${f(branchW(carried.get(u) || 0))}" stroke-opacity="0.82" stroke-linecap="round" stroke-linejoin="round"/>`);
+    }
   }
-  for (const { strand, d } of mainStrokes) {
-    el.push(`<path d="${d}" fill="none" stroke="${STRAND[strand]}" stroke-width="5" stroke-opacity="0.96" stroke-linecap="round" stroke-linejoin="round"/>`);
-  }
-
-  // station complexes: a pill around a family's parent + child platform dots
-  for (const cx of complexes) {
-    const xs = cx.pts.map((p) => p[0]), ys = cx.pts.map((p) => p[1]);
-    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-    const r = 8;
-    el.push(`<rect x="${f(x0 - r)}" y="${f(y0 - r)}" width="${f(x1 - x0 + 2 * r)}" height="${f(y1 - y0 + 2 * r)}" rx="${r}" fill="${BG}" fill-opacity="0.6" stroke="${STRAND[cx.strand]}" stroke-width="1.6" stroke-opacity="0.9"/>`);
-  }
-
-  // stations. Interchange = white disc + dark ring, sized by descendant reach
-  // (the big hubs swell downtown); ordinary station = small white core + ring.
-  for (const strand of STRAND_ORDER) {
-    for (const n of g.nodes) {
-      if (n.strand !== strand) continue;
-      const p = stationPos.get(n.id);
-      if (!p) continue;
-      if (interchange.has(n.id)) {
-        const r = 4.2 + Math.sqrt(reach(n.id) / MAXREACH) * 4.6;
-        el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r)}" fill="#f4f2fb" stroke="#0a0a16" stroke-width="1.8"/>`);
-      } else {
-        el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="3" fill="#f4f2fb" stroke="${STRAND[strand]}" stroke-width="1.6"/>`);
-      }
+  for (const s of STRAND_ORDER) {
+    const seq = mainSeqOf.get(s);
+    const lr = loadRightOf.get(s);
+    // assign each foreign through-stop to the trunk segment its column falls in
+    const insert = Array.from({ length: Math.max(0, seq.length - 1) }, () => []);
+    for (const v of guestStops.get(s)) {
+      const vc = ucol(v);
+      let idx = seq.length - 2;
+      for (let i = 0; i < seq.length - 1; i++) { if (ucol(seq[i]) <= vc && vc <= ucol(seq[i + 1])) { idx = i; break; } if (vc < ucol(seq[i])) { idx = Math.max(0, i - 1); break; } }
+      if (idx >= 0 && idx < insert.length) insert[idx].push(v);
+    }
+    for (let i = 0; i < seq.length - 1; i++) {
+      const via = insert[i].sort((a, b) => ucol(a) - ucol(b) || codeLt(a, b)).map((v) => stationPos.get(v));
+      const stations = [stationPos.get(seq[i]), ...via, stationPos.get(seq[i + 1])];
+      el.push(`<path d="${toPath(octoChain(stations))}" fill="none" stroke="${STRAND[s]}" stroke-width="${f(trunkW(lr[i + 1] || lr[i]))}" stroke-opacity="0.95" stroke-linecap="round" stroke-linejoin="round"/>`);
     }
   }
 
-  // K origin tags (radial entrances) + HS branch termini labels (toward water)
-  for (const strand of STRAND_ORDER) {
-    const c = CFG[strand];
-    const o = c.origin;
-    el.push(`<circle cx="${f(o[0])}" cy="${f(o[1])}" r="5.5" fill="${BG}" stroke="${STRAND[strand]}" stroke-width="2.4"/>`);
-    const anchor = o[0] < 200 ? "start" : "middle";
-    const ox = o[0] < 200 ? o[0] + 12 : o[0];
-    const oy = o[1] < 200 ? o[1] - 12 : (o[1] > H - 200 ? o[1] + 22 : o[1] - 12);
-    el.push(`<text x="${f(ox)}" y="${f(oy)}" text-anchor="${anchor}" font-family="ui-monospace, monospace" font-size="12" fill="${mixHex(STRAND[strand], "#ffffff", 0.15)}" letter-spacing="0.1em">${strand.toUpperCase()} · K</text>`);
+  // ---- stations -------------------------------------------------------------
+  // families: a single elongated lozenge (one marker, one label) — NOT a stack
+  // of same-line dots. It never mimics an interchange.
+  const familyUnits = new Set(families.map((p) => p.id));
+  const drawn = new Set();
+  // ordinary + family stations
+  for (const n of unitNodes) {
+    const p = stationPos.get(n.id);
+    if (!p) continue;
+    if (multiStations.has(n.id)) continue; // drawn as a capsule below
+    if (familyUnits.has(n.id)) {
+      const members = 1 + byId.get(n.id).children.length;
+      const w = 9 + Math.min(4, members) * 3.6, h = 8.4;
+      el.push(`<rect x="${f(p[0] - w)}" y="${f(p[1] - h / 2)}" width="${f(w * 2)}" height="${f(h)}" rx="${f(h / 2)}" fill="${BG}" fill-opacity="0.82" stroke="${STRAND[n.strand]}" stroke-width="1.7" stroke-opacity="0.95"/>`);
+      el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="2.6" fill="${STRAND[n.strand]}"/>`);
+    } else {
+      el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="3" fill="#f4f2fb" stroke="${STRAND[n.strand]}" stroke-width="1.6"/>`);
+    }
+    drawn.add(n.id);
   }
-  for (const { strand, term, course } of branchStrokes) {
-    el.push(`<circle cx="${f(term[0])}" cy="${f(term[1])}" r="4.4" fill="${STRAND[strand]}" stroke="${BG}" stroke-width="1.4"/>`);
-    el.push(`<text x="${f(term[0] + 10)}" y="${f(term[1] + 4)}" font-family="ui-monospace, monospace" font-size="11" fill="${mixHex(STRAND[strand], "#ffffff", 0.25)}" letter-spacing="0.06em">${HNAME[course]}</text>`);
+  // true multi-line interchanges: a capsule enclosing one dot per line colour
+  for (const u of multiStations) {
+    const p = stationPos.get(u);
+    if (!p) continue;
+    const lines = [...linesAt.get(u)].sort((a, b) => strandRankOf(a) - strandRankOf(b));
+    const R = 4.0 + Math.sqrt(reach(u) / MAXREACH) * 4.4;
+    const dotGap = R * 1.15;
+    const total = (lines.length - 1) * dotGap;
+    const capW = R + total / 2 + 5, capH = R + 5;
+    el.push(`<rect x="${f(p[0] - capW)}" y="${f(p[1] - capH)}" width="${f(capW * 2)}" height="${f(capH * 2)}" rx="${f(capH)}" fill="#0a0a16" fill-opacity="0.9" stroke="#d8d4f0" stroke-width="1.5" stroke-opacity="0.9"/>`);
+    lines.forEach((ls, i) => {
+      const ox = -total / 2 + i * dotGap;
+      el.push(`<circle cx="${f(p[0] + ox)}" cy="${f(p[1])}" r="${f(R * 0.62)}" fill="${STRAND[ls]}"/>`);
+    });
+    drawn.add(u);
   }
 
-  // interchange labels: the biggest downtown hubs only (reach ≥ 70), decluttered
-  // greedily so no two land within MINGAP — the metro-map sparseness the eye needs.
-  const MINGAP = 132;
-  const placed = [];
-  const labelable = g.nodes
-    .filter((n) => interchange.has(n.id) && reach(n.id) >= 78 && !isChild(n.id))
-    .map((n) => ({ n, p: stationPos.get(n.id) }))
-    .filter((o) => o.p)
-    .sort((a, b) => reach(b.n.id) - reach(a.n.id));
-  let flip = 0;
-  for (const { n, p } of labelable) {
-    if (placed.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < MINGAP)) continue;
-    placed.push(p);
-    const ly = flip++ % 2 === 0 ? p[1] - 13 : p[1] + 20;
-    el.push(`<text x="${f(p[0])}" y="${f(ly)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" fill="#c4c0e6" letter-spacing="0.02em">${n.code}</text>`);
-  }
-
-  // legend (top-right, clear of the radial origins and the SEA tag) + title
-  let lx = 1120;
+  // ---- K origins (left) + HS course termini (right, toward the water) -------
   for (const s of STRAND_ORDER) {
-    el.push(`<line x1="${f(lx)}" y1="62" x2="${f(lx + 24)}" y2="62" stroke="${STRAND[s]}" stroke-width="5" stroke-linecap="round"/>`);
-    el.push(`<text x="${f(lx + 31)}" y="66" font-family="ui-monospace, monospace" font-size="12" fill="${INK}" letter-spacing="0.05em">${s.toUpperCase()}</text>`);
+    const seq = mainSeqOf.get(s);
+    const start = seq[0];
+    const p = stationPos.get(start);
+    el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="5.5" fill="${BG}" stroke="${STRAND[s]}" stroke-width="2.6"/>`);
+    el.push(`<text x="${f(p[0] - 12)}" y="${f(p[1] + 4)}" text-anchor="end" font-family="ui-monospace, monospace" font-size="12" fill="${mixHex(STRAND[s], "#ffffff", 0.15)}" letter-spacing="0.08em">${s.toUpperCase()}</text>`);
+  }
+  // terminus = each strand's rightmost (deepest column) station; label by course
+  const HNAME = { A1: "ALGEBRA I", G: "GEOMETRY", A2: "ALGEBRA II", ADV: "ADVANCED" };
+  for (const s of STRAND_ORDER) {
+    let term = null, tc = -1;
+    for (const id of unitIds) if (byId.get(id).strand === s && ucol(id) > tc) { tc = ucol(id); term = id; }
+    if (!term) continue;
+    const p = stationPos.get(term);
+    const course = byId.get(term).grade === "HS" ? byId.get(term).courses[0] : COL_LABELS[tc];
+    const label = HNAME[course] || ("GRADE " + course);
+    el.push(`<text x="${f(p[0] + 14)}" y="${f(p[1] + 4)}" font-family="ui-monospace, monospace" font-size="11" fill="${mixHex(STRAND[s], "#ffffff", 0.25)}" letter-spacing="0.05em">${s.toUpperCase()} → ${label}</text>`);
+  }
+
+  // ---- interchange labels: biggest hubs only, greedy declutter --------------
+  const MINGAP = 150;
+  const placed = [];
+  const labelable = [...multiStations]
+    .map((id) => ({ id, p: stationPos.get(id), r: reach(id) }))
+    .filter((o) => o.p)
+    .sort((a, b) => b.r - a.r || codeLt(a.id, b.id));
+  let flip = 0, labels = 0;
+  for (const { id, p } of labelable) {
+    if (labels >= 20) break;
+    if (placed.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < MINGAP)) continue;
+    placed.push(p); labels++;
+    const ly = flip++ % 2 === 0 ? p[1] - 16 : p[1] + 24;
+    el.push(`<rect x="${f(p[0] - byId.get(id).code.length * 3.4 - 3)}" y="${f(ly - 9)}" width="${f(byId.get(id).code.length * 6.8 + 6)}" height="13" rx="3" fill="#0a0a16" fill-opacity="0.72"/>`);
+    el.push(`<text x="${f(p[0])}" y="${f(ly)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" fill="#d4d0f0" letter-spacing="0.02em">${byId.get(id).code}</text>`);
+  }
+
+  // legend (top-right) + title
+  let lx = 1140;
+  for (const s of STRAND_ORDER) {
+    el.push(`<line x1="${f(lx)}" y1="60" x2="${f(lx + 24)}" y2="60" stroke="${STRAND[s]}" stroke-width="5" stroke-linecap="round"/>`);
+    el.push(`<text x="${f(lx + 31)}" y="64" font-family="ui-monospace, monospace" font-size="12" fill="${INK}" letter-spacing="0.05em">${s.toUpperCase()}</text>`);
     lx += 96 + s.length * 8;
   }
   el.push(`<text x="28" y="52" font-family="ui-monospace, monospace" font-size="20" fill="#e8e6f6" letter-spacing="0.06em">THE TRANSIT MAP · prerequisite knowledge as a metro network</text>`);
 
   return svg(W, H, el,
-    "A real city, not four lanes: the four strand lines RADIATE from their own K origin (Number from the west, Algebra the northwest, Geometry the southwest, Data the north), CONVERGE and weave through a downtown LOOP (the dense grade 3–7 fraction·ratio·expression core, where most cross-strand transfers live), then peel EAST and BRANCH into their high-school course termini by the water · Number is the hub trunk, Algebra shadows it on the ring so their 86 shared transfers become co-located interchanges, not drawn lines · Data cuts through the core as the cross-town diagonal · octolinear 0/45/90° · white discs = cross-strand interchanges, sized by descendant reach · pills = family station complexes · the LINE carries within-strand order (grade→depth→code, a stylization, not the literal chain) · 480 standards, real data, deterministic");
+    "STRUCTURE from the transfer graph: each line's MAIN LINE is the maximum-reach path through its prereq subgraph (DP longest weighted path); every other standard attaches as a derived BRANCH at its nearest main-line ancestor, trunkless standards hang as spurs at their grade column · heavy cross-strand transfers (≥3 cross-strand prerequisites) are TRUE multi-line interchanges the guest line routes THROUGH — one dot per line in the capsule · families are a single elongated lozenge (one marker, one label — never a false interchange) · grade = column (topological L→R), y solved by barycenter crossing-minimisation, segments octolinear, trunk width = reach flowing through · downtown = the dense grade 3–7 core · 480 standards, deterministic");
 }
 
 // ===========================================================================
