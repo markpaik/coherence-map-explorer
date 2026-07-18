@@ -114,6 +114,37 @@ body {
   text-wrap: balance;
   text-shadow: 0 0 40px rgb(139 92 246 / 0.25); /* faint violet halo lifts it off the sky */
 }
+/* "(is art)" — hand-DRAWN, not typeset: an authored SVG stroke drawing
+   (turbulence-roughened wet stroke + a broken dry second pass), tilted, and
+   deliberately taller than the line box so the parens spill above and below
+   the wordmark's x-height — scrawled onto the poster, not set beside it. */
+.headline-art {
+  display: inline-block;
+  width: 1.55em;
+  height: 0.62em; /* the box the line layout sees; the drawing overflows it */
+  position: relative;
+  vertical-align: baseline;
+  color: var(--ink);
+  opacity: 0.82;
+}
+.headline-art svg {
+  position: absolute;
+  left: 0;
+  bottom: -0.34em; /* descend past the baseline */
+  width: 100%;
+  height: 1.18em; /* and rise past the cap height — the spill */
+  overflow: visible;
+  transform: rotate(-4deg);
+}
+body.art-ringers .headline-art {
+  color: #1a1712;
+  opacity: 0.78;
+}
+body.art-fidenza .headline-art {
+  color: #e8e0cd;
+  opacity: 0.9;
+}
+
 /* The former headline, now the tagline riding under "Coherence". */
 .tagline {
   margin: 0 0 10px;
@@ -1049,6 +1080,20 @@ body.art-fidenza .ghost-btn:hover {
   align-items: center;
   gap: 5px 9px;
   flex-wrap: wrap;
+}
+/* Wide viewports keep the rail ONE row tall — the lens toggles joining a
+   second line doubled the rail's height and read as "expanded" (Mark, round
+   8). Below this width the groups wrap as before. */
+@media (min-width: 1180px) {
+  /* .filters-rail prefix outranks the later base rules (same specificity
+     would lose on source order — the intra-group wrap bug). */
+  .filters-rail .filters-groups,
+  .filters-rail .filter-group {
+    flex-wrap: nowrap;
+  }
+  .filters-rail .filter-chip {
+    white-space: nowrap;
+  }
 }
 .filter-group {
   display: flex;

@@ -29,6 +29,7 @@ import type { EdgesHandle } from "./edges";
 import type { EtchesHandle } from "./etches";
 import type { CameraRig } from "./camera";
 import type { Machine } from "../state/machine";
+import { createEvolveField } from "./evolve";
 
 const STAGGER_MS = 35; // per unit of dependency depth (poses 0/1)
 const COLUMN_MS = 35; // per grade-column index, left→right (entering pose 2)
@@ -76,6 +77,13 @@ export interface PoseDriver {
   setPose(target: Pose, opts?: { instant?: boolean }): Promise<void>;
   /** Advance the morph; returns true while morphing (drives render-on-demand). */
   tick(dt: number): boolean;
+  /**
+   * Advance the evolving sky (scene seconds since boot). The Constellation and
+   * the Ascent drift through the day-seeded displacement field (scene/evolve);
+   * the Blueprint holds still. main.ts skips this under reduced motion, which
+   * freezes the field at its boot shape (still time-of-day dependent).
+   */
+  setEvolveTime(t: number): void;
 }
 
 export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
@@ -139,6 +147,35 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     return { box, sphere };
   }
   const homes = [boundsOf(nodePoses[0]), boundsOf(nodePoses[1]), boundsOf(nodePoses[2])];
+
+  // -- the evolving sky ------------------------------------------------------
+  // The generative layer: poses 0/1's TARGET arrays are base + a day-seeded
+  // displacement field, refreshed slowly. Everything downstream (morph lerps,
+  // edge endpoints, pick proxy, beacons) follows automatically because they
+  // all read through nodePoses/curPos. Edge controls ride the mean of their
+  // endpoints' offsets so the bows bend with the field.
+  const basePose0 = new Float32Array(nodePoses[0]);
+  const basePose1 = new Float32Array(nodePoses[1]);
+  const baseCtrl0 = new Float32Array(edgeCtrls[0]);
+  const baseCtrl1 = new Float32Array(edgeCtrls[1]);
+  const off0 = new Float32Array(n * 3);
+  const off1 = new Float32Array(n * 3);
+  const field = createEvolveField(graph);
+  function applyEvolve(t: number): void {
+    field.apply(t, basePose0, nodePoses[0], basePose1, nodePoses[1], off0, off1);
+    for (let j = 0; j < m; j++) {
+      const s = eS[j];
+      const t2 = eT[j];
+      if (s < 0 || t2 < 0) continue;
+      for (let c = 0; c < 3; c++) {
+        const mean0 = (off0[s * 3 + c] + off0[t2 * 3 + c]) * 0.5;
+        const mean1 = (off1[s * 3 + c] + off1[t2 * 3 + c]) * 0.5;
+        edgeCtrls[0][j * 3 + c] = baseCtrl0[j * 3 + c] + mean0;
+        edgeCtrls[1][j * 3 + c] = baseCtrl1[j * 3 + c] + mean1;
+      }
+    }
+  }
+  applyEvolve(0); // boot: today's shape from the first frame
 
   // -- morph state ---------------------------------------------------------
   // A morph eases each node from a captured START position to the TARGET pose's
@@ -242,12 +279,36 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     requestRender();
   }
 
+  // First paint carries the evolved boot shape (curPos was seeded from the
+  // already-evolved nodePoses[0] above; push it through to the buffers).
+  writeAll();
+  nodes.refreshPickBounds();
+
+  let lastEvolveT = 0;
+  let lastPickRefreshT = 0;
+
   return {
     get pose() {
       return poseValue;
     },
     get target() {
       return targetPose;
+    },
+
+    setEvolveTime(t) {
+      if (t - lastEvolveT < 0.5) return; // the field moves at day-scale; 2Hz is plenty
+      lastEvolveT = t;
+      applyEvolve(t);
+      if (morphing) return; // tick() reads the refreshed targets live
+      if (targetPose === 2) return; // the Blueprint holds still (targets stay fresh for the next morph)
+      curPos.set(nodePoses[targetPose]);
+      curCtrl.set(edgeCtrls[targetPose]);
+      writeAll();
+      if (t - lastPickRefreshT > 4) {
+        lastPickRefreshT = t;
+        nodes.refreshPickBounds();
+      }
+      requestRender();
     },
 
     setPose(target, opts) {

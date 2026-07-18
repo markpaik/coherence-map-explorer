@@ -37,7 +37,7 @@ const GRADE_SIZE = 26;
 // ~74 units of center separation. 15 was measurably too wide (labels collided
 // from oblique angles).
 const COURSE_SIZE = 11;
-const DEPTH = 5;
+const DEPTH = 1.8; // extrusion: 3D presence without the slab read (was 5 — "too thick", Mark round 8)
 
 // Course display text (Appendix A traditional pathway).
 const COURSE_TEXT: Record<string, string> = {
@@ -134,8 +134,8 @@ export function createEtches(
       depth: DEPTH,
       curveSegments: 6,
       bevelEnabled: true,
-      bevelThickness: 0.8,
-      bevelSize: 0.5,
+      bevelThickness: 0.45,
+      bevelSize: 0.32,
       bevelSegments: 2,
     });
     geometry.computeBoundingBox();

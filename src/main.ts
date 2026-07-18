@@ -389,6 +389,9 @@ function start(graph: GraphCore): void {
       stars.setTime(sceneTime);
       planets.setTime(sceneTime);
       beacons.setTime(sceneTime);
+      // The evolving sky: poses drift through the day-seeded field. Skipped
+      // under reduced motion, freezing the field at its boot shape.
+      poseDriver.setEvolveTime(sceneTime);
       render = true;
     }
     // The sky belongs to the GALAXY, in every pose: the Ascent and the

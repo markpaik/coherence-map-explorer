@@ -126,7 +126,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     },
     {
       id: "wap",
-      label: "Widely applicable prerequisites",
+      label: "Widely applicable prereqs",
       explain:
         "The standards whose mastery carries furthest into college majors and careers: all of K–8, plus the flagged high-school content.",
     },

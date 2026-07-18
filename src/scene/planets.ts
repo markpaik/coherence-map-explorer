@@ -72,28 +72,47 @@ const FRAG = /* glsl */ `
     // that barely separates from the sky. Sharp terminator, deep night.
     float day = smoothstep(-0.03, 0.22, nl);
 
+    // Fine surface grain shared by every body: high-frequency fbm that (a)
+    // mottles the color and (b) roughens how the surface catches the light,
+    // so the terminator breaks up instead of sweeping over a billiard ball
+    // (Mark, round 8: "they look too smooth").
+    float grain = fbm(vec2(n.x * 16.0 + float(uType) * 7.3, n.y * 16.0 - float(uType) * 3.1));
+    float grainFine = fbm(vec2(n.x * 34.0 - 5.0, n.y * 34.0 + 11.0));
+
     vec3 col;
     if (uType == 0) {
-      // Gas giant: fbm-warped horizontal bands, slowly drifting.
+      // Gas giant: fbm-warped horizontal bands, slowly drifting, with fine
+      // turbulence shredding the band edges and faint storm cells.
       float lat = n.y * 5.2;
       float warp = fbm(vec2(n.x * 2.6 + uTime * 0.008, n.y * 3.1)) * 1.35;
-      float t = lat + warp;
+      float t = lat + warp + (grain - 0.5) * 0.55;
       float band = 0.5 + 0.5 * sin(t * 3.4);
       float accent = smoothstep(0.72, 0.98, 0.5 + 0.5 * sin(t * 1.25 + 1.7));
       col = mix(uColA, uColB, band);
       col = mix(col, uColC, accent * 0.55);
+      float storm = smoothstep(0.74, 0.9, grainFine) * 0.35;
+      col = mix(col, uColC, storm);
     } else if (uType == 1) {
-      // Rocky moon: value-noise mottling + a few darker maria patches.
+      // Rocky moon: mottling + maria + crater pocking (thresholded fine noise
+      // reads as pits with brighter rims).
       float m = fbm(vec2(n.x * 7.0 + 3.0, n.y * 7.0));
       float maria = smoothstep(0.62, 0.78, fbm(vec2(n.x * 2.3, n.y * 2.4 + 9.0)));
       col = mix(uColA, uColB, m * 0.8);
       col = mix(col, uColB * 0.55, maria * 0.6);
+      float pit = smoothstep(0.68, 0.82, grainFine);
+      float rim = smoothstep(0.6, 0.68, grainFine) - pit;
+      col *= 1.0 - 0.4 * pit;
+      col *= 1.0 + 0.22 * rim;
     } else {
-      // Ice dwarf: near-smooth, a faint frost gradient toward the poles.
+      // Ice dwarf: frost gradient + cracked-ice filigree in the fine grain.
       float frost = smoothstep(0.1, 0.9, abs(n.y)) * 0.5;
       float wisp = fbm(vec2(n.x * 3.2, n.y * 4.4)) * 0.25;
       col = mix(uColA, uColB, frost + wisp);
+      float crack = smoothstep(0.62, 0.7, abs(grainFine - 0.5) * 2.0);
+      col = mix(col, uColB, crack * 0.28);
     }
+    // Rough surfaces catch light unevenly: modulate the lit sliver by grain.
+    day *= 0.82 + 0.36 * grain;
 
     col *= (0.055 + 0.945 * day);     // shadowed body, lit sliver
     col *= 1.0 - 0.45 * limb;         // limb darkening on the lit sliver
