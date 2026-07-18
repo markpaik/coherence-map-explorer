@@ -78,12 +78,18 @@ function start(graph: GraphCore): void {
 
   let reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const params = new URLSearchParams(location.search);
-  // The visit seed — every load is one of an infinite number of variations
-  // (Mark, round 9): it varies the evolving sky's phases, the opening camera
-  // angle, and the title aside's draw and ink. Runtime-only randomness; the
-  // data pipeline stays deterministic.
-  const visitSeed = (Math.random() * 0xffffffff) >>> 0;
-  const visitRand = mulberry32(visitSeed);
+  // Structure from mathematics, variation from time, nothing from chance
+  // (Mark, round 9 revision): per-visit randomness is gone. Every generative
+  // layer — the evolving sky, the title aside's pick and print — is a
+  // deterministic function of the date and hour, so the site is a living
+  // artwork whose state is the clock, and every visitor in the same hour
+  // sees the same masterful shape.
+  const bootClock = new Date();
+  const clockSeed =
+    ((bootClock.getFullYear() * 416 + (bootClock.getMonth() + 1) * 32 + bootClock.getDate()) * 24 +
+      bootClock.getHours()) >>>
+    0;
+  const clockRand = mulberry32(clockSeed);
   const debug = params.has("debug");
   const og = params.has("og"); // ?og=1: hide UI chrome for a clean OG screenshot
   if (og) document.body.classList.add("og");
@@ -237,13 +243,10 @@ function start(graph: GraphCore): void {
     machine,
     requestRender,
     reducedMotion: () => reducedMotion,
-    visitSeed,
   });
-  // Per-visit opening angle: a nudge, not a relocation (the heroic 3/4 frame
-  // survives; no two visits open on exactly the same sky).
-  rig.controls.azimuthAngle += (visitRand() - 0.5) * 0.09;
-  // The rotating poetic aside beside the wordmark, printed for this visit.
-  createAside(visitRand);
+  // The rotating poetic aside beside the wordmark: pick and print are
+  // hour-seeded, so the title turns with the day (clicking still deals).
+  createAside(clockRand);
   const viewToggle = createViewToggle({ driver: poseDriver });
   let lastReflectedPose = poseDriver.pose;
 

@@ -47,6 +47,19 @@ becomes literal route-planning.
 - Vascular system (strong inheritance metaphor, wrong tone).
 - Murmuration (coordination, not dependency; no fit).
 
+## The third dimension (Mark, round 9)
+
+Every formation is built 3D under the anamorphic law (flat and legible from
+its canonical angle, dimensional when orbited):
+- WATERSHED: altitude is real — K highlands descend to HS sea level, channels
+  carve the drop, and a large depth jump reads as a waterfall. Canonical view
+  is the painterly top-down map.
+- REEF: true volume — colonies grow as 3D coral bodies, zones wrap in depth,
+  the light shaft is a volumetric cone from the surface.
+- TRANSIT: a futuristic layered city — lines run at different z-levels
+  (elevated, surface, deep), climb between levels in helixes at the great
+  interchanges, and the loop is a three-dimensional knot you can orbit.
+
 ## Shipping strategy (anti-feature-museum)
 The pose toggle stays at three. New formations enter as:
 1. STORY-OWNED STAGES first: a story plays on the watershed before any
