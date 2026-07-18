@@ -185,13 +185,18 @@ function watershed() {
   }
 
   const el = [];
-  // the sea: a soft vertical gradient band beyond the delta shoreline
+  // the sea: a soft vertical gradient band beyond the delta shoreline, and a
+  // painterly rough-edge filter for the whole river layer (ink on wet paper).
   el.push(`<defs>
 <linearGradient id="sea" x1="0" y1="0" x2="1" y2="0">
 <stop offset="0%" stop-color="#16324a" stop-opacity="0"/>
 <stop offset="60%" stop-color="#16324a" stop-opacity="0.5"/>
 <stop offset="100%" stop-color="#1d4a63" stop-opacity="0.85"/>
-</linearGradient></defs>`);
+</linearGradient>
+<filter id="brush" x="-5%" y="-5%" width="110%" height="110%">
+<feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="41" result="n"/>
+<feDisplacementMap in="SourceGraphic" in2="n" scale="2.6"/>
+</filter></defs>`);
   el.push(`<rect x="${f(seaX)}" y="0" width="${f(W - seaX)}" height="${H}" fill="url(#sea)"/>`);
   el.push(`<line x1="${f(seaX)}" y1="0" x2="${f(seaX)}" y2="${H}" stroke="#2a5a72" stroke-width="1" stroke-opacity="0.5"/>`);
 
@@ -239,19 +244,37 @@ function watershed() {
     }
     return "M" + pts.map(([x, y]) => `${f(x)},${f(y)}`).join(" L");
   }
+  // Painterly hierarchy (Mark: rough, textured, with character — not messy).
+  // The Sacramento map is legible because almost everything is a HAIRLINE and
+  // only the main stem carries weight. Gamma-crushed widths give that
+  // hierarchy; each river then paints in passes: a soft bleeding wash under,
+  // the ink stroke over, and a wet highlight down the trunk rivers' centers.
+  // Cross-lane distributaries paint fainter and slimmer so the lane trunks
+  // own the composition. The whole layer runs through the rough-brush filter.
   const rivers = prereq.map((e) => {
-    const w = 0.8 + Math.sqrt(reach(e.t) / MAXREACH) * 6.2;
-    return { e, w };
+    const t = Math.pow(reach(e.t) / MAXREACH, 0.78);
+    const cross = crossStrand(e);
+    const w = (0.55 + t * 6.6) * (cross ? 0.7 : 1);
+    return { e, w, t, cross };
   }).sort((a, b) => b.w - a.w);
-  for (const { e, w } of rivers) {
+  const washes = [];
+  const strokes = [];
+  const highlights = [];
+  for (const { e, w, t, cross } of rivers) {
     const A = pos.get(e.s), B = pos.get(e.t);
     if (!A || !B) continue;
-    const t = byId.get(e.t);
-    const col = STRAND[t.strand];
+    const col = STRAND[byId.get(e.t).strand];
     const d = channel(A, B, e.s + "→" + e.t, w);
-    const op = clamp(0.16 + (w / 7) * 0.6, 0.16, 0.82);
-    el.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w)}" stroke-opacity="${f(op)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    const op = clamp(0.2 + t * 0.62, 0.2, 0.85) * (cross ? 0.55 : 1);
+    if (w > 1.6) {
+      washes.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w * 1.9)}" stroke-opacity="${f(op * 0.16)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    }
+    strokes.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w)}" stroke-opacity="${f(op)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    if (w > 3.4) {
+      highlights.push(`<path d="${d}" fill="none" stroke="${mixHex(col, "#ffffff", 0.45)}" stroke-width="${f(w * 0.32)}" stroke-opacity="${f(op * 0.5)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    }
   }
+  el.push(`<g filter="url(#brush)">`, ...washes, ...strokes, ...highlights, `</g>`);
 
   // related pairs: faint dotted cross-channels
   for (const e of related) {
@@ -274,18 +297,21 @@ function watershed() {
     }
     return "M" + pts.map(([px, py]) => `${f(px)},${f(py)}`).join(" L") + " Z";
   }
-  // Reservoirs are RARE, like on a real map: only true storage — standards
-  // whose descendant reach is enormous (>=140, about the top two dozen), or
-  // an HS Widely Applicable Prerequisite (K-8 wap=1 is a source artifact and
-  // must never gate a visual).
+  // Reservoirs are RARE, like on a real map: a handful of NAMED lakes. The
+  // early grades are a plateau of enormous reach (54 standards clear 185), so
+  // no threshold stays rare — take the top 16 by reach, full stop. (K-8
+  // wap=1 is a source artifact and must never gate a visual.)
+  const reservoirIds = new Set(
+    [...g.nodes].sort((a, b) => reach(b.id) - reach(a.id)).slice(0, 16).map((n) => n.id),
+  );
   for (const n of g.nodes) {
     const p = pos.get(n.id);
     if (!p) continue;
     const r = 1.8 + Math.sqrt(n.deg) * 0.9;
-    const isReservoir = reach(n.id) >= 140 || (n.grade === "HS" && n.wap);
+    const isReservoir = reservoirIds.has(n.id);
     if (isReservoir) {
       const rr = r + 3 + Math.sqrt(reach(n.id) / MAXREACH) * 6;
-      el.push(`<path d="${reservoir(p[0], p[1], rr, "rv" + n.id)}" fill="#2a5a72" fill-opacity="0.75" stroke="#ffd27a" stroke-width="0.9" stroke-opacity="0.5" stroke-linejoin="round"/>`);
+      el.push(`<path d="${reservoir(p[0], p[1], rr, "rv" + n.id)}" fill="#1d4256" fill-opacity="0.62" stroke="#ffd27a" stroke-width="0.8" stroke-opacity="0.45" stroke-linejoin="round"/>`);
     }
     el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r)}" fill="${STRAND[n.strand]}" fill-opacity="0.95"/>`);
   }
