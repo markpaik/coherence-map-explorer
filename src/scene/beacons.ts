@@ -15,7 +15,6 @@
 
 import * as THREE from "three";
 import type { GraphCore } from "../data";
-import { restRadius } from "./palette";
 import type { NodesHandle } from "./nodes";
 import { FIDENZA, RINGERS } from "./artstyle";
 
@@ -71,7 +70,12 @@ export interface BeaconsHandle {
   dispose(): void;
 }
 
-export function createBeacons(graph: GraphCore, nodes: NodesHandle): BeaconsHandle {
+export function createBeacons(
+  graph: GraphCore,
+  nodes: NodesHandle,
+  radii: Float32Array,
+): BeaconsHandle {
+  void graph; // node identity comes through `radii` + live positions now
   const base = new THREE.PlaneGeometry(1, 1);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.index = base.index;
@@ -134,7 +138,7 @@ export function createBeacons(graph: GraphCore, nodes: NodesHandle): BeaconsHand
       targets = indices ? indices.slice(0, MAX) : [];
       for (let k = 0; k < targets.length; k++) {
         const i = targets[k];
-        scales[k] = restRadius(graph.nodes[i].deg) * 2.3;
+        scales[k] = radii[i] * 2.3;
         phases[k] = (i * 2.399963) % (Math.PI * 2); // deterministic per node
       }
       scaleAttr.needsUpdate = true;

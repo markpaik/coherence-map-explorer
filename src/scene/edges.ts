@@ -362,7 +362,13 @@ export interface EdgesHandle {
   dispose(): void;
 }
 
-export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode>): EdgesHandle {
+// `radiusOf` returns a node's VISUAL rest radius by id (reach-scaled, see
+// scene/reach.ts) so Ringers string tangents land on the drawn peg edges.
+export function createEdges(
+  edges: GraphEdge[],
+  nodesById: Map<string, GraphNode>,
+  radiusOf: (id: string) => number,
+): EdgesHandle {
   const count = edges.length;
 
   // -- template strip -----------------------------------------------------
@@ -443,8 +449,8 @@ export function createEdges(edges: GraphEdge[], nodesById: Map<string, GraphNode
     //  y — Ringers string-leave side (±1); z/w — source/target rest radii.
     artScalars[i * 4] = Math.min(4.5, 0.9 + artHash(e.s + e.t) * 2.4 + (s.deg + t.deg) * 0.1);
     artScalars[i * 4 + 1] = artHash(e.s + "|" + e.t) < 0.5 ? 1 : -1;
-    artScalars[i * 4 + 2] = restRadius(s.deg);
-    artScalars[i * 4 + 3] = restRadius(t.deg);
+    artScalars[i * 4 + 2] = radiusOf(e.s);
+    artScalars[i * 4 + 3] = radiusOf(e.t);
   }
 
   const emphasisAttr = new THREE.InstancedBufferAttribute(emphasis, 1);

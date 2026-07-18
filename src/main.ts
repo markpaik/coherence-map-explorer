@@ -26,6 +26,7 @@ import { createNodes } from "./scene/nodes";
 import { createEdges } from "./scene/edges";
 import { createFilaments } from "./scene/filaments";
 import { createBeacons } from "./scene/beacons";
+import { computeNodeRadii } from "./scene/reach";
 import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
@@ -115,15 +116,20 @@ function start(graph: GraphCore): void {
   scene.background = new THREE.Color(BG);
 
   const nodesById = new Map<string, GraphNode>(graph.nodes.map((n) => [n.id, n]));
-  const nodes = createNodes(graph.nodes);
-  const edges = createEdges(graph.edges, nodesById);
+  // Load-bearing sizing: rest radii scale with descendant reach (scene/reach.ts)
+  // so structurally consequential standards read quietly larger everywhere.
+  const radii = computeNodeRadii(graph);
+  const radiusIndexById = new Map<string, number>();
+  graph.nodes.forEach((n, i) => radiusIndexById.set(n.id, i));
+  const nodes = createNodes(graph.nodes, radii);
+  const edges = createEdges(graph.edges, nodesById, (id) => radii[radiusIndexById.get(id) ?? 0]);
   // Family filaments: the thin parent→child tether (structural annotation; the
   // F-IF.C.7 fix). Follows both poses + ghosts with visibility, refreshed once
   // per rendered frame below (cheap at 116 segments).
   const filaments = createFilaments(graph, nodes);
   // Beacon rings: the gap spotlight (stories flag missed standards; the rings
   // make a handful of holes findable among 480 lights).
-  const beacons = createBeacons(graph, nodes);
+  const beacons = createBeacons(graph, nodes, radii);
   const stars = createStarfield(reducedMotion);
   const nebula = createNebula();
   // Distant sky: faint procedural planets, Constellation-only (pose-faded).

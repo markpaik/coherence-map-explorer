@@ -432,7 +432,9 @@ export function createPanel(
       b.textContent = text;
       badges.appendChild(b);
     };
-    const msa = MSA_BADGE[n.msa];
+    // Major/Supporting/Additional is a K-8 construct; HS clusters carry msa 0
+    // as a source artifact, so no MSA badge for HS (2026-07 audit).
+    const msa = n.grade === "HS" ? undefined : MSA_BADGE[n.msa];
     if (msa) add(msa, `badge-msa-${n.msa}`);
     if (n.wap && n.grade === "HS") add("Widely Applicable Prerequisite", "badge-wap");
     if (n.modeling) add("★ Modeling", "badge-modeling");

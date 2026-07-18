@@ -630,7 +630,9 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     dot.style.background = hexColor(STRAND_COLORS[n.strand]);
     const main = rowText(n.code, textOf(nodeByCode.get(n.code)!));
     btn.append(dot, main);
-    if (n.msa === 0) {
+    // Major work is a K-8 designation; HS clusters carry msa 0 as a source
+    // artifact, so the chip is gated to K-8 (2026-07 audit).
+    if (n.msa === 0 && n.grade !== "HS") {
       const chip = document.createElement("span");
       chip.className = "browse-major-chip";
       chip.textContent = "Major work";
@@ -685,7 +687,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       b.textContent = text;
       badges.appendChild(b);
     };
-    if (n.msa === 0) addBadge("Major Work", "badge-msa-0");
+    if (n.msa === 0 && n.grade !== "HS") addBadge("Major Work", "badge-msa-0");
     if (n.wap && n.grade === "HS") addBadge("Widely Applicable Prerequisite", "badge-wap");
     if (n.modeling) addBadge("★ Modeling", "badge-modeling");
 

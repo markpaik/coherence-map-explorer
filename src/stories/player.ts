@@ -317,8 +317,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     sc.card.title = `Losing ${yearName}`;
     sc.card.body =
       `${missedCount} standards go dark. Of the ${ahead} standards ahead, ` +
-      `${touched} now stand on something missing and dim; ${clear} stay bright. ` +
-      `Switch years to compare how far each loss reaches.`;
+      `${touched} now stand on something missing; ${clear} stay bright. ` +
+      `Switch years to compare how far each loss reaches. The map shows what ` +
+      `the work stands on, never what a child can or cannot do.`;
     card.render(sc, 0, 1);
 
     damageTo = target;

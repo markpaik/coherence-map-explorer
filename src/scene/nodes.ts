@@ -265,7 +265,10 @@ export interface NodesHandle {
   dispose(): void;
 }
 
-export function createNodes(nodes: GraphNode[]): NodesHandle {
+// `radii` is the per-node visual rest radius (scene/reach.ts: restRadius by
+// degree, scaled by descendant reach — the load-bearing gradient). Every
+// radius consumer (visible matrix, pick proxy) reads from it.
+export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandle {
   const count = nodes.length;
 
   // -- visible mesh -----------------------------------------------------
@@ -595,7 +598,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   // Compose one instance's visible matrix from its stored position + base
   // radius (emphasis scale rides on top in the shader, never in the matrix).
   function writeVisibleMatrix(i: number): void {
-    const r = restRadius(nodes[i].deg);
+    const r = radii[i];
     m.makeScale(r, r, r);
     m.setPosition(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
     mesh.setMatrixAt(i, m);
@@ -632,7 +635,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   const pm = new THREE.Matrix4();
   function writeProxyMatrix(i: number): void {
     const factor = PROXY_RADIUS_FACTOR * (touchMode ? TOUCH_EXTRA_FACTOR : 1);
-    const r = restRadius(nodes[i].deg) * factor;
+    const r = radii[i] * factor;
     pm.makeScale(r, r, r);
     pm.setPosition(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
     proxy.setMatrixAt(i, pm);

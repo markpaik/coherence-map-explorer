@@ -268,11 +268,17 @@ function isDeadImage(url: string): boolean {
 
 // HS traditional-pathway course map (scripts/hs-course-map.json, derived from
 // CCSS Appendix A's Traditional Pathway tables — see its source/notes fields).
-// The dump's own course-framework fields are vestigial (all zeros), so this
-// vendored mapping is the authority. Standards in both A1 and A2 are placed at
-// their FIRST course and carry the full membership in `courses` (the panel
-// says "revisited in Algebra II"). The 16 (+) fourth-course standards form an
-// "ADV" shelf at the spiral's rim.
+// The dump DOES carry its own traditional_/integrated_course_frameworks_*
+// percentages (populated for 140 of 163 HS standards; the 2026-07 audit
+// corrected an earlier "all zeros" claim here). Those record how often
+// surveyed course frameworks place each standard in each course — independent
+// per-course prevalence rates that do not partition (a revisited standard
+// scores high in two courses), a noisy multi-course signal rather than a
+// single placement. Appendix A's Traditional Pathway is used as the authority
+// for one canonical course sequence instead. Standards in both A1 and A2 are
+// placed at their FIRST course and carry the full membership in `courses`
+// (the panel says "revisited in Algebra II"). The 16 (+) fourth-course
+// standards form an "ADV" shelf at the spiral's rim.
 interface HsCourseMap {
   map: Record<string, string[]>;
   unmapped: string[];
@@ -389,11 +395,18 @@ const sanitizeOpts: sanitizeHtml.IOptions = {
 // MathJax delimiters are plain text and must survive verbatim. htmlparser2 can
 // mis-tokenize a raw "<" that sits inside math (e.g. "$x<y$" → phantom <y> tag),
 // so we placeholder every math span before sanitizing and restore it after.
+//
+// Delimiters must be UNESCAPED dollars: the source writes money as `\$28`, and
+// the 2026-07 fidelity audit caught the old pattern pairing `\$28 … \$532`
+// into a phantom inline span that swallowed a display equation's sentinel and
+// shipped literal `MATH2` text (6.RP.A.3's Painting a Barn, G-CO.C.11,
+// N-Q.A.2). The inline body also excludes the sentinel char so a `$…$` span
+// can never swallow an already-inserted token.
 const MATH_PATTERNS: RegExp[] = [
-  /\$\$[\s\S]*?\$\$/g, // $$...$$
+  /(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/g, // $$...$$
   /\\\[[\s\S]*?\\\]/g, // \[...\]
   /\\\([\s\S]*?\\\)/g, // \(...\)
-  /\$[^$\n]*?\$/g, // $...$
+  /(?<!\\)\$[^$\n⁣]*?(?<!\\)\$/g, // $...$
 ];
 
 // Sentinel wrapping each protected math span. U+2063 (INVISIBLE SEPARATOR) has
@@ -409,10 +422,12 @@ const MATH_TOKEN_RE = new RegExp(
 /**
  * Minimal HTML escape for text that will be assigned via innerHTML. `&` MUST be
  * escaped first, otherwise the `&` in the `&lt;`/`&gt;` we introduce would be
- * double-escaped. The round-trip is faithful: on innerHTML assignment the
- * browser un-escapes `&amp;`/`&lt;`/`&gt;` back to `&`/`<`/`>` in the resulting
- * text node, so KaTeX auto-render (which reads text nodes) receives the exact
- * original LaTeX source — while the raw string is inert as HTML on assignment.
+ * double-escaped. The client performs exactly ONE HTML decode (innerHTML
+ * assignment), which reverts this escape — so KaTeX auto-render receives the
+ * DECODED math source, which is why math spans are entity-decoded before this
+ * escape (see decodeEntitiesForMath): source entities like `&#39;`/`&gt;`
+ * inside math must reach KaTeX as real characters, not entity text (the
+ * 2026-07 audit found 69 standards shipping double-escaped math).
  */
 function escapeHtml(s: string): string {
   return s
@@ -420,6 +435,43 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
+
+/**
+ * Decode the source's HTML entities inside a MATH span to real characters, so
+ * that after the client's single innerHTML decode KaTeX sees true LaTeX
+ * (`A'`, `>`, `÷`, `&` in align environments). Numeric (decimal + hex) and the
+ * common named entities the snapshot uses; unknown named entities pass through
+ * untouched (no worse than the source). Safety is unchanged: the result is
+ * still run through escapeHtml, so every `<`/`>`/`&` is inert on assignment.
+ */
+function decodeEntitiesForMath(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
+    .replace(/&[a-z]+;/gi, (m) => MATH_ENTITIES[m.toLowerCase()] ?? m);
+}
+
+const MATH_ENTITIES: Record<string, string> = {
+  "&nbsp;": " ",
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&rsquo;": "’",
+  "&lsquo;": "‘",
+  "&mdash;": "—",
+  "&ndash;": "–",
+  "&hellip;": "…",
+  "&times;": "×",
+  "&divide;": "÷",
+  "&cent;": "¢",
+  "&deg;": "°",
+  "&plusmn;": "±",
+  "&minus;": "−",
+  "&middot;": "·",
+  "&ge;": "≥",
+  "&le;": "≤",
+};
 
 export function sanitizeField(html: string | undefined): string {
   if (!html) return "";
@@ -435,15 +487,24 @@ export function sanitizeField(html: string | undefined): string {
     });
   }
   let clean = sanitizeHtml(work, sanitizeOpts);
-  // Restore each math span, but HTML-ESCAPE its raw source. Without this, any
-  // markup inside `$…$` (e.g. `$<img onerror=…>$`, or prose caught between a
-  // stray pair of `$`) would bypass sanitizeHtml and reach panel.ts's innerHTML
-  // as live HTML. Escaping makes it inert on assignment while preserving the
-  // LaTeX for KaTeX (see escapeHtml). A missing index restores to nothing.
-  clean = clean.replace(MATH_TOKEN_RE, (_m, i) => {
-    const src = store[Number(i)];
-    return src === undefined ? "" : escapeHtml(src);
-  });
+  // Restore each math span: entity-decode the raw source (so the client's one
+  // innerHTML decode hands KaTeX true LaTeX), then HTML-ESCAPE it. Without the
+  // escape, any markup inside `$…$` (e.g. `$<img onerror=…>$`) would bypass
+  // sanitizeHtml and reach panel.ts's innerHTML as live HTML. A missing index
+  // restores to nothing. Restoration LOOPS until no token remains (a restored
+  // span can legally contain another span's token), and any survivor fails the
+  // build — the audit found literal `MATH2` shipping in worked examples.
+  for (let pass = 0; pass < 8 && MATH_TOKEN_RE.test(clean); pass++) {
+    MATH_TOKEN_RE.lastIndex = 0;
+    clean = clean.replace(MATH_TOKEN_RE, (_m, i) => {
+      const src = store[Number(i)];
+      return src === undefined ? "" : escapeHtml(decodeEntitiesForMath(src));
+    });
+  }
+  MATH_TOKEN_RE.lastIndex = 0;
+  if (MATH_TOKEN_RE.test(clean)) {
+    throw new Error(`sanitizeField: unrestored math sentinel in output: ${clean.slice(0, 200)}`);
+  }
   return clean.trim();
 }
 
@@ -935,8 +996,16 @@ export function buildGraph(): BuildResult {
     const idx = bandIsoIndex.get(m.grade) ?? 0;
     bandIsoIndex.set(m.grade, idx + 1);
     const a = GOLDEN * idx;
+    // HS halo nodes anchor at their COURSE sub-column center, not the band
+    // center — the 2026-07 audit found isolated ADV standards (F-BF.B.4.b/c/d)
+    // rendering mid-massif in the Ascent, ~96 units left of the advanced rim,
+    // because pos2 inherits this x. Same rule the sim seeding uses.
+    const haloX =
+      m.grade === "HS"
+        ? (subColInterval(band, m.subCol)[0] + subColInterval(band, m.subCol)[1]) / 2
+        : band.center;
     pos.set(id, [
-      band.center,
+      haloX,
       params.isolatedRadius * Math.cos(a),
       params.isolatedRadius * Math.sin(a),
     ]);

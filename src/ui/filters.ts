@@ -76,7 +76,10 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       const shown =
         gradeActive.has(n.grade) &&
         strandActive.has(n.strand) &&
-        (lens === "all" || (lens === "major" ? n.msa === 0 : n.wap));
+        // Major/Supporting/Additional is a K-8 construct: the source stores 0
+        // for every HS cluster, so without the grade gate the Major-work lens
+        // would sweep in all 163 HS standards (2026-07 audit).
+        (lens === "all" || (lens === "major" ? n.msa === 0 && n.grade !== "HS" : n.wap));
       visN[i] = shown ? 1 : 0;
     }
     for (let i = 0; i < edges.count; i++) {

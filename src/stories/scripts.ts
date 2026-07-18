@@ -71,7 +71,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:K", "grade:1", "grade:2"], pose: 1 },
         card: {
           title: "A third grader, on track",
-          body: "Fall 2019. Kindergarten through second grade light up behind this student, year by year: counting, place value, the first multiplication facts. Each light is something a teacher taught and a child learned. The grades ahead are dark because they have not happened yet.",
+          body: "Fall 2019. Kindergarten through second grade light up behind this student, year by year: counting, place value, the first steps toward multiplication. Each light is something a teacher taught and a child learned. The grades ahead are dark because they have not happened yet.",
         },
         holdMs: 11000,
         transition: "lapse",
@@ -83,7 +83,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:2", "grade:3", "grade:4"], pose: 1 },
         card: {
           title: "The fraction spring ahead",
-          body: "Nine fraction standards sit in the spring of third grade, and nearly half of high school mathematics eventually rests on them. In a normal year this student meets them in a normal classroom, and they light up like everything else did.",
+          body: "Nine fraction standards sit in the spring of third grade, and more than four fifths of high school mathematics eventually rests on them. In a normal year this student meets them in a normal classroom, and they light up like everything else did.",
         },
         holdMs: 10000,
         transition: "lapse",
@@ -112,7 +112,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:3", "grade:4"], pose: 1 },
         card: {
           title: "Fourth grade arrives anyway",
-          body: "New content lands fine where it stands on its own and struggles where it stands on last year. Watch grade 4 come on. Geometry arrives bright, because it rests on earlier geometry this student has. Fractions arrive dim, because they rest on the nine standards that went dark.",
+          body: "New content lands fine where it stands on its own and struggles where it stands on last year. Watch grade 4 come on. Geometry arrives bright, because most of what it stands on was built before third grade. Fractions arrive dimmer, because they stand on the nine standards that went dark.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -226,7 +226,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:3", "grade:4", "grade:5", "grade:6"], pose: 1 },
         card: {
           title: "Losing third grade",
-          body: "The dark spreads across 271 standards over seven remaining years, and 240 descendants of grade 3 fractions dim with it. An early gap is not the same gap arriving earlier. It has more years to grow.",
+          body: "The dark spreads across 271 standards, touching every grade that remains, from fourth through high school, and 240 descendants of grade 3 fractions dim with it. An early gap is not the same gap arriving earlier. It has more years to grow.",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -389,7 +389,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:5"], pose: 1 },
         card: {
           title: "What passes by meanwhile",
-          body: "Fifth grade happens anyway. Dividing fractions, decimal operations, volume: 40 standards go past while this student reviews, and most of them stand on foundations that were never broken. The student could have met them.",
+          body: "Fifth grade happens anyway. Volume, the coordinate plane, line plots: 40 standards go past while this student reviews, and 32 of the 40 stand on foundations that were never broken. The student could have met them.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -405,7 +405,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:4", "grade:5", "grade:6"], pose: 1 },
         card: {
           title: "The gap the review year built",
-          body: "Next fall, the grade 5 standards read as missed too, not because this student could not learn them but because nobody offered them. Review that replaces grade-level work manufactures next year's gap. Schmidt and colleagues found unequal access to content compounds exactly this way.",
+          body: "Next fall, the grade 5 standards read as missed too, not because this student could not learn them but because nobody offered them. Review that replaces grade-level work manufactures next year's gap. Schmidt and colleagues documented how unequal access to grade-level content widens achievement gaps.",
           cite: "Schmidt, Burroughs, Zoido & Houang (2015), Educational Researcher",
           citeUrl: "https://doi.org/10.3102/0013189X15603982",
         },
@@ -455,7 +455,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["code:F-IF.A.1"], pose: 1 },
         card: {
           title: "Start at the summit",
-          body: "A single light in the dark. The concept of a function sits nineteen prerequisites deep, the deepest idea on this map. Ask who in a district does the most advanced mathematical work, and people point here.",
+          body: "A single light in the dark. The concept of a function sits nineteen prerequisites deep, and fourteen later ideas branch straight off it, the busiest junction on this map. Ask who in a district does the most consequential mathematical work, and people point here.",
         },
         holdMs: 10500,
         transition: "lapse",
@@ -467,7 +467,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["ancestry:F-IF.A.1"], pose: 1 },
         card: {
           title: "Follow its foundations down",
-          body: "Watch the chain light from the summit downward. Functions stand on eighth-grade relations, which stand on proportionality, then ratio, then fractions, then multiplication, and finally counting. Nineteen floors down, there is one room at the bottom.",
+          body: "Watch the chain light from the summit downward. Functions stand on eighth-grade relations, which stand on proportionality and ratio, which stand on fractions and the whole-number work beneath them. Nineteen floors down the light reaches kindergarten, and counting is one of the foundations under everything.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -479,7 +479,7 @@ export const STORIES: Story[] = [
         camera: { fit: "all", pose: 1 },
         card: {
           title: "Now light everything that grows from counting",
-          body: "From one kindergarten standard, count to 100 by ones and tens, 225 standards light up, 47 percent of the whole map. Across six longitudinal datasets, the math children bring to school entry predicts their later achievement better than early reading or attention do.",
+          body: "From one kindergarten standard, count to 100 by ones and tens, 225 standards light up, 47 percent of the whole map. Across six longitudinal datasets, the math children bring to school entry predicts their later achievement better than early reading or attention do. The map shows what the work stands on, never what a child can or cannot do.",
           cite: "Duncan et al. (2007), Developmental Psychology; Watts et al. (2014)",
           citeUrl: "https://doi.org/10.1037/0012-1649.43.6.1428",
         },
@@ -504,7 +504,7 @@ export const STORIES: Story[] = [
         camera: { fit: "all", pose: 1 },
         card: {
           title: "There is no such thing as just counting",
-          body: "Even the classic fraction mistake, reading one fifth as bigger than one fourth because five beats four, follows people into adulthood when the early ground is thin. Early mathematics is not a warm-up for the real thing. It is the real thing.",
+          body: "Even the classic fraction mistake, reading one fifth as bigger than one fourth because five beats four, still trips adults under time pressure, mathematicians included. Early mathematics is not a warm-up for the real thing. It is the real thing.",
           cite: "Braithwaite & Siegler (2018), Developmental Science",
           citeUrl: "https://doi.org/10.1111/desc.12541",
         },
@@ -545,10 +545,10 @@ export const STORIES: Story[] = [
       {
         year: "Walk back",
         state: { lit: ["ancestry:7.RP.A.2"], focus: "7.RP.A.2" },
-        camera: { fit: ["code:6.RP.A.2", "code:5.NF.B.4", "code:4.NF.B.4"], pose: 2 },
+        camera: { fit: ["code:6.RP.A.2", "code:5.NF.B.4", "code:3.OA.A.2"], pose: 2 },
         card: {
           title: "Walk back until the ground is solid",
-          body: "Check unit rates: shaky. Check fraction multiplication: shaky. Check division as sharing: solid. Stop there. The ground floor is a third-grade skill, three steps and four school years below the label on the struggle.",
+          body: "Check unit rates: shaky. Check fraction multiplication: shaky. Check division as sharing: solid. Stop there. Three checks reached it, and the ground floor is a third-grade skill, four school years below the label on the struggle.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -560,7 +560,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["ancestry:7.RP.A.2"], pose: 2 },
         card: {
           title: "Build back up from there",
-          body: "Now light the chain the other way. From solid ground, each missing step is weeks of targeted work, not a year of going backward. Fraction knowledge in elementary school predicts high school algebra better than almost anything else researchers measured, so every step rebuilt here keeps paying.",
+          body: "Now light the chain the other way. From solid ground, each missing step is targeted work on one named standard, not a year of going backward. Fraction knowledge in elementary school predicts high school algebra better than almost anything else researchers measured, so every step rebuilt here keeps paying.",
           cite: "Siegler et al. (2012), Psychological Science",
           citeUrl: "https://doi.org/10.1177/0956797612440101",
         },
