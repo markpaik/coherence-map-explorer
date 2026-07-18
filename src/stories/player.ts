@@ -31,8 +31,9 @@ import type { CameraRig } from "../scene/camera";
 import type { FiltersHandle } from "../ui/filters";
 import type { DamageEngine } from "./damage";
 import type { SelectorResolver } from "./selectors";
-import { STORIES, type Story, type StoryScene } from "./scripts";
+import { STORIES, scenePose, sceneBody, sceneTitle, type Story, type StoryScene, type Formation } from "./scripts";
 import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
+import { createFormationPick, type FormationPickHandle } from "./formationpick";
 
 const LAPSE_MS = 2000; // "lapse" transition length (damage crossfade)
 const DEFAULT_HOLD_MS = 10500; // auto-advance dwell when a scene omits holdMs
@@ -117,6 +118,31 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     onJump: (i) => jump(i),
     onTogglePause: () => togglePause(),
   });
+
+  // Formation pin (story-HUD control). Changing it re-plays the CURRENT scene in
+  // the new formation — goto() resolves the pose through scenePose() every time,
+  // so one re-goto sets the pose, refits the camera, and swaps in heldBody copy.
+  // The pin holds for subsequent scenes (module state inside formationpick).
+  const formation: FormationPickHandle = createFormationPick({
+    onChange: () => {
+      if (running && currentStory) void goto(currentIndex, !reducedMotion());
+    },
+  });
+
+  // Render a scene's card with the title and body that match the pose it is
+  // ACTUALLY playing in: a pinned formation differing from the authored pose
+  // swaps in heldTitle/heldBody when the scene provides them (sceneTitle /
+  // sceneBody), else the authored copy stands. Clones only when the copy
+  // actually changes (keeps lose-a-year's live-rewritten copy intact).
+  function renderScene(scene: StoryScene, index: number, activePose: Formation): void {
+    const title = sceneTitle(scene, activePose);
+    const body = sceneBody(scene, activePose);
+    const view =
+      title === scene.card.title && body === scene.card.body
+        ? scene
+        : { ...scene, card: { ...scene.card, title, body } };
+    card.render(view, index, currentStory!.scenes.length);
+  }
 
   // Auto-advance is TIMING, not motion: it stays on under reduced motion (the
   // scene transitions become cuts, which is the accessible part). Pause is the
@@ -440,9 +466,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     holdRemaining = 0;
     card.setProgress(0);
 
-    // Pose first (all stories live in the Ascent): the FIRST scene triggers the
-    // unravel; later same-pose scenes resolve instantly.
-    await poseDriver.setPose(scene.camera?.pose ?? 1, { instant: reducedMotion() });
+    // Pose first: the scene's AUTHORED pose, unless the reader pinned a formation
+    // (scenePose resolves the pin). The first scene of a story triggers the
+    // unravel; a same-pose scene resolves instantly. Node positions below (camera
+    // fits, beacons) are read AFTER this await, so they frame the live pose.
+    const activePose = scenePose(scene, formation.getPinned());
+    await poseDriver.setPose(activePose, { instant: reducedMotion() });
     if (token !== navToken || !running) return; // superseded or stopped mid-morph
 
     applyFocus(scene, cut); // emphasis (silent) — camera below overrides framing
@@ -460,7 +489,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     }
     const revealMs = armLit(scene, cut);
     applyCamera(scene, !cut);
-    card.render(scene, index, currentStory.scenes.length);
+    renderScene(scene, index, activePose);
 
     // Arm the settle window: the scene holds only after the damage crossfade
     // (which a healing coda stretches) AND the lit reveal have finished.
@@ -504,6 +533,8 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     document.body.classList.add("storying");
     backdrop.hidden = false;
     card.begin(story);
+    formation.reflect(); // the pin persists across stories — show the live state
+
     card.setAutoAdvanceEnabled(autoAdvanceOn());
     card.setPaused(false);
     if (story.interactive === "lose-a-year") mountLoseAYear();
@@ -683,6 +714,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       return currentIndex;
     },
     dispose() {
+      formation.dispose();
       card.dispose();
       backdrop.remove();
     },

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { GraphCore } from "../src/data";
 import { createSelectorResolver } from "../src/stories/selectors";
 import { createDamageEngine } from "../src/stories/damage";
-import { STORIES } from "../src/stories/scripts";
+import { STORIES, scenePose, sceneBody, sceneTitle, type StoryScene } from "../src/stories/scripts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolvePath(HERE, "..");
@@ -167,5 +167,79 @@ describe("story scripts validate against the graph", () => {
       expect(story.id).toBeTruthy();
       expect(story.title).toBeTruthy();
     }
+  });
+});
+
+describe("formation pin: scenePose resolver", () => {
+  // A scene that authors Blueprint (pose 2).
+  const authoredScene: StoryScene = {
+    year: "x",
+    camera: { fit: "all", pose: 2 },
+    card: { title: "t", body: "b" },
+  };
+  // A scene that omits camera.pose entirely.
+  const poselessScene: StoryScene = { year: "x", card: { title: "t", body: "b" } };
+
+  it("AUTHORED (pinned null) yields the scene's own authored pose", () => {
+    expect(scenePose(authoredScene, null)).toBe(2);
+  });
+
+  it("AUTHORED (pinned null) defaults to the Ascent (1) when a scene omits camera.pose", () => {
+    expect(scenePose(poselessScene, null)).toBe(1);
+  });
+
+  it("a pinned formation overrides the authored pose for every scene", () => {
+    expect(scenePose(authoredScene, 0)).toBe(0);
+    expect(scenePose(authoredScene, 3)).toBe(3);
+    expect(scenePose(poselessScene, 2)).toBe(2);
+  });
+});
+
+describe("formation pin: sceneBody (heldBody) resolver", () => {
+  const counting = STORIES.find((s) => s.id === "starts-with-counting")!;
+  const heldScene = counting.scenes.find((s) => s.heldBody)!; // the "Descending" scene
+  const authoredHeldPose = heldScene.camera?.pose ?? 1; // authored Ascent (1)
+
+  it("returns the authored body when the active pose matches the authored pose", () => {
+    expect(sceneBody(heldScene, authoredHeldPose)).toBe(heldScene.card.body);
+  });
+
+  it("returns heldBody only when the active pose differs AND heldBody exists", () => {
+    const other = authoredHeldPose === 2 ? 3 : 2;
+    expect(sceneBody(heldScene, other)).toBe(heldScene.heldBody);
+    expect(sceneBody(heldScene, other)).not.toBe(heldScene.card.body);
+  });
+
+  it("falls back to the authored body when a differing pose has no heldBody", () => {
+    const plain = counting.scenes.find((s) => !s.heldBody)!;
+    const authored = plain.camera?.pose ?? 1;
+    const other = authored === 2 ? 3 : 2;
+    expect(sceneBody(plain, other)).toBe(plain.card.body);
+  });
+
+  it("held copy stays a rare, deliberate exception: two heldBody, two heldTitle", () => {
+    // Only scenes whose authored copy names its own pose's literal geometry
+    // carry variants — the counting story's summit pair (Ascent) and the
+    // walk-back opener's "board" (Blueprint). Growing this census is a designer
+    // decision, not a side effect.
+    let bodies = 0;
+    let titles = 0;
+    for (const story of STORIES)
+      for (const scene of story.scenes) {
+        if (scene.heldBody) bodies++;
+        if (scene.heldTitle) titles++;
+      }
+    expect(bodies).toBe(2);
+    expect(titles).toBe(2);
+  });
+
+  it("sceneTitle follows the same rule: authored at home pose, held elsewhere", () => {
+    const titled = counting.scenes.find((s) => s.heldTitle)!;
+    const authored = titled.camera?.pose ?? 1;
+    const other = authored === 2 ? 3 : 2;
+    expect(sceneTitle(titled, authored)).toBe(titled.card.title);
+    expect(sceneTitle(titled, other)).toBe(titled.heldTitle);
+    const plain = counting.scenes.find((s) => !s.heldTitle)!;
+    expect(sceneTitle(plain, other)).toBe(plain.card.title);
   });
 });

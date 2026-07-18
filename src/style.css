@@ -1679,6 +1679,49 @@ body.touring #scene {
   color: var(--ink-2);
 }
 
+/* Formation picker — story-HUD sibling of the pose view-toggle (.view-seg).
+   Mounted as the story card's last child (inside its focus trap); pins every
+   scene to one formation, or AUTHORED for each scene's own pose. Segments echo
+   the view-toggle's aria-pressed styling; the row wraps on narrow widths. */
+.formation-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.formation-pick-label {
+  margin-right: 4px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.formation-seg {
+  min-height: 34px; /* card-density touch target, matching the lose-a-year chips */
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+.formation-seg[aria-pressed="true"] {
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.1);
+  border-color: var(--ink-2);
+}
+.formation-seg:hover:not([aria-pressed="true"]) {
+  color: var(--ink);
+}
+
 /* Timeline scrubber, bottom-CENTER: a dot per scene + the active year label. */
 .story-scrubber {
   position: fixed;

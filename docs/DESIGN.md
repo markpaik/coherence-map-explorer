@@ -175,6 +175,19 @@ noise, disabled with reduced-motion.
 | idle drift | slow orbit, one revolution ≈ 240s; pauses on any interaction, resumes after 20s idle |
 | reduced motion | camera cuts (≤150ms), no cascade stagger (all at once), no particles, no twinkle, no drift |
 
+## Stories in any formation
+
+Every scene authors its pose (`camera.pose`), and the story HUD's FORMATION
+control can pin the whole story to one formation instead: Authored (default,
+regression-free) plus Constellation / Ascent / Blueprint / Transit. A pin takes
+effect immediately (the current scene re-poses and reframes) and persists for
+the life of the page. Copy law: narration is written in graph language ("stands
+on", "chain") so it survives any formation; the rare line that names its home
+pose's literal geometry carries a `heldTitle`/`heldBody` variant that shows only
+when the active pose differs from the authored one (two of each across all
+stories — the counting story's summit pair and the walk-back opener's "board").
+Growing that census is a designer decision, and a test pins the count.
+
 ## Sound
 
 None. (Considered; a fun v2 toggle, never default-on.)

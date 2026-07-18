@@ -42,6 +42,15 @@ export interface StoryScene {
   spotlight?: string[];
   camera?: { fit: "all" | string[]; pose?: 0 | 1 | 2 | 3 };
   card: { title: string; body: string; cite?: string; citeUrl?: string };
+  /**
+   * Alternate body shown when the story-HUD "Formation" pin makes this scene
+   * play in a pose OTHER than its authored camera.pose. When the active pose
+   * matches the authored pose, `card.body` stands. Only scenes whose authored
+   * copy names their own pose's geometry (a summit, floors down) need one.
+   */
+  heldBody?: string;
+  /** Alternate title under the same rule as heldBody (see sceneTitle). */
+  heldTitle?: string;
   /** Auto-advance dwell (ms) once the scene has settled; Next skips ahead. */
   holdMs?: number;
   transition?: "lapse" | "cut";
@@ -55,6 +64,38 @@ export interface Story {
   /** Interactive stories mount extra controls (player.ts owns the behavior). */
   interactive?: "lose-a-year";
   scenes: StoryScene[];
+}
+
+/** The four formations, by pose index (mirrors camera.pose + the pose driver). */
+export type Formation = 0 | 1 | 2 | 3;
+
+/**
+ * The pose a scene plays in. Each scene AUTHORS its pose via camera.pose; the
+ * story-HUD "Formation" control can instead PIN every scene to one formation.
+ * `pinned` null = AUTHORED (each scene's own pose, defaulting to the Ascent (1)
+ * when a scene omits camera.pose). Pure — unit-tested in tests/stories.test.ts.
+ */
+export function scenePose(scene: StoryScene, pinned: Formation | null): Formation {
+  return pinned ?? (scene.camera?.pose ?? 1);
+}
+
+/**
+ * The body copy for a scene given the pose it is ACTUALLY playing in. When a
+ * pinned formation makes the active pose differ from the scene's authored pose
+ * AND the scene supplies `heldBody`, the held copy shows; otherwise the authored
+ * `card.body` is unchanged. Pure — unit-tested in tests/stories.test.ts.
+ */
+export function sceneBody(scene: StoryScene, activePose: Formation): string {
+  const authored = scene.camera?.pose ?? 1;
+  if (activePose !== authored && scene.heldBody) return scene.heldBody;
+  return scene.card.body;
+}
+
+/** The title for a scene given its active pose — same rule as sceneBody. */
+export function sceneTitle(scene: StoryScene, activePose: Formation): string {
+  const authored = scene.camera?.pose ?? 1;
+  if (activePose !== authored && scene.heldTitle) return scene.heldTitle;
+  return scene.card.title;
 }
 
 export const STORIES: Story[] = [
@@ -453,6 +494,7 @@ export const STORIES: Story[] = [
         year: "Grade 12",
         state: { lit: ["code:F-IF.A.1"], focus: "F-IF.A.1" },
         camera: { fit: ["code:F-IF.A.1"], pose: 1 },
+        heldTitle: "Start at the far end",
         card: {
           title: "Start at the summit",
           body: "A single light in the dark. The concept of a function sits nineteen prerequisites deep, and fourteen later ideas branch straight off it, the busiest junction on this map. Ask who in a district does the most consequential mathematical work, and people point here.",
@@ -465,6 +507,9 @@ export const STORIES: Story[] = [
         state: { lit: ["ancestry:F-IF.A.1"] },
         reveal: { dir: "rtl", ms: 3600 },
         camera: { fit: ["ancestry:F-IF.A.1"], pose: 1 },
+        heldTitle: "Follow its foundations back",
+        heldBody:
+          "Watch the chain light from functions backward. Functions stand on eighth-grade relations, which stand on proportionality and ratio, which stand on fractions and the whole-number work beneath them. Nineteen steps back the light reaches kindergarten, and counting is one of the foundations under everything.",
         card: {
           title: "Follow its foundations down",
           body: "Watch the chain light from the summit downward. Functions stand on eighth-grade relations, which stand on proportionality and ratio, which stand on fractions and the whole-number work beneath them. Nineteen floors down the light reaches kindergarten, and counting is one of the foundations under everything.",
@@ -527,6 +572,8 @@ export const STORIES: Story[] = [
           title: "A student is failing proportional reasoning",
           body: "One light on the board, the seventh-grade standard this student keeps failing. The grade label says to reteach seventh grade, slower and louder. The structure is about to disagree.",
         },
+        heldBody:
+          "One light on the map, the seventh-grade standard this student keeps failing. The grade label says to reteach seventh grade, slower and louder. The structure is about to disagree.",
         holdMs: 10000,
         transition: "lapse",
       },
