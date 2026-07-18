@@ -60,6 +60,14 @@ its canonical angle, dimensional when orbited):
   (elevated, surface, deep), climb between levels in helixes at the great
   interchanges, and the loop is a three-dimensional knot you can orbit.
 
+## Status (2026-07-18)
+
+Mathematically derived previews approved in principle; Mark's verdicts:
+TRANSIT — approved, in-app build LAUNCHED (4th pose: derived layout from the
+pipeline, per-line z-levels, ramps at transfer stations, anamorphic front-on
+collapse). WATERSHED and REEF — ON HOLD at Mark's direction; previews stand,
+no build until he says go.
+
 ## Shipping strategy (anti-feature-museum)
 The pose toggle stays at three. New formations enter as:
 1. STORY-OWNED STAGES first: a story plays on the watershed before any
