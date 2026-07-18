@@ -103,26 +103,26 @@ body {
   pointer-events: none;
   user-select: none;
 }
-.brand {
-  margin: 0 0 8px;
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  font-variant: small-caps;
-  color: var(--ink-2);
-}
 .headline {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-family: var(--display);
   font-weight: 700;
-  font-size: clamp(34px, 5.4vw, 64px);
-  line-height: 1.04;
+  font-size: clamp(38px, 5.8vw, 68px);
+  line-height: 1.02;
   letter-spacing: -0.02em;
   color: var(--ink);
   text-wrap: balance;
   text-shadow: 0 0 40px rgb(139 92 246 / 0.25); /* faint violet halo lifts it off the sky */
+}
+/* The former headline, now the tagline riding under "Coherence". */
+.tagline {
+  margin: 0 0 10px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: clamp(16px, 1.9vw, 22px);
+  letter-spacing: 0.005em;
+  color: var(--ink);
+  opacity: 0.92;
 }
 .statline {
   margin: 0;
@@ -269,13 +269,38 @@ body {
 
 /* -- art-style toggle (under the pose toggle) + credit line ----------------- */
 
+/* Discovery tab: the labeled pill that unfolds the segmented control. */
+.art-tab {
+  position: fixed;
+  right: clamp(16px, 2.5vw, 28px);
+  bottom: clamp(46px, 7vh, 62px);
+  transform: translateY(-59px); /* above the 51px pose toggle + 8px gap */
+  z-index: 11;
+  min-height: 40px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+.art-tab:hover,
+.art-tab[aria-expanded="true"] {
+  color: var(--ink);
+}
 .art-toggle {
   position: fixed;
   right: clamp(16px, 2.5vw, 28px);
   bottom: clamp(46px, 7vh, 62px);
-  transform: translateY(calc(-100% - 8px)); /* stacked ABOVE the pose toggle */
+  transform: translateY(-107px); /* above the tab when unfolded */
   z-index: 11;
-  display: inline-flex;
+  display: none;
   gap: 3px;
   padding: 3px;
   background: var(--surface);
@@ -284,15 +309,17 @@ body {
   border: 1px solid var(--line);
   border-radius: 13px;
 }
+.art-toggle.art-toggle-open {
+  display: inline-flex;
+}
 .art-credit {
   position: fixed;
   right: clamp(16px, 2.5vw, 28px);
   bottom: clamp(46px, 7vh, 62px);
-  /* Sit above BOTH stacked toggles. The pose + art toggles are ~51px tall each
-     with an 8px gap between them, so the credit's baseline anchor must clear
-     2 × 51 + 2 × 8 ≈ 118px. A translateY tied to the credit's own (short)
-     height, as before, landed it inside the art toggle. */
-  transform: translateY(-118px);
+  /* Sit above the stack: pose toggle (51) + gap + Art-styles tab (40) + gap.
+     When the tab is unfolded (body.art-open) the segmented row (51 + gap)
+     slots in beneath the credit, so it rises to clear that too. */
+  transform: translateY(-107px);
   z-index: 11;
   font-size: 11px;
   color: var(--ink-2);
@@ -308,6 +335,9 @@ body {
 .art-credit.art-credit-on {
   opacity: 1;
   pointer-events: auto;
+}
+body.art-open .art-credit {
+  transform: translateY(-166px); /* clears the unfolded segmented row too */
 }
 
 /* -- depth scale hint (left edge; visible in the Ascent) -------------------- */
@@ -371,12 +401,12 @@ body.art-fidenza {
 }
 
 /* Ringers — board ink on cream. */
-body.art-ringers .brand {
-  color: rgb(26 23 18 / 0.66);
-}
 body.art-ringers .headline {
   color: #1a1712;
   text-shadow: none; /* the dark-sky violet halo smears on cream */
+}
+body.art-ringers .tagline {
+  color: rgb(26 23 18 / 0.88);
 }
 body.art-ringers .subline {
   color: rgb(26 23 18 / 0.82);
@@ -402,13 +432,13 @@ body.art-ringers .art-credit {
 }
 
 /* Fidenza — cream, dark-shadowed to lift off the teal field. */
-body.art-fidenza .brand {
-  color: rgb(232 224 205 / 0.84);
-  text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
-}
 body.art-fidenza .headline {
   color: #e8e0cd;
   text-shadow: 0 2px 14px rgb(20 51 44 / 0.5); /* replaces the violet sky halo */
+}
+body.art-fidenza .tagline {
+  color: rgb(232 224 205 / 0.94);
+  text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
 }
 body.art-fidenza .subline {
   color: rgb(232 224 205 / 0.92);
@@ -1253,6 +1283,7 @@ body.art-fidenza .art-credit {
   /* The art toggle + credit ride the same anchor + translateY stack as the pose
      toggle, so they follow it up to the mobile position (12px / 72–96px). Their
      segments already share .view-seg above, so they shrink with it. */
+  .art-tab,
   .art-toggle,
   .art-credit {
     right: 12px;

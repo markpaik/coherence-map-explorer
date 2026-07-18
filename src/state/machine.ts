@@ -311,29 +311,29 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
   function computeFocus(focus: number): FocusData {
     const parts = partsOf[focus];
-    // A parent standard with no edges of its own (e.g. 4.NF.B.3, whose .a-.d
-    // hold the connections) rolls up its children's neighbours, excluding the
-    // family itself, so focusing it lights a real neighbourhood instead of a
-    // dead end. Parents that already carry their own edges are left as-is.
-    const ownEdgeless =
-      parts.length > 0 &&
-      preds[focus].length === 0 &&
-      succ[focus].length === 0 &&
-      relatedAdj[focus].length === 0;
+    // EVERY parent standard rolls its children's connections into its own at
+    // focus time, family-internal edges excluded. The original coherence map
+    // presents a family as ONE card, so an arrow into any sub-standard reads
+    // as an arrow into the parent; a parent that kept only its own edges could
+    // show "builds on nothing" while its children carry the real inbound
+    // lineage (Mark's 6.RP.A.3 catch: its .a-.d hold the prereqs from
+    // 5.G.A.2 / 6.RP.A.1 / 6.RP.A.2 while the parent owns only outbound).
+    // Edgeless parents (e.g. 4.NF.B.3) are the degenerate case of the same
+    // rule.
     let rolledUp = false;
     let seedPreds = preds[focus];
     let seedSucc = succ[focus];
     let seedRelated = relatedAdj[focus];
-    if (ownEdgeless) {
+    if (parts.length > 0) {
       const family = new Set<number>([focus, ...parts]);
-      const roll = (adj: number[][]): number[] => {
-        const set = new Set<number>();
+      const roll = (own: number[], adj: number[][]): number[] => {
+        const set = new Set<number>(own.filter((nb) => !family.has(nb)));
         for (const c of parts) for (const nb of adj[c]) if (!family.has(nb)) set.add(nb);
         return [...set];
       };
-      seedPreds = roll(preds);
-      seedSucc = roll(succ);
-      seedRelated = roll(relatedAdj);
+      seedPreds = roll(preds[focus], preds);
+      seedSucc = roll(succ[focus], succ);
+      seedRelated = roll(relatedAdj[focus], relatedAdj);
       rolledUp = true;
     }
     // BFS ancestry/descendants seed from the (possibly rolled-up) direct sets.

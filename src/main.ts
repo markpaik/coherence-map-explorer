@@ -25,6 +25,7 @@ import { BG } from "./scene/palette";
 import { createNodes } from "./scene/nodes";
 import { createEdges } from "./scene/edges";
 import { createFilaments } from "./scene/filaments";
+import { createBeacons } from "./scene/beacons";
 import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
@@ -120,6 +121,9 @@ function start(graph: GraphCore): void {
   // F-IF.C.7 fix). Follows both poses + ghosts with visibility, refreshed once
   // per rendered frame below (cheap at 116 segments).
   const filaments = createFilaments(graph, nodes);
+  // Beacon rings: the gap spotlight (stories flag missed standards; the rings
+  // make a handful of holes findable among 480 lights).
+  const beacons = createBeacons(graph, nodes);
   const stars = createStarfield(reducedMotion);
   const nebula = createNebula();
   // Distant sky: faint procedural planets, Constellation-only (pose-faded).
@@ -129,6 +133,7 @@ function start(graph: GraphCore): void {
     nodes.proxy,
     edges.mesh,
     filaments.object,
+    beacons.object,
     stars.points,
     nebula.group,
     planets.group,
@@ -234,6 +239,7 @@ function start(graph: GraphCore): void {
     nodes.setArtStyle(style);
     edges.setArtStyle(style);
     filaments.setArtStyle(style);
+    beacons.setArtStyle(style);
     etches.setArtStyle(style);
     bloom.setArtPaper(style !== 0);
     const sky = style === 0;
@@ -273,6 +279,7 @@ function start(graph: GraphCore): void {
     resolve: resolveSelector,
     nodes,
     edges,
+    beacons,
     filters,
     rig,
     requestRender,
@@ -375,12 +382,15 @@ function start(graph: GraphCore): void {
       edges.setTime(sceneTime);
       stars.setTime(sceneTime);
       planets.setTime(sceneTime);
+      beacons.setTime(sceneTime);
       render = true;
     }
-    // The sky belongs to the Constellation: planets fade with the pose, and
-    // vanish entirely under the art styles (setVisibleAmount owns group
-    // visibility, so the art gate must live here, not in applyArtStyle).
-    planets.setVisibleAmount(artStyle === 0 ? 1 - Math.min(1, poseDriver.pose) : 0);
+    // The sky belongs to the GALAXY, in every pose: the Ascent and the
+    // Blueprint keep their planets and stars (Mark, round 7 — switching pose
+    // should not empty the heavens). Art styles have no sky at all
+    // (setVisibleAmount owns group visibility, so the art gate lives here,
+    // not in applyArtStyle).
+    planets.setVisibleAmount(artStyle === 0 ? 1 : 0);
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;
@@ -414,6 +424,7 @@ function start(graph: GraphCore): void {
       // Filaments track node positions + visibility every rendered frame (pose
       // morphs, filters, story spotlights) — one cheap pass over 116 segments.
       filaments.update();
+      if (beacons.active) beacons.update(); // rings follow morphing nodes
       if (debug) renderer.info.reset();
       bloom.render(delta);
       needsRender = false;

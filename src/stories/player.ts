@@ -26,6 +26,7 @@ import { nodeBoundingSphere } from "../state/machine";
 import type { PoseDriver } from "../scene/pose";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
+import type { BeaconsHandle } from "../scene/beacons";
 import type { CameraRig } from "../scene/camera";
 import type { FiltersHandle } from "../ui/filters";
 import type { DamageEngine } from "./damage";
@@ -52,6 +53,7 @@ export interface StoryPlayerDeps {
   resolve: SelectorResolver;
   nodes: NodesHandle;
   edges: EdgesHandle;
+  beacons: BeaconsHandle;
   filters: FiltersHandle;
   rig: CameraRig;
   requestRender: () => void;
@@ -84,7 +86,7 @@ export interface StoryPlayerHandle {
 }
 
 export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
-  const { graph, machine, poseDriver, damage, resolve, nodes, edges, filters, rig } = deps;
+  const { graph, machine, poseDriver, damage, resolve, nodes, edges, beacons, filters, rig } = deps;
   const { requestRender, announce, reducedMotion } = deps;
 
   const N = graph.nodes.length;
@@ -299,6 +301,17 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       }
     }
     const clear = ahead - touched;
+    // Display floor (visual only — the counts above use the raw engine values):
+    // the explorer's read is meant to be near-binary. Any standard that stands
+    // on ANYTHING missing must be unmistakably dimmer than one that does not
+    // (Mark, round 7: dim the dependents, keep only the independent ones
+    // bright). The graded engine still deepens the dimming with exposure.
+    for (let i = 0; i < N; i++) {
+      if (target[i] > 0.0001 && target[i] < 0.35) target[i] = 0.35;
+    }
+    // Spotlight the hollowed year itself: ringed, so the hole the user chose
+    // stays findable while its shadow spreads to the right.
+    beacons.setTargets([...missedIdx]);
     const yearName = g === "K" ? "kindergarten" : `grade ${g}`;
     const sc = currentStory!.scenes[0];
     sc.card.title = `Losing ${yearName}`;
@@ -437,6 +450,13 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       currentStory.interactive === "lose-a-year"
         ? armYearDamage(loseYearSel ?? "3", !cut)
         : applyDamage(scene, !cut);
+    // Gap spotlight: every missed standard gets a beacon ring, plus any the
+    // scene explicitly spotlights (the fix scenes ring the healed holes). The
+    // interactive story arms its own beacons inside armYearDamage.
+    if (currentStory.interactive !== "lose-a-year") {
+      const flagged = resolveUnion([...(scene.state?.missed ?? []), ...(scene.spotlight ?? [])]);
+      beacons.setTargets(flagged.size ? [...flagged] : null);
+    }
     const revealMs = armLit(scene, cut);
     applyCamera(scene, !cut);
     card.render(scene, index, currentStory.scenes.length);
@@ -507,6 +527,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     edges.setStory(0);
     nodes.setVisibleMask(null);
     edges.setVisibleMask(null);
+    beacons.setTargets(null);
     card.setExtra(null);
     loseYearSel = null;
     rig.setFrameLiftPx(0);

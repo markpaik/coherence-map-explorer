@@ -33,6 +33,13 @@ export interface StoryScene {
    * ("ltr"). Applies to whichever nodes CHANGE damage this scene.
    */
   heal?: { order: "scatter" | "ltr"; ms?: number };
+  /**
+   * Ring these standards with breathing beacon rings IN ADDITION to whatever
+   * `missed` already rings (every missed standard is beaconed automatically —
+   * the gap spotlight). Use it when a scene heals the holes but the viewer
+   * still needs to find where they were.
+   */
+  spotlight?: string[];
   camera?: { fit: "all" | string[]; pose?: 0 | 1 | 2 };
   card: { title: string; body: string; cite?: string; citeUrl?: string };
   /** Auto-advance dwell (ms) once the scene has settled; Next skips ahead. */
@@ -296,7 +303,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["ancestry:7.RP.A.2"], pose: 1 },
         card: {
           title: "Then proportional reasoning arrives",
-          body: "One seventh-grade standard stands on 75 earlier ones. Light its foundations from the top down and all three holes sit among them. Three missing pieces out of 75 are enough to make the floor tilt, while every adult in the room wonders why this student suddenly cannot keep up.",
+          body: "One seventh-grade standard stands on 75 earlier ones, and the three ringed holes sit among them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one standing on the missing. Three pieces out of 75 are enough to make the floor tilt while every adult in the room wonders why this student suddenly cannot keep up.",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -324,10 +331,11 @@ export const STORIES: Story[] = [
           damage: false,
         },
         heal: { order: "ltr", ms: 3600 },
+        spotlight: ["code:3.OA.A.2", "code:4.NF.B.4", "code:6.RP.A.2"],
         camera: { fit: ["code:3.OA.A.2", "code:4.NF.B.4", "code:6.RP.A.2", "code:7.RP.A.2"], pose: 1 },
         card: {
           title: "Find three holes, not three years",
-          body: "Seeing the structure changes the assignment. In Bloom's small studies, one-to-one mastery tutoring moved students about two standard deviations; across 108 studies of scalable mastery programs, the average is about half of one. The distance between those numbers is the work, and it starts with knowing exactly which three standards to rebuild.",
+          body: "Four lights remain: the three ringed holes and the seventh-grade standard they hold up. Seeing the structure changes the assignment. In Bloom's small studies, one-to-one mastery tutoring moved students about two standard deviations; across 108 studies of scalable mastery programs, the average is about half of one. The distance between those numbers is the work, and it starts with knowing exactly which three standards to rebuild.",
           cite: "Bloom (1984); Kulik, Kulik & Bangert-Drowns (1990)",
           citeUrl: "https://doi.org/10.3102/00346543060002265",
         },

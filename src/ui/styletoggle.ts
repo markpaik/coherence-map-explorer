@@ -29,6 +29,25 @@ export function createStyleToggle(deps: StyleToggleDeps): StyleToggleHandle {
   group.className = "art-toggle";
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", "Art style");
+  group.id = "art-toggle-group";
+
+  // Discovery tab: a labeled pill that says the feature exists. Clicking it
+  // unfolds the three-way control above; the unlabeled segmented row alone was
+  // invisible to anyone not already looking for it (Mark, round 7).
+  const tab = document.createElement("button");
+  tab.type = "button";
+  tab.className = "art-tab";
+  tab.textContent = "Art styles";
+  tab.setAttribute("aria-expanded", "false");
+  tab.setAttribute("aria-controls", group.id);
+  let open = false;
+  const setOpen = (v: boolean): void => {
+    open = v;
+    tab.setAttribute("aria-expanded", String(v));
+    group.classList.toggle("art-toggle-open", v);
+    document.body.classList.toggle("art-open", v);
+  };
+  tab.addEventListener("click", () => setOpen(!open));
 
   const buttons: HTMLButtonElement[] = ART_STYLE_NAMES.map((name, i) => {
     const btn = document.createElement("button");
@@ -46,7 +65,10 @@ export function createStyleToggle(deps: StyleToggleDeps): StyleToggleHandle {
 
   const credit = document.createElement("div");
   credit.className = "art-credit";
-  document.body.append(group, credit);
+  document.body.append(tab, group, credit);
+  // A deep-linked art style arrives with the control unfolded — the visitor
+  // should see where the look came from and how to leave it.
+  if (deps.initial !== 0) setOpen(true);
 
   function reflect(style: ArtStyle): void {
     buttons.forEach((btn, i) => btn.setAttribute("aria-pressed", String(i === style)));
@@ -58,6 +80,7 @@ export function createStyleToggle(deps: StyleToggleDeps): StyleToggleHandle {
   return {
     reflect,
     dispose() {
+      tab.remove();
       group.remove();
       credit.remove();
     },
