@@ -27,6 +27,8 @@ import { createEdges } from "./scene/edges";
 import { createFilaments } from "./scene/filaments";
 import { createBeacons } from "./scene/beacons";
 import { computeNodeRadii } from "./scene/reach";
+import { mulberry32 } from "./scene/evolve";
+import { createAside } from "./ui/aside";
 import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
 import { createStarfield } from "./scene/starfield";
@@ -76,6 +78,12 @@ function start(graph: GraphCore): void {
 
   let reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const params = new URLSearchParams(location.search);
+  // The visit seed — every load is one of an infinite number of variations
+  // (Mark, round 9): it varies the evolving sky's phases, the opening camera
+  // angle, and the title aside's draw and ink. Runtime-only randomness; the
+  // data pipeline stays deterministic.
+  const visitSeed = (Math.random() * 0xffffffff) >>> 0;
+  const visitRand = mulberry32(visitSeed);
   const debug = params.has("debug");
   const og = params.has("og"); // ?og=1: hide UI chrome for a clean OG screenshot
   if (og) document.body.classList.add("og");
@@ -229,7 +237,13 @@ function start(graph: GraphCore): void {
     machine,
     requestRender,
     reducedMotion: () => reducedMotion,
+    visitSeed,
   });
+  // Per-visit opening angle: a nudge, not a relocation (the heroic 3/4 frame
+  // survives; no two visits open on exactly the same sky).
+  rig.controls.azimuthAngle += (visitRand() - 0.5) * 0.09;
+  // The rotating poetic aside beside the wordmark, printed for this visit.
+  createAside(visitRand);
   const viewToggle = createViewToggle({ driver: poseDriver });
   let lastReflectedPose = poseDriver.pose;
 

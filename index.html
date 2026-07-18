@@ -43,6 +43,17 @@
     </style>
   </head>
   <body>
+    <!-- Persistent filter defs: the rotating aside's marker texture must live
+         OUTSIDE the hand-drawn tag SVG (a display:none svg's filters are
+         unusable), so the text-mode aside can reference it via CSS filter. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="aside-marker" x="-20%" y="-30%" width="140%" height="160%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="2" seed="13" result="n"/>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="2.2"/>
+        </filter>
+      </defs>
+    </svg>
     <noscript>
       Coherence Map Explorer needs JavaScript and a WebGL-capable browser to
       render the 3D standards graph.

@@ -53,7 +53,7 @@ const ASCENT_Z = 0.65;
 // session's sky is not a still.
 const SESSION_RATE = (Math.PI * 2) / 4200;
 
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a |= 0;
@@ -64,7 +64,10 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-export function createEvolveField(graph: GraphCore): EvolveField {
+// `visitSeed` folds the per-visit randomness into the day's phase vocabulary:
+// the field still laps once per day, but every visit occupies its own point
+// in phase space — one of an infinite number of skies (Mark, round 9).
+export function createEvolveField(graph: GraphCore, visitSeed = 0): EvolveField {
   const n = graph.nodes.length;
 
   // Day seed: the calendar date picks today's phase vocabulary, and the boot
@@ -74,7 +77,7 @@ export function createEvolveField(graph: GraphCore): EvolveField {
   const now = new Date();
   const dayKey =
     now.getFullYear() * 416 + (now.getMonth() + 1) * 32 + now.getDate();
-  const rng = mulberry32(dayKey * 2654435761);
+  const rng = mulberry32(((dayKey * 2654435761) ^ visitSeed) >>> 0);
   const phases = HARMONICS.map(() => ({
     px: rng() * Math.PI * 2,
     py: rng() * Math.PI * 2,

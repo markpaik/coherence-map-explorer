@@ -66,6 +66,8 @@ export interface PoseDriverDeps {
   requestRender: () => void;
   /** Live reduced-motion flag; when true, every setPose is forced instant. */
   reducedMotion: () => boolean;
+  /** Per-visit seed for the evolving sky (one of infinite skies). */
+  visitSeed?: number;
 }
 
 export interface PoseDriver {
@@ -160,7 +162,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
   const baseCtrl1 = new Float32Array(edgeCtrls[1]);
   const off0 = new Float32Array(n * 3);
   const off1 = new Float32Array(n * 3);
-  const field = createEvolveField(graph);
+  const field = createEvolveField(graph, deps.visitSeed ?? 0);
   function applyEvolve(t: number): void {
     field.apply(t, basePose0, nodePoses[0], basePose1, nodePoses[1], off0, off1);
     for (let j = 0; j < m; j++) {

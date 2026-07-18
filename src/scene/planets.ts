@@ -66,18 +66,37 @@ const FRAG = /* glsl */ `
     float facing = max(dot(n, V), 0.0);
     float limb = pow(1.0 - facing, 1.8);
     vec3 L = normalize(uLightDir);
-    float nl = dot(n, L);
-    // Eclipse light: the sun sits mostly BEHIND each body, so only a waxing/
-    // waning sliver catches it; the rest of the disc is a shadowed silhouette
-    // that barely separates from the sky. Sharp terminator, deep night.
-    float day = smoothstep(-0.03, 0.22, nl);
 
     // Fine surface grain shared by every body: high-frequency fbm that (a)
-    // mottles the color and (b) roughens how the surface catches the light,
-    // so the terminator breaks up instead of sweeping over a billiard ball
-    // (Mark, round 8: "they look too smooth").
-    float grain = fbm(vec2(n.x * 16.0 + float(uType) * 7.3, n.y * 16.0 - float(uType) * 3.1));
-    float grainFine = fbm(vec2(n.x * 34.0 - 5.0, n.y * 34.0 + 11.0));
+    // mottles the color and (b) becomes a HEIGHT FIELD for real relief
+    // (Mark, round 8: craters and raised elements, not just paint).
+    vec2 q = vec2(n.x * 16.0 + n.z * 6.5 + float(uType) * 7.3,
+                  n.y * 16.0 - n.z * 4.1 - float(uType) * 3.1);
+    float grain = fbm(q);
+    float grainFine = fbm(q * 2.125 + vec2(-5.0, 11.0));
+
+    // Bump-mapped normal: numeric gradient of the height field, pushed along
+    // the sphere's tangent basis. Crater bowls fall away from the sun and
+    // their rims catch it, so the ONE shared world-space light reads as
+    // topography, strongest along the terminator. Relief per type: the moon
+    // is cratered rock, the dwarf ridged ice, the giants only billow.
+    float hgt = grainFine * 0.62 + grain * 0.38;
+    float e = 0.09;
+    float hx = fbm(q + vec2(e * 16.0, 0.0)) * 0.38
+             + fbm((q + vec2(e * 16.0, 0.0)) * 2.125 + vec2(-5.0, 11.0)) * 0.62;
+    float hy = fbm(q + vec2(0.0, e * 16.0)) * 0.38
+             + fbm((q + vec2(0.0, e * 16.0)) * 2.125 + vec2(-5.0, 11.0)) * 0.62;
+    vec3 t1 = normalize(cross(n, abs(n.y) > 0.8 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0)));
+    vec3 t2 = cross(n, t1);
+    float relief = uType == 1 ? 1.15 : (uType == 2 ? 0.6 : 0.28);
+    vec3 nb = normalize(n - (t1 * (hx - hgt) + t2 * (hy - hgt)) * (relief / e));
+
+    float nl = dot(nb, L);
+    // Eclipse light: the sun sits mostly BEHIND each body, so only a waxing/
+    // waning sliver catches it; the rest of the disc is a shadowed silhouette
+    // that barely separates from the sky. Sharp terminator, deep night — and
+    // now the terminator crawls over relief instead of sweeping a ball.
+    float day = smoothstep(-0.03, 0.22, nl);
 
     vec3 col;
     if (uType == 0) {
