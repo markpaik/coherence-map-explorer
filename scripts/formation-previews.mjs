@@ -202,10 +202,43 @@ function watershed() {
     el.push(`<text x="${f(mx)}" y="${padT - 40}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12.5" fill="#4a4770" letter-spacing="0.1em">${COL_LABELS[c]}</text>`);
   }
 
-  // rivers: prereq edges as smooth downstream curves. Width = target discharge
-  // (sqrt of descendant reach, ~0.8→7px). Colored by the river system they feed
-  // (target strand); cross-lane edges read as distributaries. Thick first so
-  // the fine tributaries lie legibly on top of the trunk rivers.
+  // rivers: prereq edges as FRACTAL channels (Mark's Sacramento reference:
+  // kinks, curves, randomness — real hydrology, not smooth silk). Each river
+  // samples the downstream-leaning cubic as its spine, then displaces every
+  // interior vertex perpendicular with two scales of id-hashed noise. Creeks
+  // kink sharply; trunk rivers meander broad and slow (kink damped by width).
+  // Width = target discharge (sqrt of descendant reach, ~0.8→7px), colored by
+  // the river system fed. Thick first so fine tributaries lie on top.
+  function channel(A, B, seedKey, w) {
+    const cx = (B[0] - A[0]) * 0.42;
+    const c1x = A[0] + Math.max(cx, 30);
+    const c2x = B[0] - Math.max(cx, 8);
+    const spine = (t) => {
+      const u = 1 - t;
+      return [
+        u * u * u * A[0] + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * B[0],
+        u * u * u * A[1] + 3 * u * u * t * A[1] + 3 * u * t * t * B[1] + t * t * t * B[1],
+      ];
+    };
+    const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+    const segs = clamp(Math.round(len / 20), 7, 30);
+    const pts = [];
+    for (let i = 0; i <= segs; i++) pts.push(spine(i / segs));
+    const kink = clamp(11 / (1 + w * 0.85), 1.8, 9.5); // creeks kink harder than trunks
+    for (let i = 1; i < segs; i++) {
+      const [ax, ay] = pts[i - 1];
+      const [bx2, by2] = pts[i + 1];
+      let dx = bx2 - ax, dy = by2 - ay;
+      const L = Math.hypot(dx, dy) || 1;
+      const nx = -dy / L, ny = dx / L;
+      const env = Math.sin(Math.PI * (i / segs)); // endpoints stay pinned
+      const coarse = (hash(seedKey + "k" + Math.floor(i / 3)) - 0.5) * 2;
+      const fine = (hash(seedKey + "j" + i) - 0.5) * 2;
+      const off = (coarse * 0.62 + fine * 0.38) * kink * env * (0.7 + Math.min(1.6, len / 420));
+      pts[i] = [pts[i][0] + nx * off, pts[i][1] + ny * off];
+    }
+    return "M" + pts.map(([x, y]) => `${f(x)},${f(y)}`).join(" L");
+  }
   const rivers = prereq.map((e) => {
     const w = 0.8 + Math.sqrt(reach(e.t) / MAXREACH) * 6.2;
     return { e, w };
@@ -215,10 +248,9 @@ function watershed() {
     if (!A || !B) continue;
     const t = byId.get(e.t);
     const col = STRAND[t.strand];
-    const cx = (B[0] - A[0]) * 0.42;
-    const d = `M${f(A[0])},${f(A[1])} C${f(A[0] + cx)},${f(A[1])} ${f(B[0] - cx)},${f(B[1])} ${f(B[0])},${f(B[1])}`;
+    const d = channel(A, B, e.s + "→" + e.t, w);
     const op = clamp(0.16 + (w / 7) * 0.6, 0.16, 0.82);
-    el.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w)}" stroke-opacity="${f(op)}" stroke-linecap="round"/>`);
+    el.push(`<path d="${d}" fill="none" stroke="${col}" stroke-width="${f(w)}" stroke-opacity="${f(op)}" stroke-linecap="round" stroke-linejoin="round"/>`);
   }
 
   // related pairs: faint dotted cross-channels
@@ -228,13 +260,34 @@ function watershed() {
     el.push(`<line x1="${f(A[0])}" y1="${f(A[1])}" x2="${f(B[0])}" y2="${f(B[1])}" stroke="${INK}" stroke-width="0.8" stroke-opacity="0.22" stroke-dasharray="1.5 4"/>`);
   }
 
-  // nodes: small (rivers carry the composition). WAP = gold ring (confluences).
+  // nodes: small (rivers carry the composition). WAP standards render as
+  // RESERVOIRS — irregular lake blobs, the Sacramento map's dark pools:
+  // stored water released to everything downstream, which is exactly what a
+  // widely applicable prerequisite is. Blob size grows with reach.
+  function reservoir(x, y, r, key) {
+    const nSides = 9;
+    const pts = [];
+    for (let i = 0; i < nSides; i++) {
+      const a = (i / nSides) * Math.PI * 2;
+      const rr = r * (0.6 + hash(key + "b" + i) * 0.85);
+      pts.push([x + Math.cos(a) * rr * 1.6, y + Math.sin(a) * rr]);
+    }
+    return "M" + pts.map(([px, py]) => `${f(px)},${f(py)}`).join(" L") + " Z";
+  }
+  // Reservoirs are RARE, like on a real map: only true storage — standards
+  // whose descendant reach is enormous (>=140, about the top two dozen), or
+  // an HS Widely Applicable Prerequisite (K-8 wap=1 is a source artifact and
+  // must never gate a visual).
   for (const n of g.nodes) {
     const p = pos.get(n.id);
     if (!p) continue;
     const r = 1.8 + Math.sqrt(n.deg) * 0.9;
+    const isReservoir = reach(n.id) >= 140 || (n.grade === "HS" && n.wap);
+    if (isReservoir) {
+      const rr = r + 3 + Math.sqrt(reach(n.id) / MAXREACH) * 6;
+      el.push(`<path d="${reservoir(p[0], p[1], rr, "rv" + n.id)}" fill="#2a5a72" fill-opacity="0.75" stroke="#ffd27a" stroke-width="0.9" stroke-opacity="0.5" stroke-linejoin="round"/>`);
+    }
     el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r)}" fill="${STRAND[n.strand]}" fill-opacity="0.95"/>`);
-    if (n.wap) el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r + 2.4)}" fill="none" stroke="#ffd27a" stroke-width="1.1" stroke-opacity="0.8"/>`);
   }
 
   // lane labels at the headwaters (left)
@@ -245,7 +298,7 @@ function watershed() {
   el.push(`<text x="28" y="52" font-family="ui-monospace, monospace" font-size="20" fill="#e8e6f6" letter-spacing="0.06em">THE WATERSHED · prerequisite knowledge as a river system</text>`);
 
   return svg(W, H, el,
-    "Grade flows K (headwaters, left) → high school (delta and sea, right); 4 strand lanes braid and meander · river WIDTH = the target standard's descendant reach (discharge volume, √-scaled 0.8–7px) · cross-lane rivers are distributaries · gold ring = widely applicable prerequisite (great confluence) · dotted = related pair · families cluster as tributary mouths just upstream of the parent · 480 standards, 757 prerequisite rivers, real data, deterministic");
+    "Grade flows K (headwaters, left) → high school (delta and sea, right); 4 strand lanes braid and meander · rivers kink and meander like real hydrology (fractal channels) · river WIDTH = the target standard's descendant reach (discharge volume, √-scaled 0.8–7px) · cross-lane rivers are distributaries · steel-blue reservoir = widely applicable prerequisite (stored water, released downstream) · dotted = related pair · families cluster as tributary mouths just upstream of the parent · 480 standards, 757 prerequisite rivers, real data, deterministic");
 }
 
 // ===========================================================================
