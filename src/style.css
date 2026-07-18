@@ -385,8 +385,9 @@ body.art-open .art-credit {
    printed board (Ringers cream #f0ece0) or a teal field (Fidenza #43a08b), not
    the dark sky, so they re-ink to stay legible. Ringers inks them in board ink
    (#1a1712); Fidenza uses the cream #e8e0cd with a dark shadow so it lifts off
-   the teal. The glass plaques (view/art toggles, filter rail) are deliberately
-   left as dark framed cards on the light fields — the accepted look this round.
+   the teal. The glass plaques (view/art toggles, filter rail, search bar) are
+   deliberately kept as dark framed cards on the light fields — the accepted look
+   this round — and the search-rail buttons are re-cast to join them (below).
    Only body.art-* is scoped here; Galaxy (style 0) is untouched. */
 
 /* Page backdrop matches the active field so a deep-linked ?style= load (or any
@@ -466,6 +467,26 @@ body.art-fidenza .depth-scale-sep {
 body.art-fidenza .art-credit {
   color: rgb(232 224 205 / 0.92);
   text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
+}
+
+/* Search-rail buttons ("Show me around" / "Stories"). The base .ghost-btn is a
+   transparent pill — a thin --line border + --ink-2 label that reads on the dark
+   sky but washes out to near-nothing on the cream/teal fields (round-7 feedback).
+   On the light fields, cast them as the same dark glass cards the search bar and
+   toggles already use, so the whole rail reads as one deliberate set. The border
+   (--line) and resting label (--ink-2) now sit on a solid dark surface, so their
+   contrast matches Galaxy; a hover state (absent in the base) gives the newly
+   solid card the same feedback the toggles have. Galaxy (style 0) is untouched. */
+body.art-ringers .ghost-btn,
+body.art-fidenza .ghost-btn {
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+body.art-ringers .ghost-btn:hover,
+body.art-fidenza .ghost-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
 }
 
 /* -- hover tooltip (glass chip) ------------------------------------------ */

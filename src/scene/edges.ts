@@ -72,6 +72,10 @@ const VERT = /* glsl */ `
   out float vEmphasis;
   out float vVisible;
   out float vDamage;
+  // Fidenza pipes (round 7): the strip's -1..+1 cross-position, interpolated so
+  // the fragment can shade it like a round tube. Written only in the Fidenza
+  // branch (galaxy/ringers never read it), so their output stays byte-identical.
+  out float vSide;
 
   vec3 bezier(float s) {
     float u = 1.0 - s;
@@ -164,23 +168,34 @@ const VERT = /* glsl */ `
       vVisible = mix(0.06, 1.0, aVisible);
       vDamage = clamp(aDamage, 0.0, 1.0);
     } else {
-      // ===================== FIDENZA: flat world-plane ribbon ===============
-      // Keep the bezier + tangent, but expand in the WORLD PLANE (not screen
-      // space): the width vector has no z-component, so the strip shows FULL
-      // width from the canonical front camera and foreshortens as you orbit —
-      // the anamorphic strokes that are the whole point of this style.
+      // ===================== FIDENZA: round pipe (screen-facing) ============
+      // Round 7 (Mark): the anamorphic WORLD-PLANE ribbons were replaced by
+      // PIPES. Expand in SCREEN space (the exact galaxy math) so every
+      // connection reads as a tube from any orbit angle — never a strip that
+      // foreshortens to a hairline — at REDUCED width so connections read
+      // thinner than the node pipes. The fragment adds a round-tube shading
+      // profile across the strip (vSide) and keeps the iconic striped caps.
       vec3 p = bezier(t);
       vec3 tangent = 2.0 * (1.0 - t) * (aCtrl - aStart) + 2.0 * t * (aEnd - aCtrl);
       float tlen = length(tangent);
       vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
-      vec3 offAxis = cross(tdir, vec3(0.0, 0.0, 1.0));
-      if (length(offAxis) < 1e-4) offAxis = cross(tdir, vec3(0.0, 1.0, 0.0));
-      vec3 offsetDir = normalize(offAxis);
-      vec3 wp = p + offsetDir * aArtScalars.x * 0.5 * side;
 
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(wp, 1.0);
+      vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + tdir, 1.0);
+      vec2 dir = (clipT.xy / clipT.w - clip.xy / clip.w) * uViewport;
+      float len = max(length(dir), 1e-6);
+      vec2 normalPx = vec2(-dir.y, dir.x) / len;
+
+      // aArtScalars.x is the old world width (~0.9–4.5). Map to a thin CSS-px
+      // pipe: 2.0 + width → ~3–6 px, clamped at 6.5 — always slimmer than the
+      // node pipes.
+      float width = min(2.0 + aArtScalars.x, 6.5);
+      vec2 offsetNdc = normalPx * (width * uPxRatio * 0.5 * side) / (uViewport * 0.5);
+      clip.xy += offsetNdc * clip.w;
+      gl_Position = clip;
 
       vT = t;
+      vSide = side;
       vColor = mix(aColorA, aColorB, t);
       vArtColor = aArtFid;
       vArtColor2 = aArtFid2;
@@ -209,6 +224,7 @@ const FRAG = /* glsl */ `
   in float vEmphasis;
   in float vVisible;
   in float vDamage;
+  in float vSide; // Fidenza pipe cross-position (-1..+1); round-tube shading
 
   out vec4 fragColor;
 
@@ -283,10 +299,19 @@ const FRAG = /* glsl */ `
       }
 
       // Fidenza striped caps (prereq ends only): alternate the body color with
-      // the cap alternate near t = 0 and t = 1.
+      // the cap alternate near t = 0 and t = 1. Kept exactly — the iconic stripes.
       if (uArtStyle >= 1.5 && vKind < 0.5 && (vT < 0.12 || vT > 0.88)) {
         float band = step(0.5, fract(vT * 42.0));
         col = mix(col, vArtColor2, band);
+      }
+
+      // Fidenza round-tube shading (round 7, Mark): shade the flat screen-facing
+      // strip like a cylinder so the connection reads as a pipe — bright along
+      // the centreline (vSide≈0), darkening to the silhouette (vSide≈±1). Applied
+      // to the striped caps too, so the stripes wrap the tube. Ringers strings
+      // are untouched (guarded on Fidenza).
+      if (uArtStyle >= 1.5) {
+        col *= sqrt(max(0.15, 1.0 - vSide * vSide));
       }
 
       // Damage: dissolve a broken lineage into the field and shed opacity.
@@ -329,7 +354,7 @@ export interface EdgesHandle {
   /**
    * Swap the render skin: 0 Galaxy (additive light ribbons, exactly the
    * shipped look) | 1 Ringers (taut pure-color strings, normal blending) |
-   * 2 Fidenza (thick flat world-plane ribbons with striped caps). Emphasis /
+   * 2 Fidenza (thin screen-facing round pipes with striped caps). Emphasis /
    * visibility / damage attributes keep their meaning; art styles express
    * dimness as opacity.
    */

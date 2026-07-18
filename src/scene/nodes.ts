@@ -36,7 +36,7 @@ const glslTable = (key: "mul" | "scale" | "dim"): string =>
   STATE_TABLE.map((s) => s[key].toFixed(4)).join(", ");
 
 // ---------------------------------------------------------------------------
-// Art-style node materials (Ringers pegs / outline, Fidenza cubes).
+// Art-style node materials (Ringers pegs / outline, Fidenza pipes).
 //
 // All three share the galaxy's MeshBasicMaterial + onBeforeCompile skeleton but
 // swap the shading model for Mark's paper grammar:
@@ -58,8 +58,13 @@ interface ArtNodeMatOpts {
   uField: { value: THREE.Color };
   /** Flat color uniform (outline ink) — required when colorSource is uniform. */
   uColor?: { value: THREE.Color };
-  /** Fidenza cube twist: rotate the position around z by aTwist. */
-  twist: boolean;
+  /**
+   * Fidenza PIPE mode (round 7): tilt the z-aligned cylinder off-axis by aTwist
+   * (rotate the vertex about x by aTwist, about y by aTwist*0.7 — a z-spin of a
+   * z-aligned cylinder is invisible) and add a subtle cylindrical rounding cue
+   * in the fragment so the pipe reads round. Off for the flat Ringers pegs.
+   */
+  pipe: boolean;
   /** Distinct program cache key so patched programs never collide. */
   cacheKey: string;
 }
@@ -70,14 +75,31 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
   const colorUniformDecl = opts.colorSource.kind === "uniform" ? "uniform vec3 uArtColor;" : "";
   const colorAssign =
     opts.colorSource.kind === "attr" ? `vArtColor = ${opts.colorSource.name};` : "vArtColor = uArtColor;";
-  const twistDecl = opts.twist ? "attribute float aTwist;" : "";
-  const twistApply = opts.twist
+  const twistDecl = opts.pipe ? "attribute float aTwist;" : "";
+  // PIPE tilt (round 7): the Fidenza node is a z-aligned cylinder. A z-rotation
+  // would be invisible, so aTwist becomes a small off-axis TILT — rotate the
+  // vertex about x by aTwist and about y by aTwist*0.7 — scattering the pipes
+  // organically. The normal rides the same rotation so the cylindrical rounding
+  // term in the fragment tracks the tilted silhouette.
+  const twistApply = opts.pipe
     ? /* glsl */ `{
-          float ca = cos(aTwist);
-          float sa = sin(aTwist);
-          transformed.xy = mat2(ca, -sa, sa, ca) * transformed.xy;
+          float ax = aTwist;
+          float ay = aTwist * 0.7;
+          float cx = cos(ax); float sx = sin(ax);
+          float cy = cos(ay); float sy = sin(ay);
+          vec3 pp = transformed;
+          pp = vec3(pp.x, cx * pp.y - sx * pp.z, sx * pp.y + cx * pp.z); // Rx
+          pp = vec3(cy * pp.x + sy * pp.z, pp.y, -sy * pp.x + cy * pp.z); // Ry
+          transformed = pp;
+          vec3 nn = normal;
+          nn = vec3(nn.x, cx * nn.y - sx * nn.z, sx * nn.y + cx * nn.z);
+          nn = vec3(cy * nn.x + sy * nn.z, nn.y, -sy * nn.x + cy * nn.z);
+          vPipeNrm = normalize(normalMatrix * nn);
+          vec4 pipeMv = modelViewMatrix * instanceMatrix * vec4(transformed, 1.0);
+          vPipeView = -pipeMv.xyz;
         }`
     : "";
+  const pipeVarying = opts.pipe ? "varying vec3 vPipeNrm; varying vec3 vPipeView;" : "";
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uField = opts.uField;
@@ -98,6 +120,7 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         varying float vVisible;
         varying float vDimE;
         varying float vDamage;
+        ${pipeVarying}
         `,
       )
       .replace(
@@ -135,6 +158,7 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         varying float vVisible;
         varying float vDimE;
         varying float vDamage;
+        ${pipeVarying}
         `,
       )
       .replace(
@@ -145,6 +169,21 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         // color, fading toward the field as damage rises (dissolve into paper).
         vec3 col = mix(vArtColor, uField, clamp(vDamage, 0.0, 1.0));
         diffuseColor.rgb = col;
+        ${
+          opts.pipe
+            ? /* glsl */ `
+        // Cylindrical rounding cue (round 7) — NOT a lighting model: darken
+        // toward the silhouette so the pipe reads round, never lit. Facing
+        // ratio only (bright where the normal faces the camera), capped at 15%
+        // so the flat paper fill and palette hue stay dominant.
+        {
+          vec3 pn = normalize(vPipeNrm);
+          vec3 pv = normalize(vPipeView);
+          float facing = abs(dot(pn, pv));
+          diffuseColor.rgb *= (1.0 - 0.15 * (1.0 - facing));
+        }`
+            : ""
+        }
         // Opacity-only dimness: ghosted (aVisible→0), emphasis-dimmed, and
         // damaged instances lose alpha; nothing ever brightens.
         float artAlpha = (1.0 - 0.92 * (1.0 - vVisible)) * (1.0 - 0.7 * vDimE) * (1.0 - 0.55 * vDamage);
@@ -214,7 +253,7 @@ export interface NodesHandle {
   setTouchPicking(on: boolean): void;
   /**
    * Swap the render skin: 0 Galaxy (orbs, exactly the shipped look) |
-   * 1 Ringers (bold-outlined pegs on cream) | 2 Fidenza (palette cubes on
+   * 1 Ringers (bold-outlined pegs on cream) | 2 Fidenza (palette pipes on
    * teal). Geometry/material swap only — instanced attributes, positions,
    * picking, and every driver keep working identically across styles.
    */
@@ -259,7 +298,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
 
   // -- art-style per-instance attributes (baked once) ----------------------
   // aArtRing — Ringers peg fill by strand (near-white for edgeless standards);
-  // aArtFid — Fidenza cube fill by strand; aTwist — Fidenza per-cube z-rotation.
+  // aArtFid — Fidenza pipe fill by strand; aTwist — Fidenza per-pipe off-axis tilt.
   // Colors are baked via THREE.Color.r/g/b, i.e. LINEAR (the pipeline's own
   // convention for instanceColor + edge colors), so the shaders never need an
   // sRGB→linear step and no hand-written hex ever reaches the GLSL.
@@ -486,8 +525,13 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   const outlineGeometry = ringGeometry.clone();
   outlineGeometry.scale(1.14, 1.14, 1.06);
   attachShared(outlineGeometry);
-  // Fidenza node: a cube (twisted per-instance in the vertex shader).
-  const fidGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+  // Fidenza node: a PIPE segment (round 7, Mark's direction — was a cube).
+  // A cylinder whose AXIS points +z (rotateX(PI/2)) like the Ringers peg, but
+  // proportionally longer and slimmer — a length of pipe, not a puck. Tilted
+  // off-axis per-instance by aTwist in the vertex shader; the fragment adds a
+  // cylindrical rounding cue so it reads round.
+  const fidGeometry = new THREE.CylinderGeometry(0.75, 0.75, 2.4, 20);
+  fidGeometry.rotateX(Math.PI / 2);
   attachShared(fidGeometry);
 
   const ringMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
@@ -495,7 +539,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   patchArtNodeMaterial(ringMaterial, {
     colorSource: { kind: "attr", name: "aArtRing" },
     uField: { value: new THREE.Color(RINGERS.bg) },
-    twist: false,
+    pipe: false,
     cacheKey: "coherence-nodes-ringers-peg",
   });
 
@@ -509,7 +553,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
     colorSource: { kind: "uniform" },
     uColor: { value: new THREE.Color(RINGERS.ink) },
     uField: { value: new THREE.Color(RINGERS.bg) },
-    twist: false,
+    pipe: false,
     cacheKey: "coherence-nodes-ringers-outline",
   });
 
@@ -518,7 +562,7 @@ export function createNodes(nodes: GraphNode[]): NodesHandle {
   patchArtNodeMaterial(fidMaterial, {
     colorSource: { kind: "attr", name: "aArtFid" },
     uField: { value: new THREE.Color(FIDENZA.bg) },
-    twist: true,
+    pipe: true,
     cacheKey: "coherence-nodes-fidenza",
   });
 
