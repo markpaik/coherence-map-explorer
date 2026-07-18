@@ -88,7 +88,7 @@ const FRAG = /* glsl */ `
              + fbm((q + vec2(0.0, e * 16.0)) * 2.125 + vec2(-5.0, 11.0)) * 0.62;
     vec3 t1 = normalize(cross(n, abs(n.y) > 0.8 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0)));
     vec3 t2 = cross(n, t1);
-    float relief = uType == 1 ? 1.15 : (uType == 2 ? 0.6 : 0.28);
+    float relief = uType == 1 ? 0.55 : (uType == 2 ? 0.3 : 0.14);
     vec3 nb = normalize(n - (t1 * (hx - hgt) + t2 * (hy - hgt)) * (relief / e));
 
     float nl = dot(nb, L);
@@ -104,12 +104,12 @@ const FRAG = /* glsl */ `
       // turbulence shredding the band edges and faint storm cells.
       float lat = n.y * 5.2;
       float warp = fbm(vec2(n.x * 2.6 + uTime * 0.008, n.y * 3.1)) * 1.35;
-      float t = lat + warp + (grain - 0.5) * 0.55;
+      float t = lat + warp + (grain - 0.5) * 0.28;
       float band = 0.5 + 0.5 * sin(t * 3.4);
       float accent = smoothstep(0.72, 0.98, 0.5 + 0.5 * sin(t * 1.25 + 1.7));
       col = mix(uColA, uColB, band);
       col = mix(col, uColC, accent * 0.55);
-      float storm = smoothstep(0.74, 0.9, grainFine) * 0.35;
+      float storm = smoothstep(0.76, 0.92, grainFine) * 0.16;
       col = mix(col, uColC, storm);
     } else if (uType == 1) {
       // Rocky moon: mottling + maria + crater pocking (thresholded fine noise
@@ -120,18 +120,18 @@ const FRAG = /* glsl */ `
       col = mix(col, uColB * 0.55, maria * 0.6);
       float pit = smoothstep(0.68, 0.82, grainFine);
       float rim = smoothstep(0.6, 0.68, grainFine) - pit;
-      col *= 1.0 - 0.4 * pit;
-      col *= 1.0 + 0.22 * rim;
+      col *= 1.0 - 0.22 * pit;
+      col *= 1.0 + 0.12 * rim;
     } else {
       // Ice dwarf: frost gradient + cracked-ice filigree in the fine grain.
       float frost = smoothstep(0.1, 0.9, abs(n.y)) * 0.5;
       float wisp = fbm(vec2(n.x * 3.2, n.y * 4.4)) * 0.25;
       col = mix(uColA, uColB, frost + wisp);
       float crack = smoothstep(0.62, 0.7, abs(grainFine - 0.5) * 2.0);
-      col = mix(col, uColB, crack * 0.28);
+      col = mix(col, uColB, crack * 0.14);
     }
     // Rough surfaces catch light unevenly: modulate the lit sliver by grain.
-    day *= 0.82 + 0.36 * grain;
+    day *= 0.9 + 0.2 * grain;
 
     col *= (0.055 + 0.945 * day);     // shadowed body, lit sliver
     col *= 1.0 - 0.45 * limb;         // limb darkening on the lit sliver
