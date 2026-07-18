@@ -17,7 +17,7 @@
 import type { GraphCore, GraphNode, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
 import { STRAND_COLORS } from "../scene/palette";
-import type { Machine } from "../state/machine";
+import { rollUpFamily, type Machine } from "../state/machine";
 import type { StoryPickerHandle } from "../stories/player";
 
 export interface BrowseDeps {
@@ -733,25 +733,21 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       .map((id) => nodeById.get(id))
       .filter((i): i is number => i !== undefined);
 
-    // A parent standard with no edges of its own (e.g. 4.NF.B.3, whose .a-.d
-    // carry the connections) rolls up its children's neighbours — excluding the
-    // family — so a heading standard is never a dead end (matches the panel).
-    let buildsOn = preds[idx];
-    let leadsTo = succ[idx];
-    let rel = related[idx];
-    let rolledUp = false;
-    if (kids.length && !buildsOn.length && !leadsTo.length && !rel.length) {
-      const family = new Set<number>([idx, ...kids]);
-      const roll = (adj: number[][]): number[] => {
-        const set = new Set<number>();
-        for (const c of kids) for (const nb of adj[c]) if (!family.has(nb)) set.add(nb);
-        return [...set];
-      };
-      buildsOn = roll(preds);
-      leadsTo = roll(succ);
-      rel = roll(related);
-      rolledUp = buildsOn.length > 0 || leadsTo.length > 0 || rel.length > 0;
-    }
+    // Family roll-up is the panel's EXACT rule (machine.rollUpFamily): every
+    // parent folds its sub-standards' connections into itself — own neighbours
+    // plus each child's, family-internal members removed — so a heading standard
+    // is never a dead end and never diverges from the 3D panel. 6.RP.A.3 is the
+    // catch: it owns outbound edges while its .a-.d carry the inbound lineage
+    // (5.G.A.2 / 6.RP.A.1 / 6.RP.A.2), so the roll-up must fire whenever there
+    // are children, not only when the parent is edgeless. The shared helper is
+    // the single source of truth; Browse only renders its output.
+    const { buildsOn, leadsTo, related: rel, rolledUp } = rollUpFamily(
+      idx,
+      kids,
+      preds,
+      succ,
+      related,
+    );
 
     const groups: [string, number[]][] = [
       ["Builds on", [...buildsOn].sort(byGradeThenCode)],

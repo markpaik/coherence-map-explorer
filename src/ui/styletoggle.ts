@@ -28,7 +28,7 @@ export function createStyleToggle(deps: StyleToggleDeps): StyleToggleHandle {
   const group = document.createElement("div");
   group.className = "art-toggle";
   group.setAttribute("role", "group");
-  group.setAttribute("aria-label", "Art style");
+  group.setAttribute("aria-label", "Style overrides");
   group.id = "art-toggle-group";
 
   // Discovery tab: a labeled pill that says the feature exists. Clicking it
@@ -37,7 +37,7 @@ export function createStyleToggle(deps: StyleToggleDeps): StyleToggleHandle {
   const tab = document.createElement("button");
   tab.type = "button";
   tab.className = "art-tab";
-  tab.textContent = "Art styles";
+  tab.textContent = "Style overrides";
   tab.setAttribute("aria-expanded", "false");
   tab.setAttribute("aria-controls", group.id);
   let open = false;

@@ -240,6 +240,15 @@ export function absolutize(url: string): string {
   // Must be checked before the single-slash case, since "//" also starts "/".
   if (url.startsWith("//")) return "https:" + url;
   if (url.startsWith("/")) return ACHIEVE_BASE + url;
+  // Scheme-less bare-host URL ("host.tld/path…") — e.g. the IM task PDFs stored
+  // as "s3.amazonaws.com/illustrativemathematics/…/public_task_170.pdf?…". A
+  // leading dotted host (at least one ".segment" before the first slash) is a
+  // real external URL that lost its scheme → adopt https so the "(source)" link
+  // survives the safeLinkUrl http(s) gate. Relative paths whose first segment
+  // carries no dot ("upload/K.OA.A.2 Solution Image.jpg") do NOT match and are
+  // left verbatim (the deadImage strip rule handles the dead one). "https://…"
+  // is unaffected: "https" is followed by ":" not ".".
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+\//.test(url)) return "https://" + url;
   return url;
 }
 
@@ -1291,7 +1300,14 @@ export function buildGraph(): BuildResult {
   // A visible breath between domain blocks, so the bands read as bands.
   const blockGap = rowGap * B.blockGapFactor;
   const gutterX = 18; // gutter lane offset from the column center (band is ±40)
+  // THE LIFT (round 11): each domain block rides its own z-plane like layered
+  // paper in a pop-up card — block bi (canonical order) at z = 8 + 7*bi, capped
+  // at 40 — so a side orbit reads the sheet as stacked cards while the front-on
+  // (x/y) schematic is unchanged. The isolated gutter is one quiet plane at z=4.
+  const GUTTER_Z = 4;
+  const blockZ = (bi: number): number => Math.min(40, 8 + bi * 7);
   const pos3 = new Map<string, [number, number, number]>();
+  const bpBlockZOf = new Map<string, number>(); // connected node -> its block z-plane
   const colMinY = new Array<number>(N_COLS).fill(0);
   for (let c = 0; c < N_COLS; c++) {
     const arr = colConnected[c];
@@ -1304,38 +1320,52 @@ export function buildGraph(): BuildResult {
     {
       let r = 0;
       colBlocks[c].forEach((block, bi) => {
+        const bz = blockZ(bi);
         for (const id of block) {
-          pos3.set(id, [cx, topY - (r * rowGap + bi * blockGap), 0]);
+          pos3.set(id, [cx, topY - (r * rowGap + bi * blockGap), bz]);
+          bpBlockZOf.set(id, bz);
           r++;
         }
       });
     }
     // Gutter lane: half-step offset so gutter dots interleave beside rows
     // rather than pairing with them. Gutter counts are always smaller than
-    // the connected stack, so the gutter never deepens the column.
+    // the connected stack, so the gutter never deepens the column. One quiet
+    // z=4 plane for the whole gutter (below every block card).
     colIsolated[c].forEach((id, j) => {
       const y = topY - (j + 0.5) * rowGap;
-      pos3.set(id, [cx + gutterX, y, 0]);
+      pos3.set(id, [cx + gutterX, y, GUTTER_Z]);
       if (y < minY) minY = y;
     });
     colMinY[c] = minY;
   }
 
-  // Blueprint sanity: every node's x is exactly its column center, z is flat,
-  // and no two nodes in a column share a (rounded, i.e. emitted) lane+y slot
-  // (connected stack and isolated gutter are separate lanes at distinct x).
+  // Blueprint sanity: every node's x is exactly its column center (gutter +18),
+  // its z rides its block's pop-up plane (connected: 8..40, non-decreasing down
+  // the column; gutter: the single quiet z=4 plane), and no two nodes in a
+  // column share a (rounded, i.e. emitted) lane+y slot (connected stack and
+  // isolated gutter are separate lanes at distinct x).
   for (let c = 0; c < N_COLS; c++) {
     const cx = round2(colCenterX(c));
     const gx = round2(colCenterX(c) + gutterX);
     const slots = new Set<string>();
-    for (const id of [...colConnected[c], ...colIsolated[c]]) {
+    let prevBlockZ = -Infinity; // connected z must be monotone down the column
+    for (const id of colConnected[c]) {
       const p = pos3.get(id)!;
-      const isolated = colIsolated[c].includes(id);
-      assert(p[2] === 0, `blueprint: pos3 z must be 0 on ${id}`);
-      assert(
-        round2(p[0]) === (isolated ? gx : cx),
-        `blueprint: pos3 x ${p[0]} off-lane in column ${c} on ${id}`,
-      );
+      const bz = bpBlockZOf.get(id)!;
+      assert(p[2] === bz, `blueprint: pos3 z ${p[2]} != block plane ${bz} on ${id}`);
+      assert(bz >= 8 && bz <= 40, `blueprint: block z ${bz} out of [8,40] on ${id}`);
+      assert(bz >= prevBlockZ, `blueprint: block z not monotone down column ${c} on ${id}`);
+      prevBlockZ = bz;
+      assert(round2(p[0]) === cx, `blueprint: pos3 x ${p[0]} off main lane in column ${c} on ${id}`);
+      const slot = `${round2(p[0])}:${round2(p[1])}`;
+      assert(!slots.has(slot), `blueprint: two nodes share slot ${slot} in column ${c}`);
+      slots.add(slot);
+    }
+    for (const id of colIsolated[c]) {
+      const p = pos3.get(id)!;
+      assert(p[2] === GUTTER_Z, `blueprint: gutter pos3 z ${p[2]} != ${GUTTER_Z} on ${id}`);
+      assert(round2(p[0]) === gx, `blueprint: gutter pos3 x ${p[0]} off gutter lane in column ${c} on ${id}`);
       const slot = `${round2(p[0])}:${round2(p[1])}`;
       assert(!slots.has(slot), `blueprint: two nodes share slot ${slot} in column ${c}`);
       slots.add(slot);
@@ -1756,23 +1786,26 @@ export function buildGraph(): BuildResult {
       round2(m2y + pushB),
       round2(m2z + jitB),
     ];
-    // Pose C: flat circuit board. Same-column edges (equal x) ALL bow left —
-    // one consistent rail on the side away from the isolated gutter, arcs
-    // nested deeper for longer hops, like a bus bar on a circuit board. The
-    // side is a fixed drawing convention (not data); depth encodes hop span.
-    // Cross-column edges keep the x-midpoint but bias the control's y toward
-    // the SOURCE, so the quadratic reads as a gentle rightward S-curve from
-    // source into target. z stays 0.
+    // Pose C: flat-front circuit board, now LIFTED. Same-column edges (equal x)
+    // ALL bow left — one consistent rail on the side away from the isolated
+    // gutter, arcs nested deeper for longer hops, like a bus bar on a circuit
+    // board. The side is a fixed drawing convention (not data); depth encodes
+    // hop span. Cross-column edges keep the x-midpoint but bias the control's y
+    // toward the SOURCE, so the quadratic reads as a gentle rightward S-curve
+    // from source into target. Front-on the bow x/y is exactly as before; the
+    // control's z is the midpoint of the endpoints' block planes so an edge
+    // between two cards reads as a ramp between their z-levels on a side orbit.
     const a3 = pos3.get(s)!;
     const b3 = pos3.get(t)!;
+    const c3z = round2((a3[2] + b3[2]) / 2);
     let c3: [number, number, number];
     if (a3[0] === b3[0]) {
       const dy = Math.abs(a3[1] - b3[1]);
       const bow = -(B.sameColumnBow * (0.45 + Math.min(0.55, dy / 120)));
-      c3 = [round2(a3[0] + bow), round2((a3[1] + b3[1]) / 2), 0];
+      c3 = [round2(a3[0] + bow), round2((a3[1] + b3[1]) / 2), c3z];
     } else {
       const bias = B.crossColumnSourceBias;
-      c3 = [round2((a3[0] + b3[0]) / 2), round2(a3[1] * bias + b3[1] * (1 - bias)), 0];
+      c3 = [round2((a3[0] + b3[0]) / 2), round2(a3[1] * bias + b3[1] * (1 - bias)), c3z];
     }
     // Pose D (transit): elbow of an axis-aligned L; z = midpoint of endpoint z's
     // (cross-level edges bank between line levels). A family-internal edge (both

@@ -214,7 +214,10 @@ export function renderTag(text: string, press = 1): SVGSVGElement {
 
   const common = (g: SVGGElement): void => {
     g.setAttribute("fill", "none");
-    g.setAttribute("stroke", "currentColor");
+    // Stroke follows the --tag-ink custom property, defaulting to the element's
+    // currentColor so nothing changes by default; body.env-light flips --tag-ink
+    // dark so the aside re-inks on the light dawn / daylight fields.
+    g.setAttribute("stroke", "var(--tag-ink, currentColor)");
     g.setAttribute("stroke-linecap", "round");
     g.setAttribute("stroke-linejoin", "round");
   };

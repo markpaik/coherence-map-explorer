@@ -14,6 +14,14 @@
 // as light rather than paint, overlapping edges reinforce instead of muddying,
 // and it makes draw order irrelevant (no transparent-sort artifacts).
 // depthWrite off, depthTest on (edges still occlude behind opaque nodes).
+//
+// Daylight enamel (round-12): the ONE exception is the Transit concrete-daylight
+// window, where the ribbons paint onto a LIGHT field. Additive light washes every
+// strand toward cream there, so setDaylight flips the Galaxy material to
+// NormalBlending past the window midpoint and the fragment pulls the colour to its
+// full, ~15%-deepened strand hue (painted enamel signage). uDaylight 0 keeps the
+// shipped additive neon byte-identical, so poses 0–2 and the dark baseline are
+// untouched; the paper art styles own their own (normal) blending independently.
 
 import * as THREE from "three";
 import type { GraphEdge, GraphNode } from "../data";
@@ -74,9 +82,15 @@ const VERT = /* glsl */ `
   out float vVisible;
   out float vDamage;
   // Fidenza pipes (round 7): the strip's -1..+1 cross-position, interpolated so
-  // the fragment can shade it like a round tube. Written only in the Fidenza
-  // branch (galaxy/ringers never read it), so their output stays byte-identical.
+  // the fragment can shade it like a round tube. The Galaxy branch also writes it
+  // (round 11) to anti-alias the metro/blueprint ribbon silhouette; poses 0–1
+  // never read it (the AA is gated on the structural morph), so their output
+  // stays byte-identical.
   out float vSide;
+  // Galaxy ribbon half-width in device px (round 11): lets the fragment feather
+  // the ribbon edge over a fixed pixel span regardless of the instance's width,
+  // so thin lines keep a full-alpha core while their silhouette anti-aliases.
+  out float vHalfPx;
 
   vec3 bezier(float s) {
     float u = 1.0 - s;
@@ -175,7 +189,12 @@ const VERT = /* glsl */ `
       // at poses 0/1 and at Transit, so nothing else is disturbed, and the metro
       // block below re-widens the trunks as m3 takes over past pose 2.
       float m2 = clamp(1.0 - abs(uPose - 2.0) / 0.4, 0.0, 1.0);
-      width = mix(width, 1.1, m2);
+      // Round 11 focus grammar: at the Blueprint the resting weight is a thin 1.1
+      // ink line; a CONNECTED edge (emphasis >= HOVER) widens ×1.6 — the
+      // highlighter stroke over the resting sheet. bpLit is 0 at rest/dimmed, 1 at
+      // hover/chain/related.
+      float bpLit = clamp(e - 1.0, 0.0, 1.0);
+      width = mix(width, 1.1 * mix(1.0, 1.6, bpLit), m2);
 
       // Transit (pose 3): near-constant metro weight. Prereq trunks widen with
       // SOURCE reach (aArtScalars.z is the reach-scaled source radius already
@@ -187,6 +206,9 @@ const VERT = /* glsl */ `
         float radA = aArtScalars.z;
         float trunk = 2.0 + clamp((radA - 1.6) * 2.0, 0.0, 4.0); // ~2..6 px by reach
         float metroW = aKind < 0.5 ? max(width, trunk) : 1.4;
+        // Round 11 focus grammar: a CONNECTED line widens ×1.3 so the chain reads
+        // over the ghosted city (see the fragment's Transit fade).
+        metroW *= mix(1.0, 1.3, clamp(e - 1.0, 0.0, 1.0));
         width = mix(width, metroW, m3);
       }
 
@@ -198,6 +220,10 @@ const VERT = /* glsl */ `
       vColor = mix(aColorA, aColorB, t);
       vKind = aKind;
       vEmphasis = e;
+      // Ribbon-silhouette AA inputs (round 11): the strip's cross-position and its
+      // half-width in device px. Read only under the structural-morph AA window.
+      vSide = side;
+      vHalfPx = max(width * uPxRatio * 0.5, 0.5);
       // Filtered-out edges (either endpoint hidden) fade toward a 0.06 ghost.
       vVisible = mix(0.06, 1.0, aVisible);
       vDamage = clamp(aDamage, 0.0, 1.0);
@@ -295,6 +321,7 @@ const FRAG = /* glsl */ `
   uniform float uArtStyle; // 0 Galaxy | 1 Ringers | 2 Fidenza
   uniform float uPose; // eased pose value 0..3; 3 = Transit (opaque metro lines)
   uniform vec3 uField; // active art-style field color (damage fades toward it)
+  uniform float uDaylight; // 0..1 concrete-daylight amount at Transit (bloom keys off the same)
 
   in float vT;
   in vec3 vColor;
@@ -305,6 +332,7 @@ const FRAG = /* glsl */ `
   in float vVisible;
   in float vDamage;
   in float vSide; // Fidenza pipe cross-position (-1..+1); round-tube shading
+  in float vHalfPx; // Galaxy ribbon half-width (device px) — silhouette AA at Transit/Blueprint
 
   out vec4 fragColor;
 
@@ -316,6 +344,14 @@ const FRAG = /* glsl */ `
     if (uArtStyle < 0.5) {
       // ===================== GALAXY (shipped, byte-identical) ===============
       float e = vEmphasis;
+      // Round 11 focus grammar helpers (shared by the Blueprint m2 and Transit m3
+      // windows). lit ramps 0 at REST(1) → 1 at HOVER(2)+ : a "connected to the
+      // focus" signal (hover/chain/related all read connected). dimd is 1 only at
+      // DIMMED(0) — an UNCONNECTED edge during a focus (the base goes DIMMED under a
+      // focus). Both are 0 with no focus (every edge REST), so no-focus looks — and
+      // poses 0–2 — stay untouched.
+      float lit  = clamp(e - 1.0, 0.0, 1.0);
+      float dimd = clamp(1.0 - e, 0.0, 1.0);
       int i0 = int(floor(e));
       int i1 = int(min(floor(e) + 1.0, 5.0));
       float f = fract(e);
@@ -343,11 +379,14 @@ const FRAG = /* glsl */ `
       if (vKind < 0.5) {
         // Prerequisite (directed): HDR-bright with directional comets when chain/hot.
         alpha = max(mix(aP[i0], aP[i1], f), 0.65 * story);
-        // Transit: lift the rest line to an OPAQUE metro line (~0.95). max() so a
-        // hot/chain edge is never dimmed; mix(...,m3) so poses 0–2 are unchanged.
-        alpha = mix(alpha, max(alpha, 0.95), m3);
-        // Blueprint: lift the rest prereq to a legible thin ink line.
-        alpha = mix(alpha, max(alpha, 0.55), m2);
+        // Transit metro alpha (round 11 focus grammar): resting + connected lines
+        // stay OPAQUE metro (~0.95, today's look); a focus collapses UNCONNECTED
+        // lines to ~0.12 so they dissolve into the city and the chain owns the frame.
+        // max() keeps a hot/chain edge bright; mix(...,m3) leaves poses 0–2 unchanged.
+        alpha = mix(alpha, mix(max(alpha, 0.95), 0.12, dimd), m3);
+        // Blueprint ink alpha (round 11): dimmed→faint 0.18, resting→0.55 legible
+        // ink, connected→0.90 highlighter (= 0.55 + 0.35·lit − 0.37·dimd).
+        alpha = mix(alpha, 0.55 + 0.35 * lit - 0.37 * dimd, m2);
         col *= max(mix(mulP[i0], mulP[i1], f), 1.0 + 0.8 * story);
         float flow = max(mix(flowP[i0], flowP[i1], f), story);
         float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
@@ -357,25 +396,46 @@ const FRAG = /* glsl */ `
         // Related (undirected): in-shader dash, slow shimmer, NEVER a flow comet.
         float dash = step(0.5, fract(vT * 14.0));
         float aRel = max(mix(aR[i0], aR[i1], f), 0.4 * story);
-        // Transit: related pairs are dashed WALKING TRANSFERS — lift the rest
-        // opacity so the dashed link reads (the metro grammar for out-of-system
-        // connections). Dash cadence is fract along the path param (vT).
-        aRel = mix(aRel, max(aRel, 0.34), m3);
-        // Blueprint: related pairs lift to visible dashed CONSTRUCTION lines.
-        aRel = mix(aRel, max(aRel, 0.5), m2);
+        // Transit: related pairs are dashed WALKING TRANSFERS — resting reads as an
+        // opaque dashed link; a focus collapses UNCONNECTED transfers to ~0.12 (they
+        // dissolve into the city with the rest of the ghosted map).
+        aRel = mix(aRel, mix(max(aRel, 0.34), 0.12, dimd), m3);
+        // Blueprint: connected related re-saturate (dashed highlighter); unconnected
+        // fade faint (= 0.50 + 0.35·lit − 0.32·dimd).
+        aRel = mix(aRel, 0.50 + 0.35 * lit - 0.32 * dimd, m2);
         alpha = aRel * dash;
         float shim = max(mix(shimR[i0], shimR[i1], f), story);
         col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
       }
 
-      // Blueprint ink (pose 2, Galaxy only): the additive strand light flattens
-      // to white-ink drafting lines (strand kept as a 30% tint) — no HDR, no
-      // comets — reading as white ink over the Prussian cyanotype sheet. The
-      // literal is LINEAR #eaf2ff. m2 == 0 at poses 0/1 and Transit, so nothing
-      // else is disturbed.
+      // Daylight enamel (round-12, Galaxy Transit): in the concrete-daylight window
+      // the material paints with NORMAL blending (edges.setDaylight), so the strand
+      // must carry its FULL colour rather than an additive glow. Pull the ribbon to
+      // its pure strand hue, deepened ~15% (×0.85) so it sits ON the concrete instead
+      // of floating over it — the HDR multiplier + flow comet dissolve into flat
+      // paint. Gated on uDaylight·m3: uDaylight 0 (and poses 0–2) stay byte-identical,
+      // and the unconnected city dissolve below still recedes the ghosted map.
+      col = mix(col, vColor * 0.85, uDaylight * m3);
+
+      // Blueprint recolor (pose 2, Galaxy only): the resting sheet is white ink;
+      // strand colour is the highlighter. Resting ink = white-ink at a 50% strand
+      // tint (raised from 30% — the user found 30% too faint). A CONNECTED edge
+      // re-saturates to FULL strand colour (no white blend); unconnected edges keep
+      // the resting tint and recede via the faint alpha above. The white-ink literal
+      // is LINEAR #eaf2ff. m2 == 0 at poses 0/1 and Transit, so nothing else moves.
       if (m2 > 0.0) {
-        vec3 inkCol = mix(vec3(0.823, 0.887, 1.0), vColor, 0.3);
+        vec3 restInk = mix(vec3(0.823, 0.887, 1.0), vColor, 0.5);
+        vec3 inkCol = mix(restInk, vColor, lit);
         col = mix(col, inkCol, m2);
+      }
+      // Transit recolor (pose 3, Galaxy only): a focus dissolves UNCONNECTED lines
+      // into the CITY BACKGROUND — near-black #0a0a16 in the dark baseline, concrete
+      // grey #beb9b0 at daylight (mix by uDaylight) — so the ghosted city recedes and
+      // the chain reads. Connected + resting lines keep their strand colour. Literals
+      // are LINEAR. Gated on dimd·m3, so no-focus Transit and poses 0–2 are untouched.
+      if (m3 > 0.0) {
+        vec3 cityBg = mix(vec3(0.003035, 0.003035, 0.008023), vec3(0.514918, 0.485150, 0.434154), uDaylight);
+        col = mix(col, cityBg, dimd * m3);
       }
 
       // Structural damage (stories): pull the edge toward a near-black ember
@@ -385,7 +445,19 @@ const FRAG = /* glsl */ `
       col = mix(col, vec3(0.0231, 0.0060, 0.0037), vDamage);
       alpha *= (1.0 - 0.55 * vDamage);
 
-      // Soft edge across the ribbon is unnecessary at ~1px widths; keep it flat.
+      // Ribbon-silhouette AA (round 11 flicker fix): with antialias:false the flat
+      // screen-space ribbons alias as the camera orbits, and at the structural poses
+      // hundreds of near-opaque additive ribbons overlap along shared corridors —
+      // additive stacking amplifies the sub-pixel coverage flip into visible shimmer.
+      // Feather the alpha across the last ~0.9 device px of each edge (fixed pixel
+      // span via vHalfPx, so thin lines keep a full-alpha core). Gated on the
+      // structural morph max(m2, m3): poses 0–1 stay byte-identical and the soft edge
+      // exists only where the metro/blueprint grammar does. Touches no depth and no
+      // route/position — a texture, not a placement (THE LAW holds).
+      float aaWin = max(m2, m3);
+      float aaEdge = clamp(1.0 - 0.9 / vHalfPx, 0.0, 0.92);
+      float edgeAA = 1.0 - smoothstep(aaEdge, 1.0, abs(vSide));
+      alpha *= mix(1.0, edgeAA, aaWin);
       fragColor = vec4(col, alpha * vVisible);
     } else {
       // ===================== ART STYLES (paper: opacity, never HDR) =========
@@ -463,6 +535,17 @@ export interface EdgesHandle {
    * poses 0–2 stay pixel-identical. The pose driver calls this every morph frame.
    */
   setPose(p: number): void;
+  /**
+   * Feed the concrete-daylight amount (0..1). Two consumers: (1) the Transit focus
+   * grammar dissolves unconnected metro lines toward the live city background
+   * (near-black in the dark baseline, concrete grey at daylight); (2) the daylight
+   * enamel — past the window midpoint the Galaxy material flips to normal blending
+   * and the fragment deepens each ribbon to its full painted strand hue, so signage
+   * sits ON the concrete instead of washing to cream. main.ts passes
+   * environs.daylight01() each rendered frame (0 off-Galaxy, so paper styles are
+   * never touched).
+   */
+  setDaylight(amount: number): void;
   setViewport(widthPx: number, heightPx: number, pixelRatio: number): void;
   /**
    * Swap the render skin: 0 Galaxy (additive light ribbons, exactly the
@@ -608,6 +691,10 @@ export function createEdges(
     // 0–2 render byte-identically to the shipped look.
     uPose: { value: 0 },
     uField: { value: new THREE.Color(RINGERS.bg) },
+    // Concrete-daylight amount 0..1 (Transit). The focus grammar dissolves
+    // unconnected metro lines toward mix(#0a0a16, #beb9b0, uDaylight) — the live
+    // background — so they recede whether the stage is the dark baseline or daylight.
+    uDaylight: { value: 0 },
   };
 
   // RawShaderMaterial (not ShaderMaterial): it injects no built-in attributes,
@@ -668,6 +755,21 @@ export function createEdges(
     },
     setPose(p) {
       uniforms.uPose.value = p;
+    },
+    setDaylight(amount) {
+      uniforms.uDaylight.value = amount;
+      // Enamel compositing: in the daylight window the ribbons must PAINT (normal
+      // alpha blend) rather than GLOW (additive), or gold/violet wash to cream on
+      // the light concrete. Flip the Galaxy material at the window midpoint; the
+      // fragment lerps the enamel deepening by uDaylight so uDaylight 0 stays
+      // additive + byte-identical (poses 0–2, dark-baseline Transit). Only the
+      // Galaxy path is touched — the paper styles set their own blending in
+      // setArtStyle and never raise daylight (environs zeroes it off-Galaxy).
+      // Blending is applied at draw time, so no material.needsUpdate (see setArtStyle).
+      if (uniforms.uArtStyle.value < 0.5) {
+        const target = amount > 0.5 ? THREE.NormalBlending : THREE.AdditiveBlending;
+        if (material.blending !== target) material.blending = target;
+      }
     },
     setViewport(widthPx, heightPx, pixelRatio) {
       uniforms.uViewport.value.set(widthPx, heightPx);

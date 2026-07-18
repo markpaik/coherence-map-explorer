@@ -149,6 +149,60 @@ export function nodeBoundingSphere(
   return sphere;
 }
 
+/** The direct connections of a focused standard after family roll-up. */
+export interface RolledConnections {
+  buildsOn: number[]; // direct incoming prereqs (rolled up when a parent)
+  leadsTo: number[]; // direct outgoing prereqs (rolled up when a parent)
+  related: number[]; // related pairs (rolled up when a parent)
+  /** True whenever the focus is a family parent (parts.length > 0). */
+  rolledUp: boolean;
+}
+
+/**
+ * Roll a parent standard's family connections up into the parent. EVERY parent
+ * (any standard with sub-standards, parts.length > 0) rolls up UNCONDITIONALLY:
+ * the original coherence map presents a family as ONE card, so an arrow into
+ * any sub-standard reads as an arrow into the parent. The rolled set is the
+ * focus's OWN direct neighbours PLUS each child's neighbours, with every
+ * family-internal member (the parent and its parts) removed. A standalone
+ * standard (no parts) returns its own direct sets unchanged with rolledUp=false.
+ *
+ * Pure function of the adjacency arrays — the SINGLE source of truth for both
+ * the 3D panel (machine.computeFocus) and mobile Browse (renderConnections), so
+ * the two can never drift. Edgeless parents (e.g. 4.NF.B.3) are the degenerate
+ * case of the same rule; partial parents (e.g. 6.RP.A.3, which owns outbound
+ * edges while its .a-.d hold the inbound lineage from 5.G.A.2 / 6.RP.A.1 /
+ * 6.RP.A.2) are exactly why the gate is parts.length, not "parent has no edges".
+ */
+export function rollUpFamily(
+  focus: number,
+  parts: number[],
+  preds: number[][],
+  succ: number[][],
+  relatedAdj: number[][],
+): RolledConnections {
+  if (parts.length === 0) {
+    return {
+      buildsOn: preds[focus],
+      leadsTo: succ[focus],
+      related: relatedAdj[focus],
+      rolledUp: false,
+    };
+  }
+  const family = new Set<number>([focus, ...parts]);
+  const roll = (own: number[], adj: number[][]): number[] => {
+    const set = new Set<number>(own.filter((nb) => !family.has(nb)));
+    for (const c of parts) for (const nb of adj[c]) if (!family.has(nb)) set.add(nb);
+    return [...set];
+  };
+  return {
+    buildsOn: roll(preds[focus], preds),
+    leadsTo: roll(succ[focus], succ),
+    related: roll(relatedAdj[focus], relatedAdj),
+    rolledUp: true,
+  };
+}
+
 export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   const { nodes, edges, tooltip, canvas, rig, panel, announce, requestRender } = deps;
   let reducedMotion = deps.reducedMotion; // mutable: __cme.setReducedMotion flips it
@@ -320,22 +374,12 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     // 5.G.A.2 / 6.RP.A.1 / 6.RP.A.2 while the parent owns only outbound).
     // Edgeless parents (e.g. 4.NF.B.3) are the degenerate case of the same
     // rule.
-    let rolledUp = false;
-    let seedPreds = preds[focus];
-    let seedSucc = succ[focus];
-    let seedRelated = relatedAdj[focus];
-    if (parts.length > 0) {
-      const family = new Set<number>([focus, ...parts]);
-      const roll = (own: number[], adj: number[][]): number[] => {
-        const set = new Set<number>(own.filter((nb) => !family.has(nb)));
-        for (const c of parts) for (const nb of adj[c]) if (!family.has(nb)) set.add(nb);
-        return [...set];
-      };
-      seedPreds = roll(preds[focus], preds);
-      seedSucc = roll(succ[focus], succ);
-      seedRelated = roll(relatedAdj[focus], relatedAdj);
-      rolledUp = true;
-    }
+    const {
+      buildsOn: seedPreds,
+      leadsTo: seedSucc,
+      related: seedRelated,
+      rolledUp,
+    } = rollUpFamily(focus, parts, preds, succ, relatedAdj);
     // BFS ancestry/descendants seed from the (possibly rolled-up) direct sets.
     const ancestors = rolledUp
       ? bfsFrom(seedPreds, preds, new Set([focus, ...parts]))

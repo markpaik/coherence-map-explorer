@@ -21,7 +21,11 @@
 
 export type ArtStyle = 0 | 1 | 2;
 
-export const ART_STYLE_NAMES: readonly string[] = ["Galaxy", "Ringers", "Fidenza"];
+// User-facing option labels. Style 0's label is "Let it Ride" (round 11): with
+// per-pose environments, style 0 no longer reads as "galaxy" — it lets each
+// formation wear its own designed look, while Ringers/Fidenza are the true
+// overrides. The INTERNAL identifier / slug stays `galaxy` (ART_STYLE_SLUGS).
+export const ART_STYLE_NAMES: readonly string[] = ["Let it Ride", "Ringers", "Fidenza"];
 
 // URL param values (?style=ringers) — index-aligned with the names.
 export const ART_STYLE_SLUGS: readonly string[] = ["galaxy", "ringers", "fidenza"];
@@ -67,7 +71,7 @@ export const ART_CREDITS: readonly { html: string }[] = [
   },
   {
     html:
-      'After Tyler Hobbs’s <a href="https://www.curated.xyz/editorial/collecting-fidenza" target="_blank" rel="noopener">Fidenza</a>',
+      'After <a href="https://www.tylerxhobbs.com/works" target="_blank" rel="noopener">Tyler Hobbs</a>’s <a href="https://www.curated.xyz/editorial/collecting-fidenza" target="_blank" rel="noopener">Fidenza</a>',
   },
 ];
 

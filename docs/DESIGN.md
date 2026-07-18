@@ -248,6 +248,42 @@ Blueprint), plain orbs through the 2.4–2.6 interstitial, orbs→stations over
 2.6–3.0. The sheet is gone by 2.5. All layers fold per-node story dimming, and
 every treatment is a pure function of the eased pose value (RM-safe, no drift).
 
+## Environments (round 11: each formation wears its own world)
+
+Style 0 gives every formation a designed environment (src/scene/environs.ts,
+Galaxy-style only — Ringers/Fidenza fields ARE their environments; stories
+suppress all environments back to the dark baseline, which also preserves the
+neon night Transit):
+
+- **Constellation** — the shipped galaxy. Untouched.
+- **Ascent, "Sierra dawn"** — pre-dawn indigo grading to a narrow gold horizon
+  band biased toward the summit side; four static mist planes pooling at the
+  foundations; two feathered jagged ridge silhouettes (deterministic hash,
+  texture only, horizontal end-fade so no plane edge ever shows); stars hold
+  at 0.35 (dawn keeps its stars), planets gone.
+- **Blueprint, "studio"** — quiet slate shell; the sheet is the show, and it
+  has a BACK (mirrored bleed-through plate) so orbiting behind reads as paper.
+- **Transit, "concrete daylight"** — warm mottled concrete shell; bloom off;
+  edges flip to normal-blend ENAMEL (full strand hue ×0.85) so lines read as
+  painted signage, not glow; stations stay painted roundels (a touch brighter
+  than lines — deliberate, signage-true).
+
+Environment windows are ENDPOINT-GATED (a layer wakes only if its home pose is
+the morph's origin or target — no sheet flash on 0/1→3). On light environments
+`body.env-light` re-inks the chrome (title, captions, provline, tag aside via
+--tag-ink) dark slate, and the grade/course etches lerp to dark warm ink.
+
+FOCUS GRAMMAR: the Blueprint rests at 50% white-ink strand tint; focus
+re-saturates the connected web to full strand color ×1.6 width while the rest
+fades to faint ink (color is the highlighter). The Transit focus ghosts the
+unconnected city toward the live background (near-black at night, concrete by
+day) at ~0.12 while the chain holds full saturation ×1.3 — this is also the
+fix for the "shimmer": the washout WAS the flicker (z-fighting was disproven;
+edge ribbons never write depth).
+
+Labels: the styles tab reads "Style overrides"; style 0 is "Let it Ride"
+(slug `galaxy` unchanged) — override nothing, let each formation do its thing.
+
 ## Art styles
 
 The scene ships three render skins, switchable live from the bottom-right

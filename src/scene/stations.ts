@@ -37,6 +37,7 @@
 import * as THREE from "three";
 import type { GraphCore, StrandId } from "../data";
 import { RINGERS, FIDENZA } from "./artstyle";
+import { stationFocusFade, cityFadeTarget } from "./focusgrammar";
 
 const STRAND_ORDER: StrandId[] = ["number", "algebra", "geometry", "data"];
 
@@ -120,7 +121,7 @@ const RINGERS_FILL = 0xf0ece0; // cream board
 const RINGERS_STROKE = 0x1a1712; // ink
 const FIDENZA_FILL = 0x4fb89f; // field-adjacent teal (a touch lighter than 0x43a08b)
 const FIDENZA_STROKE = 0xe8e0cd; // cream border
-const MISSED = 0x0a0a16; // near-black a missed / ghosted station fades toward
+const MISSED = 0x0a0a16; // near-black a missed / ghosted station fades toward (dark-baseline end of the fade target)
 
 // 0 disc | 1 capsule | 2 lozenge
 type FrameKind = 0 | 1 | 2;
@@ -131,9 +132,12 @@ export interface StationsHandle {
    * Drive the crossfade + follow the live node positions. `pose` is the eased
    * pose value (0..3); the stations fade in over 2.6→3.0 and are hidden below
    * that (so poses 0–2 draw nothing). While visible, refresh every mark's centre
-   * from the live node position and fold in per-node story dimming.
+   * from the live node position and fold in per-node story dimming. `daylight01`
+   * (0..1) is the concrete-daylight amount: the missed / focus-collapsed fade
+   * target lerps from near-black #0a0a16 (dark baseline) to concrete grey #beb9b0,
+   * so an unconnected station dissolves into the live city background.
    */
-  update(pose: number): void;
+  update(pose: number, daylight01?: number): void;
   /** Swap fills / borders / dot inks for the active art style (0/1/2). */
   setArtStyle(style: number): void;
   dispose(): void;
@@ -516,17 +520,22 @@ export function createStations(
   // ghosted (filtered-out) one nearly vanishes — the exact story grammar nodes use.
   function stateOf(i: number): [number, number] {
     const e = emphA[i];
-    const emphDim = e < 1 ? clamp01(e) : 1; // EMPHASIS.DIMMED(0) → black, REST(1)+ → full
+    const emphDim = e < 1 ? clamp01(e) : 1; // EMPHASIS.DIMMED(0) → fade target, REST(1)+ → full
     const dmg = dmgA[i];
     const vis = visA[i];
     const colorDim = clamp01(emphDim * (1 - 0.85 * dmg));
-    const alphaMul = 0.12 + 0.88 * clamp01(vis);
+    // Transit focus grammar (round 11): an UNCONNECTED station (emphasis DIMMED
+    // under a focus) collapses to a faint ghost (~0.15) — its colour goes to the
+    // fade target via colorDim above, its alpha drops here — so the city recedes
+    // and the chain owns the frame. Connected + resting stations stay full; story
+    // dimming still rides on `vis`.
+    const alphaMul = (0.12 + 0.88 * clamp01(vis)) * stationFocusFade(e);
     return [colorDim, alphaMul];
   }
 
   return {
     group,
-    update(pose) {
+    update(pose, daylight01 = 0) {
       const fade = smoothstep01((pose - 2.6) / 0.4);
       if (fade <= 0.001) {
         if (group.visible) group.visible = false;
@@ -535,6 +544,13 @@ export function createStations(
       group.visible = true;
       frameUniforms.uFade.value = fade;
       pipUniforms.uFade.value = fade;
+      // Fade target for missed / ghosted / focus-collapsed marks: the live city
+      // background — near-black #0a0a16 in the dark baseline, concrete grey #beb9b0
+      // at daylight (mix by daylight01). Stories force daylight01→0, so the missed
+      // husk grammar is unchanged there.
+      const [fr, fg, fb] = cityFadeTarget(daylight01);
+      frameUniforms.uMissed.value.setRGB(fr, fg, fb); // linear (working-space) values
+      pipUniforms.uMissed.value.setRGB(fr, fg, fb);
       for (let k = 0; k < F; k++) {
         const i = frames[k].node;
         nodes.getPosition(i, v);

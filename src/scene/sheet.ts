@@ -157,12 +157,7 @@ function drawSheet(ctx: CanvasRenderingContext2D, W: number, H: number, p: Sheet
   if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "0px";
 }
 
-function buildTexture(W: number, H: number, p: SheetPalette): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  if (ctx) drawSheet(ctx, W, H, p);
+function texFromCanvas(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -170,8 +165,42 @@ function buildTexture(W: number, H: number, p: SheetPalette): THREE.CanvasTextur
   return tex;
 }
 
+function buildFrontCanvas(W: number, H: number, p: SheetPalette): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (ctx) drawSheet(ctx, W, H, p);
+  return canvas;
+}
+
+// The BACK of the sheet: an opaque field-colour plate with the same linework
+// bled faintly through at 0.22, flipped horizontally. The back plane is rotated
+// 180° about Y (a rotation, not a reflection — it alone reads UN-mirrored), so
+// the canvas supplies the reflection: the two combined give the true back-of-a-
+// real-drawing look — the ink reversed, faint through the stock.
+function buildBackCanvas(front: HTMLCanvasElement, p: SheetPalette): HTMLCanvasElement {
+  const W = front.width;
+  const H = front.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.fillStyle = p.field; // opaque plate — the paper stock
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 0.22; // faint bleed-through of the front's ink
+    ctx.translate(W, 0);
+    ctx.scale(-1, 1); // horizontal mirror
+    ctx.drawImage(front, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+  }
+  return canvas;
+}
+
 export interface SheetHandle {
-  object: THREE.Mesh;
+  object: THREE.Object3D;
   /** Drive the pose fade: full at the Blueprint (2), gone by 1.5 / 2.5. */
   update(pose: number): void;
   /** Swap the sheet texture for the active art style (regenerated + cached). */
@@ -200,29 +229,65 @@ export function createSheet(nodes: GraphNode[]): SheetHandle {
   // Texture height tracks the plane aspect so the drafting grid stays square.
   const canvasH = Math.round(CANVAS_W * (planeH / planeW));
 
-  const cache: (THREE.CanvasTexture | null)[] = [null, null, null];
-  const textureFor = (style: number): THREE.CanvasTexture => {
-    let t = cache[style];
+  // Front + back textures per art style, generated on first use and cached. The
+  // back is the front re-plated on an opaque field with the ink at 0.22.
+  const frontCache: (THREE.CanvasTexture | null)[] = [null, null, null];
+  const backCache: (THREE.CanvasTexture | null)[] = [null, null, null];
+  const frontTextureFor = (style: number): THREE.CanvasTexture => {
+    let t = frontCache[style];
     if (!t) {
-      t = buildTexture(CANVAS_W, canvasH, PALETTES[style] ?? PALETTES[0]);
-      cache[style] = t;
+      t = texFromCanvas(buildFrontCanvas(CANVAS_W, canvasH, PALETTES[style] ?? PALETTES[0]));
+      frontCache[style] = t;
+    }
+    return t;
+  };
+  const backTextureFor = (style: number): THREE.CanvasTexture => {
+    let t = backCache[style];
+    if (!t) {
+      const p = PALETTES[style] ?? PALETTES[0];
+      t = texFromCanvas(buildBackCanvas(buildFrontCanvas(CANVAS_W, canvasH, p), p));
+      backCache[style] = t;
     }
     return t;
   };
 
   const geometry = new THREE.PlaneGeometry(planeW, planeH);
-  const material = new THREE.MeshBasicMaterial({
-    map: textureFor(0),
+
+  // Front sheet — the cyanotype, facing +z (the front-on Blueprint camera).
+  const frontMat = new THREE.MeshBasicMaterial({
+    map: frontTextureFor(0),
     transparent: true,
     depthTest: true,
     depthWrite: false,
     opacity: 0,
   });
-  const object = new THREE.Mesh(geometry, material);
-  object.position.set(cx, cy, SHEET_Z);
-  object.frustumCulled = false;
-  object.name = "blueprint-sheet";
-  object.renderOrder = -3; // behind the contours (-2) and edges (-1)
+  const front = new THREE.Mesh(geometry, frontMat);
+  front.position.set(cx, cy, SHEET_Z);
+  front.frustumCulled = false;
+  front.name = "blueprint-sheet";
+  front.renderOrder = -3; // behind the contours (-2) and edges (-1)
+
+  // Back sheet — just behind, rotated 180° about Y so it faces −z (seen only
+  // when orbiting BEHIND the Blueprint). The rotation mirrors the drawing; the
+  // texture already carries the opaque field plate + faint 0.22 bleed-through,
+  // so the reverse reads as the back of a real sheet, not empty space.
+  const backMat = new THREE.MeshBasicMaterial({
+    map: backTextureFor(0),
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    opacity: 0,
+  });
+  const back = new THREE.Mesh(geometry, backMat);
+  back.position.set(cx, cy, SHEET_Z - 0.5);
+  back.rotation.y = Math.PI;
+  back.frustumCulled = false;
+  back.name = "blueprint-sheet-back";
+  back.renderOrder = -4; // behind the front
+
+  const object = new THREE.Group();
+  object.name = "blueprint-sheet-group";
+  object.add(front, back);
   object.visible = false;
 
   const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -230,22 +295,30 @@ export function createSheet(nodes: GraphNode[]): SheetHandle {
   return {
     object,
     update(pose) {
+      // Front + back share the pose window (and, via main.ts, the same endpoint
+      // gating — a sentinel pose zeroes this window when the Blueprint is not a
+      // morph endpoint). Back-face culling means only one side ever draws.
       const op = clamp01(1 - Math.abs(pose - 2) / 0.5);
       if (op <= 0.001) {
         if (object.visible) object.visible = false;
         return;
       }
       object.visible = true;
-      material.opacity = op;
+      frontMat.opacity = op;
+      backMat.opacity = op;
     },
     setArtStyle(style) {
-      material.map = textureFor(style);
-      material.needsUpdate = true;
+      frontMat.map = frontTextureFor(style);
+      frontMat.needsUpdate = true;
+      backMat.map = backTextureFor(style);
+      backMat.needsUpdate = true;
     },
     dispose() {
       geometry.dispose();
-      material.dispose();
-      for (const t of cache) t?.dispose();
+      frontMat.dispose();
+      backMat.dispose();
+      for (const t of frontCache) t?.dispose();
+      for (const t of backCache) t?.dispose();
     },
   };
 }

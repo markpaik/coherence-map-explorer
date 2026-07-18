@@ -164,8 +164,8 @@ body.art-fidenza .headline-art {
   letter-spacing: 0.04em;
   color: var(--ink-2);
 }
-/* Provenance: the crisp counts on this page derive from Zimba's wiring, which
-   its author calls contestable expert judgment — say so where the counts live. */
+/* Provenance: name the source under the counts, nothing more (round 11 cut
+   the "expert judgment, not measurement" tail — attribution should attribute). */
 .provline {
   margin: 6px 0 0;
   font-size: 11.5px;
@@ -524,6 +524,55 @@ body.art-fidenza .art-credit {
   text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
 }
 
+/* -- light environments (Galaxy dawn / daylight): dark-ink chrome ------------ */
+/* Style 0 raises a LIGHT field behind two of its formations — the Sierra dawn
+   (Ascent) and the concrete daylight (Transit). The studio behind the Blueprint
+   is a DARK shell, so it is deliberately excluded. On the light fields the fixed
+   light-ink chrome washes out, so main.ts toggles body.env-light from the same
+   slewed dawn + daylight amounts the environments use (threshold 0.5 → flips once,
+   never mid-morph). Re-ink only the FREE-STANDING chrome that sits directly on the
+   field — title text, axis captions, orbit hints, the hand-drawn aside — to dark
+   slate (primary #2b2b33, secondary #4a4a55). The dark-glass UI surfaces (search
+   bar, pills, toggles, panel) carry their own backgrounds and are left untouched.
+   env-light is Galaxy-only, so it never collides with the body.art-* re-inks. */
+body.env-light .headline {
+  color: #2b2b33;
+  text-shadow: none; /* the dark-sky violet halo smears on the light field */
+}
+body.env-light .tagline,
+body.env-light .subline {
+  color: #2b2b33;
+}
+body.env-light .statline {
+  color: #4a4a55;
+}
+body.env-light .provline {
+  color: #4a4a55;
+}
+body.env-light .provline a {
+  color: #2b2b33;
+}
+body.env-light .depth-scale,
+body.env-light .depth-scale-axis,
+body.env-light .depth-scale-mark {
+  color: #4a4a55;
+}
+body.env-light .depth-scale-sep {
+  color: #2b2b33;
+}
+body.env-light .nav-hints {
+  color: #4a4a55;
+}
+body.env-light .nav-hints span {
+  color: #2b2b33;
+}
+/* The aside SVG strokes with var(--tag-ink, currentColor) (ui/tagtype.ts); flip
+   the property dark and clear the dimming opacity so it reads on the light field. */
+body.env-light .headline-art {
+  --tag-ink: #2b2b33;
+  opacity: 1;
+}
+
 /* Search-rail buttons ("Show me around" / "Stories"). The base .ghost-btn is a
    transparent pill — a thin --line border + --ink-2 label that reads on the dark
    sky but washes out to near-nothing on the cream/teal fields (round-7 feedback).
@@ -621,9 +670,21 @@ body.art-fidenza .ghost-btn:hover {
     top 0.5s cubic-bezier(0.2, 0.8, 0.2, 1),
     bottom 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+/* Docked, the rail lives top-RIGHT so it never covers the title block
+   (round 11: top-center sat on "Coherence (is …)" at common widths). The
+   title owns the top-left; actions own the top-right. */
 .search-rail.search-docked {
   bottom: auto;
   top: 18px;
+  left: auto;
+  right: 18px;
+  transform: none;
+}
+/* Right-aligned rail: the results dropdown hangs from the search bar's right
+   edge so it cannot run off-screen. */
+.search-rail.search-docked .search-results {
+  left: auto;
+  right: 0;
 }
 .ghost-btn.soon {
   color: var(--ink);

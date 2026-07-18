@@ -30,6 +30,7 @@ import { createStations } from "./scene/stations";
 import { createDrafts, draftFade } from "./scene/drafts";
 import { createSheet } from "./scene/sheet";
 import { createContours } from "./scene/contours";
+import { createEnvirons, endpointOwns } from "./scene/environs";
 import { computeNodeRadii } from "./scene/reach";
 import { mulberry32 } from "./scene/evolve";
 import { createAside } from "./ui/aside";
@@ -165,9 +166,15 @@ function start(graph: GraphCore): void {
   const contours = createContours(graph.nodes);
   const stars = createStarfield(reducedMotion);
   const nebula = createNebula();
-  // Distant sky: faint procedural planets, Constellation-only (pose-faded).
+  // Distant sky: faint procedural planets — the galaxy the Constellation keeps.
   const planets = createPlanets();
+  // Thematic environments: a Sierra dawn behind the Ascent, a quiet studio
+  // behind the Blueprint, concrete daylight behind the Transit. Each is endpoint-
+  // gated (raised only when its home is a morph endpoint), Galaxy-only, and owns
+  // the galaxy fade — planets recede and stars dim as an environment takes over.
+  const environs = createEnvirons({ planets, stars });
   scene.add(
+    environs.group,
     sheet.object,
     contours.object,
     nodes.mesh,
@@ -446,12 +453,9 @@ function start(graph: GraphCore): void {
       poseDriver.setEvolveTime(sceneTime);
       render = true;
     }
-    // The sky belongs to the GALAXY, in every pose: the Ascent and the
-    // Blueprint keep their planets and stars (Mark, round 7 — switching pose
-    // should not empty the heavens). Art styles have no sky at all
-    // (setVisibleAmount owns group visibility, so the art gate lives here,
-    // not in applyArtStyle).
-    planets.setVisibleAmount(artStyle === 0 ? 1 : 0);
+    // Planet visibility + star dimming are owned by environs.update (in the
+    // render block): the galaxy is full in the Constellation and recedes as a
+    // thematic environment takes over, and vanishes entirely in the art styles.
 
     if (picking.update()) render = true;
     if (machine.tick(delta)) render = true;
@@ -483,22 +487,57 @@ function start(graph: GraphCore): void {
 
     if (render) {
       // Transit metro grammar: feed the eased pose to the edge program (so pose 3
-      // sharpens the soft bezier into metro turns) and crossfade the node sprites
-      // out as the station marks fade in (pose 2.6→3.0). All gated on the pose-3
-      // morph amount, so poses 0–2 render unchanged.
+      // sharpens the soft bezier into metro turns). Edges morph continuously, so
+      // they are NOT endpoint-gated.
       const pose = poseDriver.pose;
       edges.setPose(pose);
-      // Orbs collapse under the UNION of both handoff windows: the drafted rings
-      // own the Blueprint (drafts fade 1.6→2.0→2.4) and the stations own the
-      // Transit (stationFade 2.6→3.0). The windows never overlap; between them
-      // (2.4→2.6) the orbs are the neutral interstitial as they travel.
-      nodes.setOrbFade(Math.max(stationFadeFor(pose), draftFade(pose)));
-      stations.update(pose);
-      // Blueprint sheet + drafted node symbols (idle outside pose ~1.5–2.5) and
-      // Ascent elevation contours (idle outside pose ~0.5–1.5).
-      sheet.update(pose);
-      drafts.update(pose);
-      contours.update(pose);
+
+      // Endpoint-gated round-10 layer windows (round-11 fix). Each layer's window
+      // keys on the scalar pose, so a morph that SWEEPS THROUGH a home (0→3 passes
+      // pose 2) would briefly flash that home's layer. Gate each layer to the
+      // morph endpoints: it shows only when its home pose is the origin or target.
+      // Settled poses (origin === target) behave exactly as before. We cannot touch
+      // the drafts/contours/stations internals, so the gate is applied at the CALL
+      // SITE — feed the real pose when the endpoint owns the home, else a sentinel
+      // far pose (OFF_POSE) that zeroes every layer's own window.
+      const gate = { origin: poseDriver.origin, target: poseDriver.target };
+      const OFF_POSE = -1;
+      const gatedPose = (home: number): number => (endpointOwns(home, gate) ? pose : OFF_POSE);
+      // Orbs collapse under the UNION of both handoff windows — but only the ones
+      // whose home is a morph endpoint, so 0→3 never blanks the orbs at pose 2
+      // (where the drafts would otherwise fully fade them out).
+      const draftAmt = endpointOwns(2, gate) ? draftFade(pose) : 0;
+      const stationAmt = endpointOwns(3, gate) ? stationFadeFor(pose) : 0;
+      nodes.setOrbFade(Math.max(stationAmt, draftAmt));
+      // Concrete-daylight amount (Galaxy only; 0 in the paper styles): the Transit
+      // focus grammar dissolves unconnected metro lines + stations toward the live
+      // city background — near-black in the dark baseline, concrete grey at daylight.
+      // environs.update runs just below, so this is last frame's value (a one-frame
+      // lag on a slow ramp — imperceptible).
+      const daylight = artStyle === 0 ? environs.daylight01() : 0;
+      edges.setDaylight(daylight);
+      stations.update(gatedPose(3), daylight); // Transit stations, home 3
+      // Blueprint sheet + drafted node symbols (home 2) and Ascent contours (home 1).
+      sheet.update(gatedPose(2));
+      drafts.update(gatedPose(2));
+      contours.update(gatedPose(1));
+      // Thematic environments (Sierra dawn / studio / concrete daylight): same
+      // endpoint gate, plus story suppression and the Galaxy-only art gate. Owns
+      // the planet recede + star dim; returns true while its fade is still slewing.
+      const envSlewing = environs.update(pose, gate, storyPlayer.running, artStyle);
+      // Light-environment chrome (round-12): the Sierra dawn and concrete daylight
+      // are LIGHT fields (the studio behind the Blueprint is a DARK shell, so it is
+      // excluded). When their combined amount owns the frame — Galaxy only, no story
+      // — flip the fixed light-ink chrome to dark slate (body.env-light in style.css)
+      // and re-ink the etch markers with a dark warm ink. These read the SAME slewed
+      // amounts environs just consumed; the 0.5 threshold on a continuous amount
+      // flips once and never flickers mid-morph.
+      const dawnAmt = artStyle === 0 && !storyPlayer.running ? environs.dawn01() : 0;
+      const dayAmt = artStyle === 0 && !storyPlayer.running ? environs.daylight01() : 0;
+      document.body.classList.toggle("env-light", dawnAmt + dayAmt > 0.5);
+      etches.setEnvLight(Math.max(dawnAmt, dayAmt));
+      // Bloom bleeds out as the concrete daylight surfaces (Galaxy only).
+      bloom.setDaylight(artStyle === 0 ? environs.daylight01() : 0);
       // Filaments track node positions + visibility every rendered frame (pose
       // morphs, filters, story spotlights) — one cheap pass over 116 segments.
       filaments.update();
@@ -506,6 +545,9 @@ function start(graph: GraphCore): void {
       if (debug) renderer.info.reset();
       bloom.render(delta);
       needsRender = false;
+      // Keep the pump hot while the galaxy-fade slew (planet recede / star dim)
+      // is still settling, so it converges under render-on-demand.
+      if (envSlewing) needsRender = true;
 
       if (!revealed) {
         revealed = true;
@@ -682,6 +724,9 @@ function start(graph: GraphCore): void {
       drafts,
       sheet,
       contours,
+      environs,
+      planets,
+      stars,
       graph,
     };
   }

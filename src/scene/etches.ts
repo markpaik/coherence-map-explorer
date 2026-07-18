@@ -19,6 +19,11 @@ const GRADE_FONT_URL = "/fonts/space-grotesk-600.typeface.json";
 const COURSE_FONT_URL = "/fonts/space-grotesk-600-course.typeface.json";
 const FACE_COLOR = 0x34315e;
 const SIDE_COLOR = 0x16142e;
+// Light-environment ink (round-12): on the Sierra dawn / concrete daylight fields
+// the faint-violet extrusion vanishes, so setEnvLight lerps the face/side toward a
+// dark warm ink that reads as an engraved marker standing on the light ground.
+const ENV_LIGHT_FACE = 0x2a2722;
+const ENV_LIGHT_SIDE = 0x6b665c;
 
 // Marker ink per art style, index-aligned with ArtStyle (0 Galaxy | 1 Ringers |
 // 2 Fidenza). The etches are engraved monuments in the Galaxy; under an art
@@ -68,6 +73,13 @@ export interface EtchesHandle {
    * violet) | 1 Ringers (ink on the cream board) | 2 Fidenza (deep teal-ink).
    */
   setArtStyle(style: number): void;
+  /**
+   * Re-ink the Galaxy markers for a LIGHT environment: amount 0 = the shipped
+   * faint-violet extrusion, 1 = a dark warm ink that stands legibly on the dawn /
+   * daylight field. main.ts drives it with max(dawn, daylight) in style 0 (and 0
+   * during stories). A NO-OP in art styles 1/2 — their MARKER_INK stands.
+   */
+  setEnvLight(amount: number): void;
   dispose(): void;
 }
 
@@ -83,6 +95,13 @@ export function createEtches(
   const faceMat = new THREE.MeshBasicMaterial({ color: FACE_COLOR });
   const sideMat = new THREE.MeshBasicMaterial({ color: SIDE_COLOR });
   const loader = new FontLoader();
+  // Ink state: the active art style (only style 0 honours setEnvLight) plus the
+  // fixed lerp endpoints for the Galaxy light-environment re-ink.
+  let artStyleCur = 0;
+  const galaxyFace = new THREE.Color(FACE_COLOR);
+  const galaxySide = new THREE.Color(SIDE_COLOR);
+  const envLightFace = new THREE.Color(ENV_LIGHT_FACE);
+  const envLightSide = new THREE.Color(ENV_LIGHT_SIDE);
 
   // Each marker remembers all three pose positions so setPose can lerp it.
   interface Marker {
@@ -137,6 +156,7 @@ export function createEtches(
     marker2: [number, number, number] | undefined,
     marker3: [number, number, number] | undefined,
     marker4: [number, number, number] | undefined,
+    yOffset = 0,
   ): void {
     const geometry = new TextGeometry(text, {
       font,
@@ -153,11 +173,17 @@ export function createEtches(
     geometry.translate(-(bb.max.x + bb.min.x) / 2, 0, -(bb.max.z + bb.min.z) / 2);
     geometries.push(geometry);
     const mesh = new THREE.Mesh(geometry, [faceMat, sideMat]);
-    const a = marker;
-    const b = marker2 ?? marker; // no pose-B target ⇒ stays put
-    const c = marker3 ?? b; // no pose-C target ⇒ holds the Ascent placement
-    const d = marker4 ?? c; // no pose-D target ⇒ holds the Blueprint placement
-    const mk: Marker = { mesh, a, b, c, d };
+    const aR = marker;
+    const bR = marker2 ?? aR; // no pose-B target ⇒ stays put
+    const cR = marker3 ?? bR; // no pose-C target ⇒ holds the Ascent placement
+    const dR = marker4 ?? cR; // no pose-D target ⇒ holds the Blueprint placement
+    // Optional −y stagger, applied UNIFORMLY to all four pose slots so a
+    // second-rank label stays a row below its neighbours in every pose (used to
+    // split the four HS course labels into two rows; 0 for grades ⇒ identical
+    // to the shipped placement).
+    const off = (p: [number, number, number]): [number, number, number] =>
+      yOffset ? [p[0], p[1] + yOffset, p[2]] : p;
+    const mk: Marker = { mesh, a: off(aR), b: off(bR), c: off(cR), d: off(dR) };
     // Adopt the current pose immediately (markers may load mid-morph or while
     // already in the Ascent / Blueprint) so nothing pops in at the wrong place.
     placeMarker(mk);
@@ -174,14 +200,25 @@ export function createEtches(
       // Course labels need A,B,D,E,G,I,L,M,N,O,R,T,V,Y + space — a separate
       // subset face. If it is missing (older build), fall back to initials
       // renderable with the grade face (no crash, degraded gracefully).
+      //
+      // The four course names (ALGEBRA I / GEOMETRY / ALGEBRA II / ADVANCED)
+      // collide at oblique camera angles (ALGEBRA II over ADVANCED). Split them
+      // into two rows in EVERY pose: even-index courses keep their marker row,
+      // odd-index courses (GEOMETRY, ADVANCED) drop a further COURSE_ROW_DROP
+      // below it — a uniform −y offset across all four pose slots so the stagger
+      // holds across Constellation, Ascent, Blueprint, and Transit.
+      const COURSE_ROW_DROP = 26;
+      const courseStagger = (i: number): number => (i % 2) * -COURSE_ROW_DROP;
       try {
         const courseFont = await loader.loadAsync(COURSE_FONT_URL);
-        for (const c of courses)
-          addMarker(courseFont, COURSE_TEXT[c.id] ?? c.label.toUpperCase(), COURSE_SIZE, c.marker, c.marker2, c.marker3, c.marker4);
+        courses.forEach((c, i) =>
+          addMarker(courseFont, COURSE_TEXT[c.id] ?? c.label.toUpperCase(), COURSE_SIZE, c.marker, c.marker2, c.marker3, c.marker4, courseStagger(i)),
+        );
       } catch {
         console.warn("[cme] course typeface missing; falling back to short marks");
-        for (const c of courses)
-          addMarker(gradeFont, c.id.replace(/[^A-Z0-9]/g, ""), COURSE_SIZE, c.marker, c.marker2, c.marker3, c.marker4);
+        courses.forEach((c, i) =>
+          addMarker(gradeFont, c.id.replace(/[^A-Z0-9]/g, ""), COURSE_SIZE, c.marker, c.marker2, c.marker3, c.marker4, courseStagger(i)),
+        );
       }
     } catch (err) {
       // Markers are ornament — a font failure must never take down the scene.
@@ -200,9 +237,19 @@ export function createEtches(
       // Both marker materials are shared across every etch, so a single color
       // swap re-inks the whole set. Clamp to a known style; anything else keeps
       // the shipped Galaxy ink.
+      artStyleCur = style;
       const ink = MARKER_INK[style] ?? MARKER_INK[0];
       faceMat.color.setHex(ink.face);
       sideMat.color.setHex(ink.side);
+    },
+    setEnvLight(amount) {
+      // Only the Galaxy etch re-inks for a light environment; art styles 1/2 keep
+      // their MARKER_INK (setArtStyle owns them). amount 0 restores the exact
+      // shipped faint-violet extrusion, so no-environment Galaxy is unchanged.
+      if (artStyleCur !== 0) return;
+      const a = amount < 0 ? 0 : amount > 1 ? 1 : amount;
+      faceMat.color.lerpColors(galaxyFace, envLightFace, a);
+      sideMat.color.lerpColors(galaxySide, envLightSide, a);
     },
     dispose() {
       for (const g of geometries) g.dispose();

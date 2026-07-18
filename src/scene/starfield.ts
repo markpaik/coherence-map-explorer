@@ -53,6 +53,7 @@ const FRAG = /* glsl */ `
 
   uniform float uTime;
   uniform float uTwinkle; // 0 under prefers-reduced-motion
+  uniform float uDim;     // 1 normal; <1 when an environment sky dims the stars
 
   varying vec3 vColor;
   varying float vPhase;
@@ -67,7 +68,7 @@ const FRAG = /* glsl */ `
     float body = smoothstep(0.5, 0.3, d);
     // Slow twinkle: per-point phase + speed.
     float tw = mix(1.0, (1.0 - vAmp) + vAmp * (0.5 + 0.5 * sin(uTime * vSpeed + vPhase)), uTwinkle);
-    gl_FragColor = vec4(vColor * tw, body * 0.9);
+    gl_FragColor = vec4(vColor * tw, body * 0.9 * uDim);
   }
 `;
 
@@ -76,6 +77,9 @@ export interface StarfieldHandle {
   setTime(t: number): void;
   setTwinkleEnabled(on: boolean): void;
   setPixelRatio(pr: number): void;
+  /** Scale the stars' alpha (1 full … 0 gone). Environments dim the sky: dawn
+   *  holds stars at 0.35, the studio and concrete daylight take them to 0. */
+  setDim(amount: number): void;
   dispose(): void;
 }
 
@@ -129,6 +133,7 @@ export function createStarfield(reducedMotion: boolean): StarfieldHandle {
     uTime: { value: 0 },
     uTwinkle: { value: reducedMotion ? 0 : 1 },
     uPxRatio: { value: 1 },
+    uDim: { value: 1 },
   };
 
   const material = new THREE.ShaderMaterial({
@@ -155,6 +160,9 @@ export function createStarfield(reducedMotion: boolean): StarfieldHandle {
     },
     setPixelRatio(pr) {
       uniforms.uPxRatio.value = pr;
+    },
+    setDim(amount) {
+      uniforms.uDim.value = amount < 0 ? 0 : amount > 1 ? 1 : amount;
     },
     dispose() {
       geometry.dispose();

@@ -35,6 +35,7 @@
 import * as THREE from "three";
 import type { GraphCore, StrandId } from "../data";
 import { RINGERS, FIDENZA } from "./artstyle";
+import { connectedness, draftFocusFade } from "./focusgrammar";
 
 // Strand brights — DESIGN.md's validated line palette (the same source the
 // stations borders + the acceptance preview draw from).
@@ -160,8 +161,10 @@ export function createDrafts(
   const rCenter = new Float32Array(R * 3);
   const rRadius = new Float32Array(R);
   const rDouble = new Float32Array(R);
-  const rInk = new Float32Array(R * 3);
+  const rInk = new Float32Array(R * 3); // resting white-ink (strand-tinted)
+  const rStrand = new Float32Array(R * 3); // full strand colour (connected re-saturate)
   const rState = new Float32Array(R * 2).fill(1);
+  const rLit = new Float32Array(R); // 0 rest/dimmed → 1 connected (per frame)
   rings.forEach((d, k) => {
     rRadius[k] = d.radius;
     rDouble[k] = d.double;
@@ -171,10 +174,15 @@ export function createDrafts(
   const rStateAttr = new THREE.InstancedBufferAttribute(rState, 2);
   rStateAttr.setUsage(THREE.DynamicDrawUsage);
   const rInkAttr = new THREE.InstancedBufferAttribute(rInk, 3);
+  const rStrandAttr = new THREE.InstancedBufferAttribute(rStrand, 3);
+  const rLitAttr = new THREE.InstancedBufferAttribute(rLit, 1);
+  rLitAttr.setUsage(THREE.DynamicDrawUsage);
   ringGeo.setAttribute("aCenter", rCenterAttr);
   ringGeo.setAttribute("aRadius", new THREE.InstancedBufferAttribute(rRadius, 1));
   ringGeo.setAttribute("aDouble", new THREE.InstancedBufferAttribute(rDouble, 1));
   ringGeo.setAttribute("aInk", rInkAttr);
+  ringGeo.setAttribute("aStrand", rStrandAttr);
+  ringGeo.setAttribute("aLit", rLitAttr);
   ringGeo.setAttribute("aState", rStateAttr);
   ringGeo.instanceCount = R;
 
@@ -194,11 +202,15 @@ export function createDrafts(
       attribute float aRadius;
       attribute float aDouble;
       attribute vec3 aInk;
+      attribute vec3 aStrand;
+      attribute float aLit;
       attribute vec2 aState;
       varying vec2 vLocal;
       varying float vRadius;
       varying float vDouble;
       varying vec3 vInk;
+      varying vec3 vStrand;
+      varying float vLit;
       varying vec2 vState;
       void main() {
         float halfExtent = aRadius * 2.15; // cover the outermost tick (~1.95R)
@@ -210,6 +222,8 @@ export function createDrafts(
         vRadius = aRadius;
         vDouble = aDouble;
         vInk = aInk;
+        vStrand = aStrand;
+        vLit = aLit;
         vState = aState;
       }
     `,
@@ -221,6 +235,8 @@ export function createDrafts(
       varying float vRadius;
       varying float vDouble;
       varying vec3 vInk;
+      varying vec3 vStrand;
+      varying float vLit;
       varying vec2 vState;
       // Coverage of a stroke of half-width w centred on d == 0 (derivative-free
       // AA, size-relative — the Blueprint is fixed front-on like Transit).
@@ -249,7 +265,11 @@ export function createDrafts(
         float tickV = vy * band(ax, tickHalf, aa);
         cov = max(cov, max(tickH, tickV));
         if (cov < 0.003) discard;
-        vec3 col = mix(uMissed, vInk, vState.x);
+        // Round 11 focus grammar: a CONNECTED ring re-saturates the resting
+        // white-ink to full strand colour (vLit); story damage still pulls it to
+        // the missed target (vState.x).
+        vec3 ink = mix(vInk, vStrand, vLit);
+        vec3 col = mix(uMissed, ink, vState.x);
         gl_FragColor = vec4(col, cov * uFade * vState.y);
       }
     `,
@@ -267,8 +287,10 @@ export function createDrafts(
   dotGeo.setAttribute("position", dotPlane.getAttribute("position"));
   const dCenter = new Float32Array(D * 3);
   const dScale = new Float32Array(D);
-  const dColor = new Float32Array(D * 3);
+  const dColor = new Float32Array(D * 3); // resting white-ink (strand-tinted)
+  const dStrand = new Float32Array(D * 3); // full strand colour (connected re-saturate)
   const dState = new Float32Array(D * 2).fill(1);
+  const dLit = new Float32Array(D); // 0 rest/dimmed → 1 connected (per frame)
   dots.forEach((d, k) => {
     dScale[k] = d.scale;
   });
@@ -277,9 +299,14 @@ export function createDrafts(
   const dStateAttr = new THREE.InstancedBufferAttribute(dState, 2);
   dStateAttr.setUsage(THREE.DynamicDrawUsage);
   const dColorAttr = new THREE.InstancedBufferAttribute(dColor, 3);
+  const dStrandAttr = new THREE.InstancedBufferAttribute(dStrand, 3);
+  const dLitAttr = new THREE.InstancedBufferAttribute(dLit, 1);
+  dLitAttr.setUsage(THREE.DynamicDrawUsage);
   dotGeo.setAttribute("aCenter", dCenterAttr);
   dotGeo.setAttribute("aScale", new THREE.InstancedBufferAttribute(dScale, 1));
   dotGeo.setAttribute("aColor", dColorAttr);
+  dotGeo.setAttribute("aStrand", dStrandAttr);
+  dotGeo.setAttribute("aLit", dLitAttr);
   dotGeo.setAttribute("aState", dStateAttr);
   dotGeo.instanceCount = D;
 
@@ -298,9 +325,13 @@ export function createDrafts(
       attribute vec3 aCenter;
       attribute float aScale;
       attribute vec3 aColor;
+      attribute vec3 aStrand;
+      attribute float aLit;
       attribute vec2 aState;
       varying vec2 vP;
       varying vec3 vColor;
+      varying vec3 vStrand;
+      varying float vLit;
       varying vec2 vState;
       void main() {
         vec4 mv = modelViewMatrix * vec4(aCenter, 1.0);
@@ -308,6 +339,8 @@ export function createDrafts(
         gl_Position = projectionMatrix * mv;
         vP = position.xy * 2.0;
         vColor = aColor;
+        vStrand = aStrand;
+        vLit = aLit;
         vState = aState;
       }
     `,
@@ -317,12 +350,17 @@ export function createDrafts(
       uniform vec3 uMissed;
       varying vec2 vP;
       varying vec3 vColor;
+      varying vec3 vStrand;
+      varying float vLit;
       varying vec2 vState;
       void main() {
         float r = length(vP);
         float a = 1.0 - smoothstep(0.85, 1.0, r);
         if (a < 0.003) discard;
-        vec3 col = mix(uMissed, vColor, vState.x);
+        // Connected Major-Work dots re-saturate to full strand (vLit); damage
+        // still pulls toward the missed target (vState.x).
+        vec3 ink = mix(vColor, vStrand, vLit);
+        vec3 col = mix(uMissed, ink, vState.x);
         gl_FragColor = vec4(col, a * uFade * vState.y);
       }
     `,
@@ -344,20 +382,27 @@ export function createDrafts(
     const inkHex = INK_BASE[style] ?? INK_BASE[0];
     const strandHexFor = (s: StrandId): number =>
       style === 1 ? (RINGERS.peg[s] ?? RINGERS.pegWhite) : style === 2 ? (FIDENZA.node[s] ?? FIDENZA.palette[0]) : LINE_HEX[s];
-    // Tint the ink 30% toward the strand (linear lerp — matches the baked-color
-    // convention the other layers use).
-    const tint = (s: StrandId, out: Float32Array, k: number): void => {
-      base.setHex(inkHex);
+    // Resting white-ink strand tint: raised to 50% for Galaxy (round 11 — the user
+    // found 30% too faint); the paper styles keep 30%. Bake BOTH the resting ink
+    // (white-ink tinted toward strand) and the FULL strand colour a connected ring
+    // re-saturates to. Linear lerp — matches the baked-color convention.
+    const restTint = style === 0 ? 0.5 : 0.3;
+    const bake = (s: StrandId, ink: Float32Array, strand: Float32Array, k: number): void => {
       strandC.setHex(strandHexFor(s));
-      base.lerp(strandC, 0.3);
-      out[k * 3] = base.r;
-      out[k * 3 + 1] = base.g;
-      out[k * 3 + 2] = base.b;
+      base.setHex(inkHex).lerp(strandC, restTint);
+      ink[k * 3] = base.r;
+      ink[k * 3 + 1] = base.g;
+      ink[k * 3 + 2] = base.b;
+      strand[k * 3] = strandC.r;
+      strand[k * 3 + 1] = strandC.g;
+      strand[k * 3 + 2] = strandC.b;
     };
-    rings.forEach((d, k) => tint(d.strand, rInk, k));
-    dots.forEach((d, k) => tint(d.strand, dColor, k));
+    rings.forEach((d, k) => bake(d.strand, rInk, rStrand, k));
+    dots.forEach((d, k) => bake(d.strand, dColor, dStrand, k));
     rInkAttr.needsUpdate = true;
+    rStrandAttr.needsUpdate = true;
     dColorAttr.needsUpdate = true;
+    dStrandAttr.needsUpdate = true;
   }
   bakeColors(0);
 
@@ -367,14 +412,22 @@ export function createDrafts(
   const dmgA = nodes.damageAttr.array as Float32Array;
   const v = new THREE.Vector3();
   const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
-  // Same fold as stations: dimmed emphasis / damage → near-black (holds place);
-  // ghosted (filtered out) → nearly vanishes.
-  function stateOf(i: number): [number, number] {
+  // Fold a node's live emphasis / visibility / damage into [colorDim, alphaMul,
+  // lit] for the drafted symbols. Round 11 focus grammar: connected symbols
+  // re-saturate to full strand (lit), while an UNCONNECTED symbol under a focus
+  // FADES to faint ink via alpha (focusFade) rather than blackening — so a
+  // Blueprint focus reads as a highlighter over the resting sheet. DAMAGE still
+  // pulls the colour to the missed target (colorDim) and a ghost still nearly
+  // vanishes (vis): the story dark-baseline and husk grammar are untouched (every
+  // story lights only its focus closure, so no lit node is ever emphasis-dimmed).
+  function stateOf(i: number): [number, number, number] {
     const e = emphA[i];
-    const emphDim = e < 1 ? clamp01(e) : 1;
-    const colorDim = clamp01(emphDim * (1 - 0.85 * dmgA[i]));
-    const alphaMul = 0.12 + 0.88 * clamp01(visA[i]);
-    return [colorDim, alphaMul];
+    const dmg = dmgA[i];
+    const vis = visA[i];
+    const colorDim = clamp01(1 - 0.85 * dmg);
+    const lit = connectedness(e);
+    const alphaMul = (0.12 + 0.88 * clamp01(vis)) * draftFocusFade(e);
+    return [colorDim, alphaMul, lit];
   }
 
   return {
@@ -397,6 +450,7 @@ export function createDrafts(
         const st = stateOf(i);
         rState[k * 2] = st[0];
         rState[k * 2 + 1] = st[1];
+        rLit[k] = st[2];
       }
       for (let k = 0; k < D; k++) {
         const i = dots[k].node;
@@ -407,11 +461,14 @@ export function createDrafts(
         const st = stateOf(i);
         dState[k * 2] = st[0];
         dState[k * 2 + 1] = st[1];
+        dLit[k] = st[2];
       }
       rCenterAttr.needsUpdate = true;
       rStateAttr.needsUpdate = true;
+      rLitAttr.needsUpdate = true;
       dCenterAttr.needsUpdate = true;
       dStateAttr.needsUpdate = true;
+      dLitAttr.needsUpdate = true;
     },
     setArtStyle(style) {
       bakeColors(style);

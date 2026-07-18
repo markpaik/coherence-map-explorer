@@ -184,12 +184,65 @@ describe("pose C (blueprint)", () => {
     n.grade === "HS" ? 9 + COURSE_ORDER.indexOf(n.courses![0]) : GRADES.indexOf(n.grade);
   const bp = core.nodes as (OutNode & { pos3?: number[]; courses?: string[] })[];
 
-  it("every node carries a flat pos3 (z === 0)", () => {
+  it("every node carries a lifted pos3 (z on a block plane 8..40, gutter 4)", () => {
     expect(bp.length).toBe(480);
+    // Round-11 lift: each domain block rides its own z-plane (8 + 7k capped 40)
+    // like layered paper in a pop-up card; the edgeless side gutter is one quiet
+    // z=4 plane. The legal planes for k = 0,1,2,… (capped at 40) are finite.
+    const planes = new Set([4, 8, 15, 22, 29, 36, 40]);
     for (const n of bp) {
       expect(n.pos3 && n.pos3.length === 3).toBe(true);
       for (const v of n.pos3!) expect(Number.isFinite(v)).toBe(true);
-      expect(n.pos3![2]).toBe(0);
+      expect(planes.has(n.pos3![2])).toBe(true);
+    }
+  });
+
+  it("pos3 z steps each domain block deeper, monotone down every column, gutter on z=4", () => {
+    // Down a column the connected stack runs block-by-block onto deeper planes
+    // (non-decreasing z); the +18 side gutter is edgeless nodes on one z=4 plane.
+    const cols = new Map<number, (typeof bp)[number][]>();
+    for (const n of bp) {
+      const c = columnOf(n);
+      if (!cols.has(c)) cols.set(c, []);
+      cols.get(c)!.push(n);
+    }
+    let maxZ = 0;
+    let multiBlockCols = 0;
+    for (const ns of cols.values()) {
+      const mainX = Math.min(...ns.map((n) => n.pos3![0])); // main lane is left of the +18 gutter
+      const connected = ns
+        .filter((n) => n.pos3![0] === mainX)
+        .sort((a, b) => b.pos3![1] - a.pos3![1]); // top → bottom
+      const gutter = ns.filter((n) => n.pos3![0] !== mainX);
+      for (const g of gutter) expect(g.pos3![2]).toBe(4);
+      let prevZ = -Infinity;
+      const seenPlanes = new Set<number>();
+      for (const n of connected) {
+        expect(n.pos3![2]).toBeGreaterThanOrEqual(8);
+        expect(n.pos3![2]).toBeLessThanOrEqual(40);
+        expect(n.pos3![2]).toBeGreaterThanOrEqual(prevZ); // monotone down the column
+        prevZ = n.pos3![2];
+        seenPlanes.add(n.pos3![2]);
+        maxZ = Math.max(maxZ, n.pos3![2]);
+      }
+      if (seenPlanes.size > 1) multiBlockCols++;
+    }
+    expect(maxZ).toBeGreaterThan(8); // at least one column stacks multiple blocks
+    expect(maxZ).toBeLessThanOrEqual(40); // capped
+    expect(multiBlockCols).toBeGreaterThan(0);
+  });
+
+  it("front-on blueprint is byte-stable: pos3 x/y unchanged by the z lift", () => {
+    // Baseline captured with the round-11 airing (columnWidth 94, targetHeight
+    // 560, blockGap 1.5) but BEFORE the z lift. Lifting blocks onto z-planes
+    // moves only z; the front-on schematic (x,y) must be identical byte-for-byte.
+    const baseline = JSON.parse(
+      readFileSync(resolve(HERE, "fixtures/blueprint-xy-baseline.json"), "utf8"),
+    ) as { nodes: Record<string, [number, number]> };
+    for (const n of bp) {
+      const b = baseline.nodes[n.id];
+      expect(n.pos3![0]).toBe(b[0]);
+      expect(n.pos3![1]).toBe(b[1]);
     }
   });
 
@@ -229,13 +282,17 @@ describe("pose C (blueprint)", () => {
     }
   });
 
-  it("every edge carries a flat blueprint control point c3", () => {
+  it("every edge carries a blueprint control point c3 (z = endpoint block-plane midpoint)", () => {
+    const round2 = (v: number): number => Math.round(v * 100) / 100;
+    const byId = new Map(bp.map((n) => [n.id, n]));
     const edges = core.edges as (OutEdge & { c3?: number[] })[];
     expect(edges.length).toBe(757 + 142);
     for (const e of edges) {
       expect(e.c3 && e.c3.length === 3).toBe(true);
       for (const v of e.c3!) expect(Number.isFinite(v)).toBe(true);
-      expect(e.c3![2]).toBe(0);
+      const a = byId.get(e.s)!.pos3!;
+      const b = byId.get(e.t)!.pos3!;
+      expect(e.c3![2]).toBe(round2((a[2] + b[2]) / 2)); // ramp between the two card planes
     }
   });
 
@@ -254,15 +311,16 @@ describe("pose D (transit)", () => {
   // Transit column = the blueprint column, EXCEPT a family child re-expands next
   // to its PARENT station (its transit column is the parent's), so 5 HS children
   // whose own course differs from the parent (F-BF.B.4.b/c/d, F-IF.C.7.c/d) still
-  // live in the parent's column. Column centers are (c-6)*80, half-width 40.
+  // live in the parent's column. Column centers are (c-6)*94, half-width 47
+  // (round-11 airing widened the columns 80→94).
   const COURSE_ORDER = ["A1", "G", "A2", "ADV"];
   const byId = new Map(core.nodes.map((n) => [n.id, n]));
   const columnOf = (n: OutNode & { grade: string; courses?: string[] }): number =>
     n.grade === "HS" ? 9 + COURSE_ORDER.indexOf(n.courses![0]) : GRADES.indexOf(n.grade);
   const transitColumnOf = (n: OutNode & { parent?: string; courses?: string[] }): number =>
     n.parent ? columnOf(byId.get(n.parent)! as OutNode & { courses?: string[] }) : columnOf(n);
-  const colCenterX = (c: number): number => (c - 6) * 80;
-  const HALF_COL = 40;
+  const colCenterX = (c: number): number => (c - 6) * 94;
+  const HALF_COL = 47;
   const LINE_Z = new Set([90, 30, -30, -90]);
   const tp = core.nodes as (OutNode & { pos4?: number[]; parent?: string; courses?: string[] })[];
 
@@ -294,8 +352,11 @@ describe("pose D (transit)", () => {
   });
 
   it("front-on collapse is byte-stable: pos4 x/y and c4 x/y unchanged by the z push", () => {
-    // Baseline captured before the ±16/±6 → ±90/±30 z change. Deepening the
-    // decks moves only z; the front-on schematic (x,y) must be identical.
+    // Baseline REGENERATED for round 11: the blueprint airing (columnWidth
+    // 80→94 shifts pos4 x, targetColumnHeight 440→560 widens pos3's y span so
+    // the transit rows rescale in y) deliberately moved the front-on collapse,
+    // so the fixture was rebuilt from the aired build. The assertion stays EXACT
+    // (deepening the decks in z still moves only z — x/y must match byte-for-byte).
     const baseline = JSON.parse(
       readFileSync(resolve(HERE, "fixtures/transit-xy-baseline.json"), "utf8"),
     ) as { nodes: Record<string, [number, number]>; edges: [number, number][] };
@@ -576,11 +637,17 @@ describe("structured link-field scheme validation", () => {
     expect(safeLinkUrl("/page/1/foo")).toBe(
       "https://achievethecore.org/page/1/foo",
     );
-    // dangerous / non-http schemes and bare/scheme-less URLs are dropped
+    // dangerous / non-http schemes are dropped
     expect(safeLinkUrl("javascript:alert(1)")).toBeUndefined();
     expect(safeLinkUrl("data:text/html,<script>alert(1)</script>")).toBeUndefined();
     expect(safeLinkUrl("vbscript:msgbox(1)")).toBeUndefined();
-    expect(safeLinkUrl("s3.amazonaws.com/bucket/file.pdf")).toBeUndefined();
+    // a scheme-less DOTTED-HOST URL is a real external link that lost its
+    // scheme (the IM task PDFs) — absolutized to https, not dropped
+    expect(safeLinkUrl("s3.amazonaws.com/bucket/file.pdf")).toBe(
+      "https://s3.amazonaws.com/bucket/file.pdf",
+    );
+    // but a relative path with no dotted host is still dropped
+    expect(safeLinkUrl("upload/K.OA.A.2 Solution Image.jpg")).toBeUndefined();
   });
 
   it("every emitted task/example URL is absolute http(s)", () => {
@@ -611,6 +678,20 @@ describe("URL absolutization", () => {
   it("leaves an already-absolute URL untouched", () => {
     expect(absolutize("https://achievethecore.org/y")).toBe(
       "https://achievethecore.org/y",
+    );
+  });
+  it("prepends https to a scheme-less dotted-host URL, not to a relative path", () => {
+    // bare host.tld/path (the IM S3 task PDFs) → https
+    expect(
+      absolutize("s3.amazonaws.com/illustrativemathematics/x/task.pdf?1462"),
+    ).toBe("https://s3.amazonaws.com/illustrativemathematics/x/task.pdf?1462");
+    // relative path whose first segment has no dot → left verbatim
+    expect(absolutize("upload/K.OA.A.2 Solution Image.jpg")).toBe(
+      "upload/K.OA.A.2 Solution Image.jpg",
+    );
+    // an already-schemed URL is untouched ("https" is followed by ":", not ".")
+    expect(absolutize("http://s3.amazonaws.com/x")).toBe(
+      "http://s3.amazonaws.com/x",
     );
   });
   it("no emitted URL has the doubled-slash-after-host defect", () => {

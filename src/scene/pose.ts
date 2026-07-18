@@ -78,6 +78,14 @@ export interface PoseDriver {
   readonly pose: number;
   /** The settled/target pose (what aria-pressed and the scale hint key off). */
   readonly target: Pose;
+  /**
+   * The morph's ORIGIN — the pose we departed (the previous settled target).
+   * Settled ⇒ origin === target; while morphing it is the endpoint we left. It
+   * lets main.ts gate the round-10 layers (sheet / drafts / contours / stations
+   * / environs) to their endpoints, so a morph that SWEEPS THROUGH a home pose
+   * (e.g. 0→3 passes the scalar pose value 2) never flashes that home's layer.
+   */
+  readonly origin: Pose;
   /** Morph to a pose. Resolves when the transition settles (instant ⇒ at once). */
   setPose(target: Pose, opts?: { instant?: boolean }): Promise<void>;
   /** Advance the morph; returns true while morphing (drives render-on-demand). */
@@ -206,6 +214,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
   let poseValue = 0; // exposed as `pose` (continuous 0..3)
   let fromPose = 0;
   let targetPose: Pose = 0;
+  let originPose: Pose = 0; // the pose we're leaving (previous target); === target when settled
   let morphing = false;
   let elapsed = 0;
   let totalMs = NODE_MS;
@@ -286,6 +295,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     poseValue = target;
     fromPose = target;
     targetPose = target;
+    originPose = target; // settled ⇒ origin === target
     morphing = false;
     elapsed = 0;
     writeAll();
@@ -308,6 +318,9 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     },
     get target() {
       return targetPose;
+    },
+    get origin() {
+      return originPose;
     },
 
     setEvolveTime(t) {
@@ -344,6 +357,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
       startPos.set(curPos);
       startCtrl.set(curCtrl);
       fromPose = poseValue;
+      originPose = targetPose; // the pose we're leaving (the previous target)
       targetPose = target;
       totalMs = maxDelayFor(target) + NODE_MS;
       elapsed = 0;
@@ -399,6 +413,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
 
       if (landed) {
         morphing = false;
+        originPose = dest; // settled ⇒ origin === target
         nodes.refreshPickBounds();
         settleCamera(dest, true);
         resolvePending();

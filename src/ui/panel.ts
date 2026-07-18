@@ -495,6 +495,19 @@ export function createPanel(
       const ex = document.createElement("div");
       ex.className = "example-body math-host";
       ex.innerHTML = example; // pipeline-sanitized
+      // A worked-example <img> that still fails at runtime (host rot the
+      // pipeline didn't catch, expired signed URL) must not leave a broken-image
+      // glyph beside otherwise-good text. `error` doesn't bubble, so listen in
+      // the CAPTURE phase and hide just the offending image. CSP-safe — no
+      // inline handler, addEventListener only.
+      ex.addEventListener(
+        "error",
+        (e) => {
+          const t = e.target;
+          if (t instanceof HTMLImageElement) t.style.display = "none";
+        },
+        true,
+      );
       det.appendChild(ex);
       if (exampleAttr) {
         const attr = document.createElement("p");
