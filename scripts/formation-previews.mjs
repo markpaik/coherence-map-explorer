@@ -468,190 +468,272 @@ function reef() {
 }
 
 // ===========================================================================
-// 3 · THE TRANSIT MAP — an octolinear metro schematic (segments at 0/45/90°),
-// light-on-dark. Each strand is a line; standards are stations ordered by
-// (grade, within-grade depth, code); families are station complexes; a cross-
-// strand touch makes an interchange. Within-strand sequence is carried by the
-// line itself (not drawn as separate edges) — stylization noted in the caption.
+// 3 · THE TRANSIT MAP — a real city metro, not a lane diagram. A downtown LOOP
+// (CTA-style elevated ring) holds the dense cross-strand core (grades ~3–7, the
+// fraction·ratio·expression spine, where 86 of the map's 159 cross-strand
+// transfers live). The four strand lines RADIATE in from four compass origins as
+// K, converge and weave through the Loop, then peel off EAST and BRANCH into
+// their high-school course termini (A1/G/A2/ADV) along the water — the same sea
+// the Watershed empties into (one world, two maps). Rules distilled from the
+// CTA (a true downtown Loop with radial branches), the Tube & Vignelli NYC
+// (octolinear 0/45/90°, long straights, trunk-sharing that splits near the
+// periphery), and BART (radial spokes meeting through a single core). Number is
+// the hub strand (heaviest transfers to everyone); Algebra shadows it on the
+// ring as a shared trunk so their 86 transfers become co-located interchanges
+// rather than drawn connectors — which is exactly what real maps do. Within-
+// strand sequence is carried by the line itself (grade→depth→code sort), not the
+// literal prerequisite chain — the honest stylization noted in the caption.
 // ===========================================================================
 function transit() {
-  const W = 1960, H = 900;
-  const padL = 70, padR = 70, padT = 150, padB = 96;
-  const usableW = W - padL - padR;
+  const W = 1960, H = 1120;
+  const seaX = 1756;
 
-  // column widths ∝ the busiest line in that column, so dense HS bands (Algebra
-  // I, Geometry) get the room they honestly need and sparse early grades pack in.
-  const colMax = new Array(13).fill(0);
-  {
-    const per = {};
-    for (const n of g.nodes) {
-      if (isChild(n.id)) continue;
-      const k = n.strand + "|" + colOf(n);
-      per[k] = (per[k] || 0) + 1 + (n.children ? n.children.length : 0);
-    }
-    for (const k in per) {
-      const c = +k.split("|")[1];
-      colMax[c] = Math.max(colMax[c], per[k]);
-    }
-  }
-  const sumMax = colMax.reduce((a, b) => a + Math.max(3, b), 0);
-  const colX = [padL];
-  for (let c = 0; c < 13; c++) colX.push(colX[c] + (Math.max(3, colMax[c]) / sumMax) * usableW);
-
-  // home track per strand (well separated) + a small per-column drift realised
-  // as 45° jogs, so the four lines weave without colliding.
-  const trackGap = (H - padT - padB) / 5;
-  const homeY = (strand) => padT + (STRAND_ORDER.indexOf(strand) + 1) * trackGap;
-  const UNIT = 16;
-  const drift = (strand, col) => {
-    const s = STRAND_ORDER.indexOf(strand);
-    return Math.round(1.6 * Math.sin(col * 0.85 + s * 1.7 + hash("dr" + s) * 3)) * UNIT;
+  // ---- downtown Loop rectangle + the eastern sea (geographic anchor) --------
+  const LOOP = { x0: 560, y0: 384, x1: 1000, y1: 804 };
+  const cxM = (LOOP.x0 + LOOP.x1) / 2, cyM = (LOOP.y0 + LOOP.y1) / 2;
+  const corner = [[LOOP.x0, LOOP.y0], [LOOP.x1, LOOP.y0], [LOOP.x1, LOOP.y1], [LOOP.x0, LOOP.y1]];
+  // perimeter param t∈[0,4): 0–1 top L→R · 1–2 right T→B · 2–3 bottom R→L · 3–4 left B→T
+  const perim = (t) => {
+    t = ((t % 4) + 4) % 4;
+    const s = Math.floor(t), fr = t - s;
+    const a = corner[s], b = corner[(s + 1) % 4];
+    return [a[0] + (b[0] - a[0]) * fr, a[1] + (b[1] - a[1]) * fr];
   };
-  const trackY = (strand, col) => homeY(strand) + drift(strand, col);
+  const perimNormal = (t) => [[0, -1], [1, 0], [0, 1], [-1, 0]][Math.floor((((t % 4) + 4) % 4))];
+  const perimPt = (t, off) => { const p = perim(t), n = perimNormal(t); return [p[0] + n[0] * off, p[1] + n[1] * off]; };
+  // ordered edge-following points from t0 to t1 in direction dir (+1/−1),
+  // bundled outward by off px so co-running lines nest visibly (NYC trunk).
+  const perimWalk = (t0, t1, dir, off) => {
+    const total = dir > 0 ? (((t1 - t0) % 4) + 4) % 4 : (((t0 - t1) % 4) + 4) % 4;
+    const raw = [t0];
+    let t = t0, acc = 0, guard = 0;
+    while (guard++ < 12) {
+      const c = dir > 0 ? Math.floor(t + 1e-6) + 1 : Math.ceil(t - 1e-6) - 1;
+      const dt = dir > 0 ? c - t : t - c;
+      if (dt >= total - acc - 1e-6) break;
+      raw.push(c); acc += dt; t = c;
+    }
+    raw.push(t1);
+    return raw.map((tt) => perimPt(tt, off));
+  };
+
+  // octolinear elbow a→b: straight run then a 45° final segment into b.
+  const elbow = (a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx < 1 || ady < 1) return [a, b];
+    const sx = Math.sign(dx), sy = Math.sign(dy);
+    return adx > ady ? [a, [b[0] - sx * ady, a[1]], b] : [a, [a[0], b[1] - sy * adx], b];
+  };
+  const toPath = (pts) => "M" + pts.map((p) => `${f(p[0])},${f(p[1])}`).join(" L");
+  const plen = (pts) => { const seg = [0]; let L = 0; for (let i = 1; i < pts.length; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(L); } return { L, seg }; };
+  const at = (pts, seg, L, fr) => {
+    const d = clamp(fr, 0, 1) * L;
+    let i = 1; while (i < seg.length - 1 && seg[i] < d) i++;
+    const p0 = pts[i - 1], p1 = pts[i], sl = (seg[i] - seg[i - 1]) || 1, u = (d - seg[i - 1]) / sl;
+    const tx = (p1[0] - p0[0]) / sl, ty = (p1[1] - p0[1]) / sl;
+    return [p0[0] + (p1[0] - p0[0]) * u, p0[1] + (p1[1] - p0[1]) * u, tx, ty];
+  };
+
+  const BUNDLE = 11;
+  // per-strand routing, CTA-style: the four Loop sides are each OWNED by a
+  // line's downtown stretch (like Wells/Lake/Wabash/Van Buren), handing off at
+  // corner interchanges. Number (the hub, most downtown stations) runs the WEST
+  // then NORTH sides; Algebra shadows it on NORTH then turns down the EAST;
+  // Geometry runs the SOUTH; Data is the cross-town diagonal (a subway cutting
+  // through the core). entryT/exitT are Loop perimeter params; dir the way
+  // around; lane the bundle offset; junc the branch split east of the Loop;
+  // tx/ty0/ty1 the eastern terminus fan (toward the water).
+  const CFG = {
+    number:  { origin: [70, 706], entryT: 3.0, exitT: 1.0, dir: +1, lane: 0, junc: [1150, 300], tx: 1470, ty0: 200, ty1: 380 },
+    algebra: { origin: [150, 150], entryT: 0.06, exitT: 1.5, dir: +1, lane: 1, junc: [1150, 470], tx: 1500, ty0: 400, ty1: 560 },
+    geometry:{ origin: [150, H - 150], entryT: 3.0, exitT: 2.0, dir: -1, lane: 0, junc: [1150, 840], tx: 1500, ty0: 804, ty1: 904 },
+    data:    { diagonal: true, origin: [700, 86], enter: [700, LOOP.y0], exit: [LOOP.x1, LOOP.y0 + (LOOP.x1 - 700)], junc: [1185, 700], tx: 1545, ty0: 628, ty1: 788 },
+  };
+  const HORDER = ["A1", "G", "A2", "ADV"];
+  const HNAME = { A1: "ALGEBRA I", G: "GEOMETRY", A2: "ALGEBRA II", ADV: "ADVANCED" };
 
   const el = [];
   const stationPos = new Map(); // node id → [x, y]
-  const linePaths = [];         // { strand, d }
-  const complexes = [];         // { strand, ids:[...], x0,x1,y }
+  const mainStrokes = [];       // { strand, d }
+  const branchStrokes = [];     // { strand, d, term, course }
+  const complexes = [];         // { strand, pts, cx, cy }
+
+  const bySort = (a, b) => a.col - b.col || a.key.depth - b.key.depth || (a.key.code < b.key.code ? -1 : 1);
+  // lay a phase's units along a polyline; families fan perpendicular into a pill
+  const distribute = (path, units, m0, m1) => {
+    if (!units.length) return;
+    const { L, seg } = plen(path);
+    const n = units.length;
+    units.forEach((u, i) => {
+      const fr = n === 1 ? m0 + (1 - m0 - m1) * 0.5 : m0 + ((i + 0.5) / n) * (1 - m0 - m1);
+      const [x, y, tx, ty] = at(path, seg, L, fr);
+      const px = -ty, py = tx; // perpendicular
+      const m = u.members, gap = m.length > 1 ? 8.5 : 0;
+      const mp = m.map((mn, j) => {
+        const o = (j - (m.length - 1) / 2) * gap;
+        const pt = [x + px * o, y + py * o];
+        stationPos.set(mn.id, pt);
+        return pt;
+      });
+      if (m.length > 1) complexes.push({ strand: u.strand, pts: mp, cx: x, cy: y });
+    });
+  };
 
   for (const strand of STRAND_ORDER) {
-    // units in this line: a family collapses to one unit at the parent's key;
-    // singletons are their own unit. Ordered by (col, depth, code).
+    const c = CFG[strand];
     const mine = g.nodes.filter((n) => n.strand === strand && !isChild(n.id));
     const units = mine.map((n) => ({
-      key: n,
-      col: colOf(n),
-      members: n.children && n.children.length ? [n, ...n.children.map((c) => byId.get(c))] : [n],
+      strand, key: n, col: colOf(n),
+      members: n.children && n.children.length ? [n, ...n.children.map((k) => byId.get(k))] : [n],
     }));
-    units.sort((a, b) =>
-      a.col - b.col || a.key.depth - b.key.depth || (a.key.code < b.key.code ? -1 : 1));
-
-    // group units by column, spread their member dots evenly across the column
-    const byCol = Array.from({ length: 13 }, () => []);
-    for (const u of units) byCol[u.col].push(u);
-
-    const pts = []; // ordered [x, y] the route threads (one per dot)
-    for (let c = 0; c < 13; c++) {
-      const list = byCol[c];
-      if (!list.length) continue;
-      const dots = list.reduce((a, u) => a + u.members.length, 0);
-      const x0 = colX[c] + 10, x1 = colX[c + 1] - 10;
-      const y = trackY(strand, c);
-      let k = 0;
-      for (const u of list) {
-        const startK = k;
-        for (const m of u.members) {
-          const x = x0 + (dots === 1 ? 0.5 : (k + 0.5) / dots) * (x1 - x0);
-          stationPos.set(m.id, [x, y]);
-          pts.push([x, y]);
-          k++;
-        }
-        if (u.members.length > 1) {
-          const xs = u.members.map((m) => stationPos.get(m.id)[0]);
-          complexes.push({ strand, ids: u.members.map((m) => m.id), x0: Math.min(...xs), x1: Math.max(...xs), y });
-        }
-        void startK;
-      }
+    const approach = [], loop = [], branch = {};
+    for (const u of units) {
+      if (u.col <= 3) approach.push(u);
+      else if (u.col <= 8) loop.push(u);
+      else (branch[u.key.courses[0]] = branch[u.key.courses[0]] || []).push(u);
     }
+    approach.sort(bySort); loop.sort(bySort);
 
-    // octolinear route through the dots: horizontal within a track, a 45° jog
-    // where the track changes between columns.
-    let d = "";
-    for (let i = 0; i < pts.length; i++) {
-      const [x, y] = pts[i];
-      if (i === 0) { d = `M${f(x)},${f(y)}`; continue; }
-      const py = pts[i - 1][1];
-      if (Math.abs(y - py) < 0.5) {
-        d += ` L${f(x)},${f(y)}`;
-      } else {
-        const dy = Math.abs(y - py);
-        const jog = Math.max(pts[i - 1][0] + 1, x - dy); // 45° run == rise
-        d += ` L${f(jog)},${f(py)} L${f(x)},${f(y)}`;
-      }
+    // build the three-phase spine
+    let approachPath, loopPath, egressPath;
+    if (c.diagonal) {
+      approachPath = [c.origin, c.enter];
+      loopPath = [c.enter, c.exit];
+      egressPath = elbow(c.exit, c.junc);
+    } else {
+      approachPath = elbow(c.origin, perimPt(c.entryT, c.lane * BUNDLE));
+      loopPath = perimWalk(c.entryT, c.exitT, c.dir, c.lane * BUNDLE);
+      egressPath = elbow(perimPt(c.exitT, c.lane * BUNDLE), c.junc);
     }
-    linePaths.push({ strand, d });
+    distribute(approachPath, approach, 0.05, 0.05);
+    distribute(loopPath, loop, 0.015, 0.015);
+
+    const main = approachPath.concat(loopPath.slice(1), egressPath.slice(1));
+    mainStrokes.push({ strand, d: toPath(main) });
+
+    const present = HORDER.filter((cr) => branch[cr] && branch[cr].length);
+    present.forEach((cr, i) => {
+      const ty = present.length === 1 ? (c.ty0 + c.ty1) / 2 : c.ty0 + (c.ty1 - c.ty0) * (i / (present.length - 1));
+      const long = branch[cr].length > 15; // dense yards reach further east
+      const term = [c.tx + (long ? 150 : 0), ty];
+      const bpath = elbow(c.junc, term);
+      distribute(bpath, branch[cr].sort(bySort), 0.07, 0.10);
+      branchStrokes.push({ strand, d: toPath(bpath), term, course: cr });
+    });
   }
 
-  // ---- draw order ----------------------------------------------------------
-  // column separators + labels
-  for (let c = 0; c < 13; c++) {
-    el.push(`<line x1="${f(colX[c + 1])}" y1="${padT - 40}" x2="${f(colX[c + 1])}" y2="${H - padB}" stroke="#15132a" stroke-width="1"/>`);
-    const mx = (colX[c] + colX[c + 1]) / 2;
-    el.push(`<text x="${f(mx)}" y="${H - padB + 30}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="13" fill="#4a4770" letter-spacing="0.1em">${COL_LABELS[c]}</text>`);
-  }
-  el.push(`<text x="${f((colX[0] + colX[9]) / 2)}" y="${H - padB + 54}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11.5" fill="#3a3860" letter-spacing="0.14em">GRADE K – 8</text>`);
-  el.push(`<text x="${f((colX[9] + colX[13]) / 2)}" y="${H - padB + 54}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11.5" fill="#3a3860" letter-spacing="0.14em">HIGH SCHOOL</text>`);
+  // ---- draw order: back → front --------------------------------------------
+  // the sea beyond the eastern shoreline (the delta the Watershed empties into)
+  el.push(`<defs>
+<linearGradient id="tsea" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0%" stop-color="#16324a" stop-opacity="0"/>
+<stop offset="55%" stop-color="#16324a" stop-opacity="0.5"/>
+<stop offset="100%" stop-color="#1d4a63" stop-opacity="0.85"/>
+</linearGradient>
+<radialGradient id="tdown" cx="50%" cy="50%" r="62%">
+<stop offset="0%" stop-color="#1a1838" stop-opacity="0.9"/>
+<stop offset="100%" stop-color="#12102a" stop-opacity="0"/>
+</radialGradient></defs>`);
+  el.push(`<rect x="${f(seaX)}" y="0" width="${f(W - seaX)}" height="${H}" fill="url(#tsea)"/>`);
+  el.push(`<line x1="${f(seaX)}" y1="0" x2="${f(seaX)}" y2="${H}" stroke="#2a5a72" stroke-width="1" stroke-opacity="0.5"/>`);
+  el.push(`<text x="${f(seaX + 16)}" y="60" font-family="ui-monospace, monospace" font-size="12.5" fill="#4a7a90" letter-spacing="0.14em">SEA</text>`);
 
-  // transfers: cross-strand prereq edges as thin connector curves between lines
+  // downtown district: a soft glow + the LOOP track guide (a faint dotted
+  // rectangle, like the CTA's elevated Loop) + labels, so the core reads as a
+  // real downtown ring even where a colored line doesn't cover a full side.
+  el.push(`<rect x="${f(LOOP.x0 - 70)}" y="${f(LOOP.y0 - 70)}" width="${f(LOOP.x1 - LOOP.x0 + 140)}" height="${f(LOOP.y1 - LOOP.y0 + 140)}" fill="url(#tdown)"/>`);
+  el.push(`<rect x="${f(LOOP.x0)}" y="${f(LOOP.y0)}" width="${f(LOOP.x1 - LOOP.x0)}" height="${f(LOOP.y1 - LOOP.y0)}" rx="3" fill="none" stroke="#3c3960" stroke-width="2" stroke-opacity="0.7" stroke-dasharray="2 7"/>`);
+  el.push(`<text x="${f(cxM)}" y="${f(cyM - 4)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="15" fill="#3a3760" letter-spacing="0.46em">THE LOOP</text>`);
+  el.push(`<text x="${f(cxM)}" y="${f(cyM + 18)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" fill="#302d4c" letter-spacing="0.2em">DOWNTOWN · GRADES 3 – 7 · THE FRACTION–RATIO CORE</text>`);
+
+  // transfers: cross-strand prereq edges as faint connector arcs — drawn ONLY
+  // where the two stations are not already co-located (a shared interchange).
   for (const e of prereq) {
     if (!crossStrand(e)) continue;
     const A = stationPos.get(e.s), B = stationPos.get(e.t);
     if (!A || !B) continue;
-    const mx = (A[0] + B[0]) / 2;
-    const my = (A[1] + B[1]) / 2 + (hash("tf" + e.s + e.t) - 0.5) * 26;
-    el.push(`<path d="M${f(A[0])},${f(A[1])} Q${f(mx)},${f(my)} ${f(B[0])},${f(B[1])}" fill="none" stroke="#7d78b0" stroke-width="1" stroke-opacity="0.35"/>`);
+    const dist = Math.hypot(A[0] - B[0], A[1] - B[1]);
+    if (dist < 26) continue;   // already a shared interchange — no connector needed
+    if (dist > 430) continue;  // cross-map hauls read as haze; the shared trunk carries them
+    const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2 + (hash("tf" + e.s + e.t) - 0.5) * 20;
+    el.push(`<path d="M${f(A[0])},${f(A[1])} Q${f(mx)},${f(my)} ${f(B[0])},${f(B[1])}" fill="none" stroke="#6f6aa2" stroke-width="0.9" stroke-opacity="0.16"/>`);
   }
 
-  // the lines themselves (5px, full strand color)
-  for (const { strand, d } of linePaths) {
-    el.push(`<path d="${d}" fill="none" stroke="${STRAND[strand]}" stroke-width="5" stroke-opacity="0.95" stroke-linecap="round" stroke-linejoin="round"/>`);
+  // the lines: branches first (thinner tail), then the trunks over them.
+  for (const { strand, d } of branchStrokes) {
+    el.push(`<path d="${d}" fill="none" stroke="${STRAND[strand]}" stroke-width="4.4" stroke-opacity="0.9" stroke-linecap="round" stroke-linejoin="round"/>`);
+  }
+  for (const { strand, d } of mainStrokes) {
+    el.push(`<path d="${d}" fill="none" stroke="${STRAND[strand]}" stroke-width="5" stroke-opacity="0.96" stroke-linecap="round" stroke-linejoin="round"/>`);
   }
 
-  // station complexes: a pill enclosing parent + child platform dots
+  // station complexes: a pill around a family's parent + child platform dots
   for (const cx of complexes) {
-    const r = 9;
-    el.push(`<rect x="${f(cx.x0 - r)}" y="${f(cx.y - r)}" width="${f(cx.x1 - cx.x0 + 2 * r)}" height="${f(2 * r)}" rx="${r}" fill="${BG}" fill-opacity="0.55" stroke="${STRAND[cx.strand]}" stroke-width="1.6" stroke-opacity="0.9"/>`);
+    const xs = cx.pts.map((p) => p[0]), ys = cx.pts.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const r = 8;
+    el.push(`<rect x="${f(x0 - r)}" y="${f(y0 - r)}" width="${f(x1 - x0 + 2 * r)}" height="${f(y1 - y0 + 2 * r)}" rx="${r}" fill="${BG}" fill-opacity="0.6" stroke="${STRAND[cx.strand]}" stroke-width="1.6" stroke-opacity="0.9"/>`);
   }
 
-  // stations. Interchange = larger white disc + dark ring (size scales with
-  // reach for the WAP hubs); ordinary station = small white core + line ring.
+  // stations. Interchange = white disc + dark ring, sized by descendant reach
+  // (the big hubs swell downtown); ordinary station = small white core + ring.
   for (const strand of STRAND_ORDER) {
     for (const n of g.nodes) {
       if (n.strand !== strand) continue;
       const p = stationPos.get(n.id);
       if (!p) continue;
       if (interchange.has(n.id)) {
-        const r = 4.4 + Math.sqrt(reach(n.id) / MAXREACH) * 4.2;
+        const r = 4.2 + Math.sqrt(reach(n.id) / MAXREACH) * 4.6;
         el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="${f(r)}" fill="#f4f2fb" stroke="#0a0a16" stroke-width="1.8"/>`);
       } else {
-        el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="3.1" fill="#f4f2fb" stroke="${STRAND[strand]}" stroke-width="1.7"/>`);
+        el.push(`<circle cx="${f(p[0])}" cy="${f(p[1])}" r="3" fill="#f4f2fb" stroke="${STRAND[strand]}" stroke-width="1.6"/>`);
       }
     }
   }
 
-  // labels: only interchanges with reach ≥ 60, never a child platform — then
-  // DECLUTTERED greedily left→right so no two labels in the same band land
-  // within MINGAP px. Dense grade columns therefore surface just their leading
-  // hub, keeping the metro-map sparseness the eye needs.
-  const MINGAP = 118;
-  const labelable = g.nodes
-    .filter((n) => interchange.has(n.id) && reach(n.id) >= 60 && !isChild(n.id))
-    .map((n) => ({ n, p: stationPos.get(n.id) }))
-    .filter((o) => o.p)
-    .sort((a, b) => a.p[0] - b.p[0]);
-  const lastX = {}; // per (strand + above/below) band
-  let flip = 0;
-  for (const { n, p } of labelable) {
-    const above = flip % 2 === 0;
-    const band = n.strand + (above ? "^" : "v");
-    if (lastX[band] !== undefined && p[0] - lastX[band] < MINGAP) continue;
-    lastX[band] = p[0];
-    flip++;
-    const ly = above ? p[1] - 12 : p[1] + 18;
-    el.push(`<text x="${f(p[0])}" y="${f(ly)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" fill="#a9a5d0" letter-spacing="0.02em">${n.code}</text>`);
+  // K origin tags (radial entrances) + HS branch termini labels (toward water)
+  for (const strand of STRAND_ORDER) {
+    const c = CFG[strand];
+    const o = c.origin;
+    el.push(`<circle cx="${f(o[0])}" cy="${f(o[1])}" r="5.5" fill="${BG}" stroke="${STRAND[strand]}" stroke-width="2.4"/>`);
+    const anchor = o[0] < 200 ? "start" : "middle";
+    const ox = o[0] < 200 ? o[0] + 12 : o[0];
+    const oy = o[1] < 200 ? o[1] - 12 : (o[1] > H - 200 ? o[1] + 22 : o[1] - 12);
+    el.push(`<text x="${f(ox)}" y="${f(oy)}" text-anchor="${anchor}" font-family="ui-monospace, monospace" font-size="12" fill="${mixHex(STRAND[strand], "#ffffff", 0.15)}" letter-spacing="0.1em">${strand.toUpperCase()} · K</text>`);
+  }
+  for (const { strand, term, course } of branchStrokes) {
+    el.push(`<circle cx="${f(term[0])}" cy="${f(term[1])}" r="4.4" fill="${STRAND[strand]}" stroke="${BG}" stroke-width="1.4"/>`);
+    el.push(`<text x="${f(term[0] + 10)}" y="${f(term[1] + 4)}" font-family="ui-monospace, monospace" font-size="11" fill="${mixHex(STRAND[strand], "#ffffff", 0.25)}" letter-spacing="0.06em">${HNAME[course]}</text>`);
   }
 
-  // legend (line = strand)
-  let lx = padL;
+  // interchange labels: the biggest downtown hubs only (reach ≥ 70), decluttered
+  // greedily so no two land within MINGAP — the metro-map sparseness the eye needs.
+  const MINGAP = 132;
+  const placed = [];
+  const labelable = g.nodes
+    .filter((n) => interchange.has(n.id) && reach(n.id) >= 78 && !isChild(n.id))
+    .map((n) => ({ n, p: stationPos.get(n.id) }))
+    .filter((o) => o.p)
+    .sort((a, b) => reach(b.n.id) - reach(a.n.id));
+  let flip = 0;
+  for (const { n, p } of labelable) {
+    if (placed.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < MINGAP)) continue;
+    placed.push(p);
+    const ly = flip++ % 2 === 0 ? p[1] - 13 : p[1] + 20;
+    el.push(`<text x="${f(p[0])}" y="${f(ly)}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" fill="#c4c0e6" letter-spacing="0.02em">${n.code}</text>`);
+  }
+
+  // legend (top-right, clear of the radial origins and the SEA tag) + title
+  let lx = 1120;
   for (const s of STRAND_ORDER) {
-    el.push(`<line x1="${f(lx)}" y1="78" x2="${f(lx + 26)}" y2="78" stroke="${STRAND[s]}" stroke-width="5" stroke-linecap="round"/>`);
-    el.push(`<text x="${f(lx + 34)}" y="82" font-family="ui-monospace, monospace" font-size="12.5" fill="${INK}" letter-spacing="0.06em">${s.toUpperCase()}</text>`);
-    lx += 150 + s.length * 8;
+    el.push(`<line x1="${f(lx)}" y1="62" x2="${f(lx + 24)}" y2="62" stroke="${STRAND[s]}" stroke-width="5" stroke-linecap="round"/>`);
+    el.push(`<text x="${f(lx + 31)}" y="66" font-family="ui-monospace, monospace" font-size="12" fill="${INK}" letter-spacing="0.05em">${s.toUpperCase()}</text>`);
+    lx += 96 + s.length * 8;
   }
   el.push(`<text x="28" y="52" font-family="ui-monospace, monospace" font-size="20" fill="#e8e6f6" letter-spacing="0.06em">THE TRANSIT MAP · prerequisite knowledge as a metro network</text>`);
 
   return svg(W, H, el,
-    "Octolinear (0/45/90°) · 4 strand lines run left→right through 13 grade columns, weaving on parallel tracks · stations ordered by grade then build depth then code · the LINE carries within-strand sequence, so within-strand prerequisites are NOT drawn as separate edges (honest stylization) · white interchanges = cross-strand touch points, sized by reach · rounded pills = station complexes (family: parent + child platforms) · faint curves = cross-strand prerequisite transfers · labels only for interchanges with reach ≥ 60 · 480 standards, real data, deterministic");
+    "A real city, not four lanes: the four strand lines RADIATE from their own K origin (Number from the west, Algebra the northwest, Geometry the southwest, Data the north), CONVERGE and weave through a downtown LOOP (the dense grade 3–7 fraction·ratio·expression core, where most cross-strand transfers live), then peel EAST and BRANCH into their high-school course termini by the water · Number is the hub trunk, Algebra shadows it on the ring so their 86 shared transfers become co-located interchanges, not drawn lines · Data cuts through the core as the cross-town diagonal · octolinear 0/45/90° · white discs = cross-strand interchanges, sized by descendant reach · pills = family station complexes · the LINE carries within-strand order (grade→depth→code, a stylization, not the literal chain) · 480 standards, real data, deterministic");
 }
 
 // ===========================================================================
