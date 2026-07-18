@@ -11,11 +11,17 @@
 // tag; every other completion renders as marker text in the tag styling.
 //
 // Copy is design: edit this list only with the designer.
+// GLYPH CONSTRAINT: entries may use only lowercase a-z, spaces, and hyphens
+// (the tag hand's glyph set; see ui/tagtype.ts).
+
+import { renderTag } from "./tagtype";
 
 export const ASIDES: readonly string[] = [
   "art",
   // ---- single words -------------------------------------------------------
+  "simplicity",
   "clarity",
+  "calming",
   "patience",
   "structure",
   "gravity",
@@ -24,7 +30,6 @@ export const ASIDES: readonly string[] = [
   "momentum",
   "architecture",
   "inheritance",
-  "accumulation",
   "calm",
   "sequence",
   "foundation",
@@ -38,86 +43,83 @@ export const ASIDES: readonly string[] = [
   "order",
   "rhythm",
   "roots",
-  "scaffolding",
-  "cartography",
-  "astronomy",
   "bedrock",
   "breath",
-  "gardening",
-  // ---- phrases ------------------------------------------------------------
+  "balance",
+  "flow",
+  "growth",
+  "ground",
+  "harmony",
+  "elegance",
+  "wonder",
+  "quiet",
+  "steadiness",
+  "practice",
+  "progress",
+  "grace",
+  "attention",
+  "beauty",
+  "discovery",
+  "wayfinding",
+  "proportion",
+  "unfolding",
+  "belonging",
+  // ---- simple phrases -----------------------------------------------------
   "clarity in complexity",
-  "order without cages",
-  "beauty in structure",
-  "the long game",
-  "quiet engineering",
-  "slow architecture",
-  "patient accumulation",
-  "deep foundations",
-  "careful sequence",
+  "quiet order",
+  "deep roots",
+  "solid ground",
+  "slow growth",
+  "small steps",
+  "one structure",
+  "steady light",
+  "patient work",
+  "connected ideas",
+  "common ground",
+  "shared foundations",
+  "first things first",
+  "step by step",
+  "roots and branches",
+  "built to last",
+  "nothing wasted",
+  "no step skipped",
+  "all one piece",
+  "the long view",
+  "the whole picture",
+  "gentle order",
+  "quiet momentum",
+  "earned light",
+  "careful steps",
+  "strong foundations",
+  "the slow build",
+  "growing upward",
+  "holding together",
+  "in good order",
+  "made to connect",
+  "simple at heart",
+  "beauty in order",
+  "a steady climb",
+  "level by level",
+  "year by year",
+  "grade by grade",
+  "piece by piece",
+  "a single thread",
+  "a clear path",
+  "paths that meet",
+  "streams that join",
+  "a quiet sky",
+  "worth the climb",
+  "every rung",
+  "every light earned",
+  "rivers of practice",
+  "step after step",
   "everything connected",
   "nothing isolated",
-  "structure made visible",
   "the shape of learning",
   "a map of care",
-  "gravity for ideas",
-  "light through structure",
-  "the geometry of growth",
-  "rivers of practice",
+  "deep foundations",
   "roots before branches",
-  "step after step",
-  "one thing before another",
-  "mathematics remembering itself",
-  "the architecture of thought",
-  "thirteen years, one structure",
-  "a constellation of small wins",
-  "every light earned",
-  "the opposite of luck",
-  "no wasted year",
-  "a ladder with every rung",
-  "the slow reveal of structure",
-  "an inheritance of ideas",
-  "a childhood of connected steps",
-  "the river beneath the grades",
-  "the ground beneath algebra",
-  "the thread through the years",
-  "learning with a memory",
-  "the map before the journey",
-  // ---- ending statements: Coherence is ... --------------------------------
-  "how far you can see",
-  "what practice builds",
-  "every step remembered",
-  "nothing learned alone",
-  "why the next step holds",
-  "what the years add up to",
-  "where struggle gets its map",
-  "how foundations carry weight",
-  "what teachers build together",
-  "the distance a child travels",
-  "counting all the way up",
-  "how one idea holds another",
-  "what remains when tests fade",
-  "the promise that steps connect",
-  "seeing the whole staircase",
-  "why fractions matter forever",
-  "the debt each idea owes",
-  "how knowledge takes root",
-  "what endures beneath mastery",
-  "where every summit starts",
-  "what kindergarten already knew",
-  "what building on really means",
-  "the case against shortcuts",
-  "how understanding compounds",
-  "what gaps cannot hide from",
-  "the sum of small arrivals",
-  "why order matters",
-  "what holds when pushed",
-  "how counting becomes calculus",
-  "all of it load-bearing",
-  "what a map owes a child",
-  "the long way that works",
-  "how the light stays on",
-  "what the first step promised",
-  "where the story begins",
+  "the long game",
 ] as const;
 
 export interface AsideHandle {
@@ -126,58 +128,41 @@ export interface AsideHandle {
 
 /**
  * Mount the rotating aside into the headline. `rand` is the visit's seeded
- * generator (one print per visit). The hand-drawn "(is art)" SVG already in
- * the DOM shows verbatim when the draw is "art"; every other completion
- * renders as tag-styled marker text with per-visit lean, size, and pressure.
+ * generator (one print per visit). EVERY completion, "art" included, renders
+ * through the tag hand (ui/tagtype.ts), so all one hundred lines share the
+ * approved tag's exact styling — same brackets, chisel weights, echo, and
+ * turbulence — with per-visit lean, drop, and ink pressure.
  */
 export function createAside(rand: () => number): AsideHandle {
   const host = document.querySelector<HTMLElement>(".headline-art");
   if (!host) return { dispose() {} };
-  const drawnTag = host.querySelector("svg");
 
-  const textEl = document.createElement("span");
-  textEl.className = "headline-aside-text";
-  textEl.hidden = true;
-  host.appendChild(textEl);
-
-  // Per-visit print variation: the aside's own lean, drop, size, ink weight,
-  // and turbulence seed. Applied to the text mode via custom properties and
-  // to the drawn tag by re-seeding its filters and tilting the whole print.
+  // Per-visit print variation.
   const lean = -(2 + rand() * 5); // degrees
-  const drop = -(0.06 + rand() * 0.14); // em
-  const size = 0.39 + rand() * 0.07; // em
-  const press = 0.72 + rand() * 0.2; // opacity
+  const drop = 0.3 + rand() * 0.1; // em below baseline
+  const press = 0.86 + rand() * 0.28; // ink pressure (stroke weight)
   host.style.setProperty("--aside-rot", `${lean.toFixed(2)}deg`);
-  host.style.setProperty("--aside-drop", `${drop.toFixed(3)}em`);
-  host.style.setProperty("--aside-size", `${size.toFixed(3)}em`);
-  host.style.setProperty("--aside-press", press.toFixed(2));
-  if (drawnTag) {
-    (drawnTag as SVGElement).style.transform = `rotate(${lean.toFixed(2)}deg)`;
-    drawnTag.querySelectorAll("feTurbulence").forEach((t) => {
-      t.setAttribute("seed", String(1 + Math.floor(rand() * 997)));
-    });
-  }
-  // The text-mode marker filter lives in a persistent defs block — give this
-  // visit's ink its own turbulence too.
+  // This visit's turbulence for the marker filter.
   document
     .querySelectorAll("#aside-marker feTurbulence")
     .forEach((t) => t.setAttribute("seed", String(1 + Math.floor(rand() * 997))));
 
   let index = Math.floor(rand() * ASIDES.length);
+  let current: SVGSVGElement | null = null;
 
   function show(i: number): void {
     const word = ASIDES[i];
     host!.setAttribute("aria-label", `(is ${word})`);
-    if (word === "art" && drawnTag) {
-      textEl.hidden = true;
-      (drawnTag as SVGElement).style.display = "";
-      host!.classList.remove("headline-art-text");
-    } else {
-      if (drawnTag) (drawnTag as SVGElement).style.display = "none";
-      textEl.textContent = `(is ${word})`;
-      textEl.hidden = false;
-      host!.classList.add("headline-art-text");
-    }
+    const svg = renderTag(`(is ${word})`, press);
+    const units = Number(svg.dataset.tagWidth) || 130;
+    const em = (units / 130) * 1.18; // glyph box is 130 tall = 1.18em on screen
+    svg.style.width = `${em.toFixed(3)}em`;
+    svg.style.height = "1.18em";
+    svg.style.bottom = `-${drop.toFixed(3)}em`;
+    current?.remove();
+    current = svg;
+    host!.appendChild(svg);
+    host!.style.width = `${Math.max(0.8, em * 0.94).toFixed(3)}em`;
   }
   show(index);
 
@@ -193,7 +178,7 @@ export function createAside(rand: () => number): AsideHandle {
   return {
     dispose() {
       host.removeEventListener("click", onClick);
-      textEl.remove();
+      current?.remove();
     },
   };
 }

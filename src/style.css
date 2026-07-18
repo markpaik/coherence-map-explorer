@@ -130,11 +130,10 @@ body {
 .headline-art svg {
   position: absolute;
   left: 0;
-  bottom: -0.34em; /* descend past the baseline */
-  width: 100%;
+  bottom: -0.34em; /* descend past the baseline (per-visit drop set inline) */
   height: 1.18em; /* and rise past the cap height — the spill */
   overflow: visible;
-  transform: rotate(-4deg);
+  transform: rotate(var(--aside-rot, -4deg));
 }
 body.art-ringers .headline-art {
   color: #1a1712;
@@ -144,29 +143,9 @@ body.art-fidenza .headline-art {
   color: #e8e0cd;
   opacity: 0.9;
 }
-/* Text mode of the aside: any of the 100 completions, in the tag's clothes.
-   Per-visit custom properties (lean, drop, size, ink pressure) are set by
-   ui/aside.ts — every visit prints its own aside. */
-.headline-art.headline-art-text {
-  width: auto;
-}
-.headline-aside-text {
-  font-family: "Brush Script MT", "Bradley Hand", "Segoe Script", "Snell Roundhand", cursive;
-  font-size: var(--aside-size, 0.42em);
-  display: inline-block;
-  transform: rotate(var(--aside-rot, -4deg)) skewX(-6deg) translateY(var(--aside-drop, -0.1em));
-  opacity: var(--aside-press, 0.82);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  text-shadow: 0.045em 0.055em 0 rgb(154 125 240 / 0.2); /* the echo pass */
-  filter: url(#aside-marker);
-}
-body.art-ringers .headline-aside-text {
-  text-shadow: 0.045em 0.055em 0 rgb(26 23 18 / 0.2);
-}
-body.art-fidenza .headline-aside-text {
-  text-shadow: 0.045em 0.055em 0 rgb(20 51 44 / 0.45);
-}
+/* Every aside (art included) renders through the tag hand (ui/tagtype.ts):
+   one stroke language for all one hundred lines. Width and drop are set
+   inline per phrase; the visit's lean comes through the custom property. */
 
 /* The former headline, now the tagline riding under "Coherence". */
 .tagline {
