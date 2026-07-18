@@ -213,13 +213,48 @@ all standards grouped by grade with the same panel. Every interactive target
 5. A teacher can go from load → their standard → its prerequisites in under
    15 seconds without instructions.
 
+## Pose grammar (round 10: "strikingly reminiscent of the concept")
+
+Each formation carries its concept's own visual vocabulary, not just its
+layout. The acceptance specs are the preview SVGs in docs/previews/
+(transit-pose-front/-side, blueprint-pose-sheet), rendered from the shipped
+pose data by scripts/pose-grammar-previews.mjs.
+
+- **Constellation** — the shipped galaxy look, untouched. It already IS its
+  concept.
+- **Ascent** — altitude vocabulary: elevation isolines per prerequisite-depth
+  level (y = median pos2 y at that depth, x hugging the massif), every 5th an
+  index contour, faint (0.08/0.14) so the dark story baseline holds. Ascent
+  window only.
+- **Blueprint** — a literal drafted sheet at z=−8 behind the circuit: field +
+  exposure washes + drafting grid + double frame + corner registers + title
+  block (COHERENCE · PREREQUISITE CIRCUIT … SHEET 3 OF 4 · SCALE NONE · SEED
+  1337), per style: Prussian cyanotype (Galaxy) / cream vellum + graphite
+  (Ringers) / teal + cream ink (Fidenza). Nodes hand off to drafted rings +
+  crosshair ticks (families double ring, K-8 Major Work filled center); Galaxy
+  edges flatten to thin white-ink lines with strand kept as a 30% tint,
+  related pairs as dashed construction lines.
+- **Transit** — metro vocabulary: straight runs with tight rounded knuckles
+  (d = min(9, 0.42·segment)), opaque near-constant trunk widths by reach,
+  z-decks at +90/+30/−30/−90 (number/algebra/geometry/data) with banked
+  elbows at the endpoint z-midpoint, stations as pale discs with wraparound
+  strand borders, 38 true interchanges (≥3 cross-strand prereqs at node
+  grain) as capsules with one dot per line, families as lozenges with child
+  ticks, related pairs as dashed walking transfers. Ringers keeps straight
+  strings at pose 3 (its own identity).
+
+Grammar handoffs never overlap: orbs→drafts over pose 1.6–2.4 (peak at the
+Blueprint), plain orbs through the 2.4–2.6 interstitial, orbs→stations over
+2.6–3.0. The sheet is gone by 2.5. All layers fold per-node story dimming, and
+every treatment is a pure function of the eased pose value (RM-safe, no drift).
+
 ## Art styles
 
 The scene ships three render skins, switchable live from the bottom-right
-toggle and deep-linkable by URL. A style is a LOOK, not a layout: all three
-poses (Constellation, Ascent, Blueprint) work under every style, and the state
-machine, filters, and stories drive the same attributes no matter which skin is
-active. Switching is instant, since a style is a look and not a place, so
+toggle and deep-linkable by URL. A style is a LOOK, not a layout: all four
+poses (Constellation, Ascent, Blueprint, Transit) work under every style, and
+the state machine, filters, and stories drive the same attributes no matter
+which skin is active. Switching is instant, since a style is a look and not a place, so
 nothing needs a transition to interrupt. Reference stills live in
 docs/previews/.
 

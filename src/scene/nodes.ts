@@ -67,6 +67,13 @@ interface ArtNodeMatOpts {
   pipe: boolean;
   /** Distinct program cache key so patched programs never collide. */
   cacheKey: string;
+  /**
+   * Pose-3 station handoff (0 normal … 1 fully stationed). At Transit the galaxy
+   * node sprites cede to the station marks (scene/stations.ts): the peg shrinks
+   * to nothing as the station fades in. Shared across skins so the crossfade
+   * reads the same in every art style; gated at 0 so poses 0–2 are unchanged.
+   */
+  uPoseFade: THREE.IUniform<number>;
 }
 
 function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMatOpts): void {
@@ -103,6 +110,7 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uField = opts.uField;
+    shader.uniforms.uPoseFade = opts.uPoseFade;
     if (opts.uColor) shader.uniforms.uArtColor = opts.uColor;
 
     shader.vertexShader = shader.vertexShader
@@ -113,6 +121,7 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         attribute float aEmphasis;
         attribute float aVisible;
         attribute float aDamage;
+        uniform float uPoseFade;
         ${colorAttrDecl}
         ${colorUniformDecl}
         ${twistDecl}
@@ -138,6 +147,9 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
           int i1 = int(min(floor(e) + 1.0, 5.0));
           float f = fract(e);
           float scl = mix(sclTab[i0], sclTab[i1], f);
+          // Transit station handoff: collapse the peg to nothing as the station
+          // mark takes over (uPoseFade 0→1). At 0 this is a no-op (× 1.0).
+          scl *= mix(1.0, 0.001, uPoseFade);
           vDimE = mix(dimTab[i0], dimTab[i1], f);
           vVisible = aVisible;
           vDamage = clamp(aDamage, 0.0, 1.0);
@@ -249,6 +261,15 @@ export interface NodesHandle {
   setShimmerEnabled(on: boolean): void;
   /** Story-mode luminance lift for undamaged nodes (1 = off; ~1.9 = shine). */
   setStoryLift(mul: number): void;
+  /**
+   * Per-pose orb handoff (0 normal … 1 fully collapsed). Shrinks the node
+   * sprites to nothing while a drafted / stationed grammar owns the pose — the
+   * caller passes the UNION of both handoff windows: the drafted rings
+   * (scene/drafts.ts) over pose 1.6→2.0→2.4 and the Transit stations
+   * (scene/stations.ts) over pose 2.6→3.0. Applies in every art skin. 0 leaves
+   * poses 0/1 (and the 2.4→2.6 gap between the two windows) untouched.
+   */
+  setOrbFade(amount: number): void;
   /** Grow the proxy pick radius for touch pointers (idempotent). */
   setTouchPicking(on: boolean): void;
   /**
@@ -340,6 +361,9 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     // attenuates the lift to nothing, widening the narrative contrast between
     // shining and struggling. 1.0 = off.
     uStoryLift: { value: 1 },
+    // Transit station handoff (0 normal … 1 fully stationed). Shared with the
+    // art-node materials so every skin crossfades pegs → station marks the same.
+    uPoseFade: { value: 0 },
   };
 
   material.onBeforeCompile = (shader) => {
@@ -347,6 +371,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     shader.uniforms.uDimColor = uniforms.uDimColor;
     shader.uniforms.uShimmer = uniforms.uShimmer;
     shader.uniforms.uStoryLift = uniforms.uStoryLift;
+    shader.uniforms.uPoseFade = uniforms.uPoseFade;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -359,6 +384,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         attribute float aDamage;
         uniform float uTime;
         uniform float uShimmer;
+        uniform float uPoseFade;
         varying float vColorMul;
         varying float vShim;
         varying float vDim;
@@ -392,6 +418,10 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           // Filtered-out instances shrink to a faint background speck (ghost) and
           // read as dimmed — opaque, so the depth pass and edge occlusion hold.
           scl *= mix(0.14, 1.0, aVisible);
+          // Transit station handoff: collapse the orb to nothing as the station
+          // mark fades in (uPoseFade 0→1). At 0 this is a no-op (× 1.0), so poses
+          // 0–2 stay byte-identical.
+          scl *= mix(1.0, 0.001, uPoseFade);
           vDim = max(dim, (1.0 - aVisible) * 0.9);
           // Damage rides on top of emphasis: it recolors (fragment) but never
           // resizes, so a chain-lit-but-damaged node keeps its emphasis size.
@@ -544,6 +574,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     uField: { value: new THREE.Color(RINGERS.bg) },
     pipe: false,
     cacheKey: "coherence-nodes-ringers-peg",
+    uPoseFade: uniforms.uPoseFade,
   });
 
   const outlineMaterial = new THREE.MeshBasicMaterial({
@@ -558,6 +589,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     uField: { value: new THREE.Color(RINGERS.bg) },
     pipe: false,
     cacheKey: "coherence-nodes-ringers-outline",
+    uPoseFade: uniforms.uPoseFade,
   });
 
   const fidMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
@@ -567,6 +599,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     uField: { value: new THREE.Color(FIDENZA.bg) },
     pipe: true,
     cacheKey: "coherence-nodes-fidenza",
+    uPoseFade: uniforms.uPoseFade,
   });
 
   // Widened to InstancedMesh<BufferGeometry> so setArtStyle can swap in the
@@ -708,6 +741,9 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     },
     setStoryLift(mul) {
       uniforms.uStoryLift.value = mul;
+    },
+    setOrbFade(amount) {
+      uniforms.uPoseFade.value = amount;
     },
     setTouchPicking(on) {
       if (on === touchMode) return;

@@ -63,6 +63,7 @@ const VERT = /* glsl */ `
   uniform vec2 uViewport;   // drawing-buffer size in device px
   uniform float uPxRatio;   // device px per CSS px (capped at 2)
   uniform float uArtStyle;  // 0 Galaxy | 1 Ringers | 2 Fidenza
+  uniform float uPose;      // eased pose value 0..3 (driver-fed); 3 = Transit
 
   out float vT;
   out vec3 vColor;
@@ -82,12 +83,67 @@ const VERT = /* glsl */ `
     return u * u * aStart + 2.0 * u * s * aCtrl + s * s * aEnd;
   }
 
+  // Transit metro turn (pose 3): a straight run A→P1, a TIGHT rounded knuckle
+  // P1→(quadratic through the elbow E=aCtrl)→P2, then a straight run P2→B.
+  //   d  = min(9, 0.42|AE|, 0.42|EB|)
+  //   P1 = lerp(A,E, 1 − d/|AE|)   P2 = lerp(E,B, d/|EB|)
+  // s ∈ [0,1] is distributed by segment length so the fixed 24-sample strip
+  // spends its vertices evenly along the L — the knuckle chord approximates its
+  // (short) arc, which is invisible at metro-line widths. This is the exact
+  // grammar the acceptance preview draws (scripts/pose-grammar-previews.mjs
+  // elbowPath), adapted to sample continuously for the ribbon tessellation.
+  vec3 metroPos(float s) {
+    vec3 A = aStart, E = aCtrl, B = aEnd;
+    float la = length(E - A);
+    float lb = length(B - E);
+    if (la < 1e-3 || lb < 1e-3) return mix(A, B, s); // degenerate → straight
+    float d = min(9.0, min(0.42 * la, 0.42 * lb));
+    vec3 P1 = mix(A, E, 1.0 - d / la);
+    vec3 P2 = mix(E, B, d / lb);
+    float L1 = la - d;            // straight A→P1
+    float Lk = length(P2 - P1);   // knuckle (chord ≈ arc)
+    float L2 = lb - d;            // straight P2→B
+    float L = max(L1 + Lk + L2, 1e-4);
+    float x = s * L;
+    if (x <= L1) return mix(A, P1, x / max(L1, 1e-4));
+    if (x <= L1 + Lk) {
+      float u = (x - L1) / max(Lk, 1e-4);
+      float om = 1.0 - u;
+      return om * om * P1 + 2.0 * om * u * E + u * u * P2;
+    }
+    return mix(P2, B, (x - L1 - Lk) / max(L2, 1e-4));
+  }
+
+  // Position + tangent for the bezier-based skins (Galaxy / Fidenza), blended
+  // bezier→metro by m3 = the pose-3 morph amount. At m3 == 0 this returns the
+  // shipped bezier position and its ANALYTIC tangent verbatim, so poses 0–2 stay
+  // byte-identical; only during/at Transit does the soft swoop sharpen into the
+  // metro turn (tangent via a symmetric finite difference of the blended path,
+  // which stays well-defined through the knuckle).
+  void curveAt(float s, float m3, out vec3 p, out vec3 tan) {
+    vec3 pB = bezier(s);
+    if (m3 <= 0.0) {
+      p = pB;
+      tan = 2.0 * (1.0 - s) * (aCtrl - aStart) + 2.0 * s * (aEnd - aCtrl);
+      return;
+    }
+    p = mix(pB, metroPos(s), m3);
+    float e = 0.03;
+    float sa = clamp(s - e, 0.0, 1.0);
+    float sb = clamp(s + e, 0.0, 1.0);
+    vec3 pa = mix(bezier(sa), metroPos(sa), m3);
+    vec3 pb = mix(bezier(sb), metroPos(sb), m3);
+    tan = pb - pa;
+  }
+
   void main() {
+    float m3 = clamp(uPose - 2.0, 0.0, 1.0); // pose-3 morph amount (0 off, 1 Transit)
     if (uArtStyle < 0.5) {
       // ===================== GALAXY (shipped, byte-identical) ===============
-      vec3 p = bezier(t);
-      // Analytic tangent of the quadratic bezier (well-defined at both ends).
-      vec3 tangent = 2.0 * (1.0 - t) * (aCtrl - aStart) + 2.0 * t * (aEnd - aCtrl);
+      // At m3 == 0 curveAt returns the exact shipped bezier point + analytic
+      // tangent; at Transit it samples the metro turn instead.
+      vec3 p; vec3 tangent;
+      curveAt(t, m3, p, tangent);
       // Coincident endpoints (control == start == end) give a zero tangent;
       // normalize() would emit NaN and blow up the whole instanced draw.
       float tlen = length(tangent);
@@ -112,6 +168,27 @@ const VERT = /* glsl */ `
       int i1 = int(min(floor(e) + 1.0, 5.0));
       float f = fract(e);
       float width = mix(mix(wP[i0], wP[i1], f), mix(wR[i0], wR[i1], f), aKind);
+
+      // Blueprint (pose 2, Galaxy only): flatten to a thin near-constant
+      // drafting weight so the linework reads as printed ink, not lit ribbons.
+      // m2 is a triangular window peaking at the Blueprint (1.6→2→2.4); it is 0
+      // at poses 0/1 and at Transit, so nothing else is disturbed, and the metro
+      // block below re-widens the trunks as m3 takes over past pose 2.
+      float m2 = clamp(1.0 - abs(uPose - 2.0) / 0.4, 0.0, 1.0);
+      width = mix(width, 1.1, m2);
+
+      // Transit (pose 3): near-constant metro weight. Prereq trunks widen with
+      // SOURCE reach (aArtScalars.z is the reach-scaled source radius already
+      // threaded via radiusOf) — heavier lines carry more of the map; related
+      // walking-transfers stay a thin dashed link. Emphasis widening survives via
+      // max(). The width is constant along t (no along-edge taper). Gated on m3 so
+      // poses 0–2 are untouched.
+      if (m3 > 0.0) {
+        float radA = aArtScalars.z;
+        float trunk = 2.0 + clamp((radA - 1.6) * 2.0, 0.0, 4.0); // ~2..6 px by reach
+        float metroW = aKind < 0.5 ? max(width, trunk) : 1.4;
+        width = mix(width, metroW, m3);
+      }
 
       vec2 offsetNdc = normalPx * (width * uPxRatio * 0.5 * side) / (uViewport * 0.5);
       clip.xy += offsetNdc * clip.w;
@@ -175,8 +252,10 @@ const VERT = /* glsl */ `
       // foreshortens to a hairline — at REDUCED width so connections read
       // thinner than the node pipes. The fragment adds a round-tube shading
       // profile across the strip (vSide) and keeps the iconic striped caps.
-      vec3 p = bezier(t);
-      vec3 tangent = 2.0 * (1.0 - t) * (aCtrl - aStart) + 2.0 * t * (aEnd - aCtrl);
+      // Shares the Galaxy metro-turn blend: Fidenza pipes bend at the same
+      // knuckles at Transit (m3 == 0 keeps the shipped soft bezier).
+      vec3 p; vec3 tangent;
+      curveAt(t, m3, p, tangent);
       float tlen = length(tangent);
       vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
 
@@ -214,6 +293,7 @@ const FRAG = /* glsl */ `
   uniform float uFlow; // 1 = animate prereq comets, 0 = frozen (reduced motion)
   uniform float uStory; // 1 while a story plays: healthy edges lift toward the chain look
   uniform float uArtStyle; // 0 Galaxy | 1 Ringers | 2 Fidenza
+  uniform float uPose; // eased pose value 0..3; 3 = Transit (opaque metro lines)
   uniform vec3 uField; // active art-style field color (damage fades toward it)
 
   in float vT;
@@ -229,6 +309,10 @@ const FRAG = /* glsl */ `
   out vec4 fragColor;
 
   void main() {
+    float m3 = clamp(uPose - 2.0, 0.0, 1.0); // pose-3 morph amount (0 off, 1 Transit)
+    // Blueprint window (pose 2, Galaxy only): a triangular ramp peaking at 2.0,
+    // zero outside 1.6..2.4 — off at poses 0/1 and at Transit.
+    float m2 = clamp(1.0 - abs(uPose - 2.0) / 0.4, 0.0, 1.0);
     if (uArtStyle < 0.5) {
       // ===================== GALAXY (shipped, byte-identical) ===============
       float e = vEmphasis;
@@ -259,6 +343,11 @@ const FRAG = /* glsl */ `
       if (vKind < 0.5) {
         // Prerequisite (directed): HDR-bright with directional comets when chain/hot.
         alpha = max(mix(aP[i0], aP[i1], f), 0.65 * story);
+        // Transit: lift the rest line to an OPAQUE metro line (~0.95). max() so a
+        // hot/chain edge is never dimmed; mix(...,m3) so poses 0–2 are unchanged.
+        alpha = mix(alpha, max(alpha, 0.95), m3);
+        // Blueprint: lift the rest prereq to a legible thin ink line.
+        alpha = mix(alpha, max(alpha, 0.55), m2);
         col *= max(mix(mulP[i0], mulP[i1], f), 1.0 + 0.8 * story);
         float flow = max(mix(flowP[i0], flowP[i1], f), story);
         float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
@@ -267,9 +356,26 @@ const FRAG = /* glsl */ `
       } else {
         // Related (undirected): in-shader dash, slow shimmer, NEVER a flow comet.
         float dash = step(0.5, fract(vT * 14.0));
-        alpha = max(mix(aR[i0], aR[i1], f), 0.4 * story) * dash;
+        float aRel = max(mix(aR[i0], aR[i1], f), 0.4 * story);
+        // Transit: related pairs are dashed WALKING TRANSFERS — lift the rest
+        // opacity so the dashed link reads (the metro grammar for out-of-system
+        // connections). Dash cadence is fract along the path param (vT).
+        aRel = mix(aRel, max(aRel, 0.34), m3);
+        // Blueprint: related pairs lift to visible dashed CONSTRUCTION lines.
+        aRel = mix(aRel, max(aRel, 0.5), m2);
+        alpha = aRel * dash;
         float shim = max(mix(shimR[i0], shimR[i1], f), story);
         col *= mix(mulR[i0], mulR[i1], f) * (1.0 + 0.2 * sin(uTime * 2.0) * shim);
+      }
+
+      // Blueprint ink (pose 2, Galaxy only): the additive strand light flattens
+      // to white-ink drafting lines (strand kept as a 30% tint) — no HDR, no
+      // comets — reading as white ink over the Prussian cyanotype sheet. The
+      // literal is LINEAR #eaf2ff. m2 == 0 at poses 0/1 and Transit, so nothing
+      // else is disturbed.
+      if (m2 > 0.0) {
+        vec3 inkCol = mix(vec3(0.823, 0.887, 1.0), vColor, 0.3);
+        col = mix(col, inkCol, m2);
       }
 
       // Structural damage (stories): pull the edge toward a near-black ember
@@ -350,6 +456,13 @@ export interface EdgesHandle {
   endAttr: THREE.InstancedBufferAttribute;
   setTime(t: number): void;
   setFlowEnabled(on: boolean): void;
+  /**
+   * Feed the eased pose value (0..3) so the Transit pose (3) can render its metro
+   * grammar — straight runs with tight rounded knuckles, opaque trunk lines,
+   * dashed walking transfers. Everything is gated on the pose-3 morph amount, so
+   * poses 0–2 stay pixel-identical. The pose driver calls this every morph frame.
+   */
+  setPose(p: number): void;
   setViewport(widthPx: number, heightPx: number, pixelRatio: number): void;
   /**
    * Swap the render skin: 0 Galaxy (additive light ribbons, exactly the
@@ -490,6 +603,10 @@ export function createEdges(
     // Art style: 0 Galaxy | 1 Ringers | 2 Fidenza. uField is the active paper
     // color the damage-fade lerps toward (unused in the galaxy branch).
     uArtStyle: { value: 0 },
+    // Eased pose value 0..3 (driver-fed each frame). Only >2 changes anything —
+    // the whole metro treatment is gated on m3 = clamp(uPose-2,0,1), so poses
+    // 0–2 render byte-identically to the shipped look.
+    uPose: { value: 0 },
     uField: { value: new THREE.Color(RINGERS.bg) },
   };
 
@@ -548,6 +665,9 @@ export function createEdges(
     },
     setFlowEnabled(on) {
       uniforms.uFlow.value = on ? 1 : 0;
+    },
+    setPose(p) {
+      uniforms.uPose.value = p;
     },
     setViewport(widthPx, heightPx, pixelRatio) {
       uniforms.uViewport.value.set(widthPx, heightPx);

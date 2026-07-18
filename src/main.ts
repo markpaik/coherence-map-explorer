@@ -26,6 +26,10 @@ import { createNodes } from "./scene/nodes";
 import { createEdges } from "./scene/edges";
 import { createFilaments } from "./scene/filaments";
 import { createBeacons } from "./scene/beacons";
+import { createStations } from "./scene/stations";
+import { createDrafts, draftFade } from "./scene/drafts";
+import { createSheet } from "./scene/sheet";
+import { createContours } from "./scene/contours";
 import { computeNodeRadii } from "./scene/reach";
 import { mulberry32 } from "./scene/evolve";
 import { createAside } from "./ui/aside";
@@ -144,16 +148,35 @@ function start(graph: GraphCore): void {
   // Beacon rings: the gap spotlight (stories flag missed standards; the rings
   // make a handful of holes findable among 480 lights).
   const beacons = createBeacons(graph, nodes, radii);
+  // Transit stations: the metro-map grammar the Transit pose (pose 3) crossfades
+  // to as the node sprites fade out (pale discs / interchange capsules / family
+  // lozenges). Idle below pose 2.6; follows live node positions; honours story
+  // dimming via the same per-node emphasis/visibility/damage the nodes read.
+  const stations = createStations(graph, radii, nodes);
+  // Blueprint grammar: the cyanotype sheet behind the pose-2 content, and the
+  // drafted node symbols (rings / double rings / crosshair ticks / Major-Work
+  // dots) that the orbs hand off to over pose 1.6→2.4. Both idle outside the
+  // Blueprint window; drafts follow live node positions + story dimming exactly
+  // as the stations do.
+  const sheet = createSheet(graph.nodes);
+  const drafts = createDrafts(graph, radii, nodes);
+  // Ascent altitude vocabulary: faint elevation isolines, one per dependency
+  // depth, every fifth an index contour. Static reference grid; Ascent-only.
+  const contours = createContours(graph.nodes);
   const stars = createStarfield(reducedMotion);
   const nebula = createNebula();
   // Distant sky: faint procedural planets, Constellation-only (pose-faded).
   const planets = createPlanets();
   scene.add(
+    sheet.object,
+    contours.object,
     nodes.mesh,
     nodes.proxy,
     edges.mesh,
     filaments.object,
     beacons.object,
+    stations.group,
+    drafts.group,
     stars.points,
     nebula.group,
     planets.group,
@@ -263,6 +286,10 @@ function start(graph: GraphCore): void {
     edges.setArtStyle(style);
     filaments.setArtStyle(style);
     beacons.setArtStyle(style);
+    stations.setArtStyle(style);
+    drafts.setArtStyle(style);
+    sheet.setArtStyle(style);
+    contours.setArtStyle(style);
     etches.setArtStyle(style);
     bloom.setArtPaper(style !== 0);
     const sky = style === 0;
@@ -386,6 +413,14 @@ function start(graph: GraphCore): void {
     }
   });
 
+  // Station crossfade envelope: node sprites hand off to station marks over the
+  // pose 2.6→3.0 window (0 = orbs, 1 = fully stationed). Both the node fade and
+  // the stations read this exact smoothstep so the crossfade stays in lockstep.
+  const stationFadeFor = (p: number): number => {
+    const t = Math.min(1, Math.max(0, (p - 2.6) / 0.4));
+    return t * t * (3 - 2 * t);
+  };
+
   let sceneTime = 0;
   let last = performance.now();
   let revealed = false;
@@ -447,6 +482,23 @@ function start(graph: GraphCore): void {
     if (rig.update(delta, !driftAllowed)) render = true;
 
     if (render) {
+      // Transit metro grammar: feed the eased pose to the edge program (so pose 3
+      // sharpens the soft bezier into metro turns) and crossfade the node sprites
+      // out as the station marks fade in (pose 2.6→3.0). All gated on the pose-3
+      // morph amount, so poses 0–2 render unchanged.
+      const pose = poseDriver.pose;
+      edges.setPose(pose);
+      // Orbs collapse under the UNION of both handoff windows: the drafted rings
+      // own the Blueprint (drafts fade 1.6→2.0→2.4) and the stations own the
+      // Transit (stationFade 2.6→3.0). The windows never overlap; between them
+      // (2.4→2.6) the orbs are the neutral interstitial as they travel.
+      nodes.setOrbFade(Math.max(stationFadeFor(pose), draftFade(pose)));
+      stations.update(pose);
+      // Blueprint sheet + drafted node symbols (idle outside pose ~1.5–2.5) and
+      // Ascent elevation contours (idle outside pose ~0.5–1.5).
+      sheet.update(pose);
+      drafts.update(pose);
+      contours.update(pose);
       // Filaments track node positions + visibility every rendered frame (pose
       // morphs, filters, story spotlights) — one cheap pass over 116 segments.
       filaments.update();
@@ -626,6 +678,10 @@ function start(graph: GraphCore): void {
       nodes,
       edges,
       filaments,
+      stations,
+      drafts,
+      sheet,
+      contours,
       graph,
     };
   }

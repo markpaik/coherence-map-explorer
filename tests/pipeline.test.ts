@@ -8,6 +8,9 @@ import {
   absolutize,
   safeLinkUrl,
 } from "../scripts/build-graph";
+import { classifyStations } from "../src/scene/stations";
+import { classifyDrafts } from "../src/scene/drafts";
+import { deriveContourLevels } from "../src/scene/contours";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -260,7 +263,7 @@ describe("pose D (transit)", () => {
     n.parent ? columnOf(byId.get(n.parent)! as OutNode & { courses?: string[] }) : columnOf(n);
   const colCenterX = (c: number): number => (c - 6) * 80;
   const HALF_COL = 40;
-  const LINE_Z = new Set([16, 6, -6, -16]);
+  const LINE_Z = new Set([90, 30, -30, -90]);
   const tp = core.nodes as (OutNode & { pos4?: number[]; parent?: string; courses?: string[] })[];
 
   it("every node carries a pos4, all 480, finite", () => {
@@ -271,13 +274,41 @@ describe("pose D (transit)", () => {
     }
   });
 
-  it("every node's z sits on a line level: +16 / +6 / -6 / -16", () => {
+  it("every node's z sits on a line level: +90 / +30 / -30 / -90 (decks pushed apart)", () => {
     for (const n of tp) expect(LINE_Z.has(n.pos4![2])).toBe(true);
   });
 
-  it("z is one level per strand (number +16, algebra +6, geometry -6, data -16)", () => {
-    const want: Record<string, number> = { number: 16, algebra: 6, geometry: -6, data: -16 };
+  it("z is one level per strand (number +90, algebra +30, geometry -30, data -90)", () => {
+    const want: Record<string, number> = { number: 90, algebra: 30, geometry: -30, data: -90 };
     for (const n of tp) expect(n.pos4![2]).toBe(want[n.strand]);
+  });
+
+  it("banked elbow c4.z is the midpoint of its endpoints' z (cross-deck ramps)", () => {
+    const round2 = (v: number): number => Math.round(v * 100) / 100;
+    const pById = new Map(tp.map((n) => [n.id, n]));
+    for (const e of core.edges as (OutEdge & { c4?: number[] })[]) {
+      const a = pById.get(e.s)!.pos4!;
+      const b = pById.get(e.t)!.pos4!;
+      expect(e.c4![2]).toBe(round2((a[2] + b[2]) / 2));
+    }
+  });
+
+  it("front-on collapse is byte-stable: pos4 x/y and c4 x/y unchanged by the z push", () => {
+    // Baseline captured before the ±16/±6 → ±90/±30 z change. Deepening the
+    // decks moves only z; the front-on schematic (x,y) must be identical.
+    const baseline = JSON.parse(
+      readFileSync(resolve(HERE, "fixtures/transit-xy-baseline.json"), "utf8"),
+    ) as { nodes: Record<string, [number, number]>; edges: [number, number][] };
+    for (const n of tp) {
+      const b = baseline.nodes[n.id];
+      expect(n.pos4![0]).toBe(b[0]);
+      expect(n.pos4![1]).toBe(b[1]);
+    }
+    (core.edges as (OutEdge & { c4?: number[] })[]).forEach((e, i) => {
+      const b = baseline.edges[i];
+      expect(e.c4![0]).toBe(b[0]);
+      expect(e.c4![1]).toBe(b[1]);
+    });
   });
 
   it("every node's x is within its transit column's ±40 extent", () => {
@@ -322,6 +353,122 @@ describe("pose D (transit)", () => {
       expect(c.marker4 && c.marker4.length === 3).toBe(true);
       expect(c.marker4![2]).toBe(0);
     }
+  });
+});
+
+describe("transit station classification (pure logic)", () => {
+  // The station grammar (src/scene/stations.ts) partitions the 480 standards
+  // into four mutually exclusive marks. classifyStations is the load-time pure
+  // function the renderer uses; assert its partition matches the derivation the
+  // acceptance preview (scripts/pose-grammar-previews.mjs) draws.
+  const cls = classifyStations(core as unknown as Parameters<typeof classifyStations>[0]);
+
+  it("partitions all 480 standards into disc / capsule / lozenge / child", () => {
+    expect(cls.discs.length + cls.capsules.length + cls.lozenges.length + cls.children.length).toBe(
+      480,
+    );
+    // Disjoint: no id appears in two buckets.
+    const all = [...cls.discs, ...cls.capsules, ...cls.lozenges, ...cls.children];
+    expect(new Set(all).size).toBe(480);
+  });
+
+  it("true interchange set = ≥3 cross-strand prereqs, never a family child", () => {
+    // The preview rule (xCount ≥ 3 cross-strand prereq edges incident, excluding
+    // sub-standards) yields 38 on the shipped graph — NOT the 42 quoted in the
+    // brief; 38 is what the rule produces on the real data.
+    expect(cls.interchangeIds.length).toBe(38);
+    const childSet = new Set(cls.children);
+    for (const id of cls.interchangeIds) expect(childSet.has(id)).toBe(false);
+  });
+
+  it("family parents draw as lozenges (a parent that is also an interchange stays a lozenge)", () => {
+    // 40 family parents; 4 of them clear the interchange floor but a parent
+    // always wins precedence → drawn as a lozenge, so exactly 34 capsules.
+    expect(cls.lozenges.length).toBe(40);
+    expect(cls.capsules.length).toBe(34);
+    expect(cls.discs.length).toBe(290);
+    expect(cls.children.length).toBe(116);
+    const interSet = new Set(cls.interchangeIds);
+    const parentsAlsoInterchange = cls.lozenges.filter((id) => interSet.has(id));
+    expect(parentsAlsoInterchange.length).toBe(4);
+  });
+
+  it("each capsule carries its own strand line plus every cross-strand neighbour strand", () => {
+    const byIdN = new Map(core.nodes.map((n) => [n.id, n]));
+    for (const cap of cls.capsuleLines) {
+      const self = byIdN.get(cap.id)!.strand;
+      expect(cap.lines).toContain(self);
+      // lines are the sorted union number→algebra→geometry→data, ≥2 entries
+      expect(cap.lines.length).toBeGreaterThanOrEqual(2);
+      const order = ["number", "algebra", "geometry", "data"];
+      const ranks = cap.lines.map((l) => order.indexOf(l));
+      for (let i = 1; i < ranks.length; i++) expect(ranks[i]).toBeGreaterThan(ranks[i - 1]);
+    }
+  });
+});
+
+describe("blueprint drafted classification (pure logic)", () => {
+  // The drafted node grammar (src/scene/drafts.ts) gives every standard a ring;
+  // family parents add an outer ring, K-8 Major Work adds a centre dot. Assert
+  // the partition + the badge count match the derivation the acceptance preview
+  // (scripts/pose-grammar-previews.mjs blueprintSheet) draws.
+  const cls = classifyDrafts(core as unknown as Parameters<typeof classifyDrafts>[0]);
+
+  it("partitions all 480 standards into ordinary / family / child rings", () => {
+    expect(cls.ordinary.length).toBe(324);
+    expect(cls.families.length).toBe(40);
+    expect(cls.children.length).toBe(116);
+    expect(cls.ordinary.length + cls.families.length + cls.children.length).toBe(480);
+    const all = [...cls.ordinary, ...cls.families, ...cls.children];
+    expect(new Set(all).size).toBe(480); // disjoint
+  });
+
+  it("family parents are never also children (no nested draft marks)", () => {
+    const childSet = new Set(cls.children);
+    for (const id of cls.families) expect(childSet.has(id)).toBe(false);
+  });
+
+  it("Major-Work centre dots = every msa===0 non-HS standard (221)", () => {
+    expect(cls.majorWork.length).toBe(221);
+    const byId = new Map(core.nodes.map((n) => [n.id, n as unknown as { msa: number; grade: string }]));
+    for (const id of cls.majorWork) {
+      const n = byId.get(id)!;
+      expect(n.msa).toBe(0);
+      expect(n.grade).not.toBe("HS");
+    }
+  });
+});
+
+describe("ascent contour levels (pure logic)", () => {
+  // The Ascent elevation isolines (src/scene/contours.ts) draw one line per
+  // dependency depth, every fifth an index contour. Assert the derivation
+  // against the shipped pos2 geometry (y = depth·13 − 90 per node).
+  const levels = deriveContourLevels(
+    core.nodes as unknown as Parameters<typeof deriveContourLevels>[0],
+  );
+
+  it("one level per dependency depth, contiguous 0..30", () => {
+    expect(levels.length).toBe(31);
+    levels.forEach((lv, i) => expect(lv.depth).toBe(i));
+  });
+
+  it("each level's y is the depth's shared pos2 elevation (depth·13 − 90)", () => {
+    for (const lv of levels) expect(lv.y).toBeCloseTo(lv.depth * 13 - 90, 5);
+  });
+
+  it("every fifth level is an index contour (depth % 5 === 0), 7 total", () => {
+    for (const lv of levels) expect(lv.index).toBe(lv.depth % 5 === 0);
+    expect(levels.filter((lv) => lv.index).length).toBe(7);
+  });
+
+  it("levels account for all 480 nodes with a non-empty x-extent", () => {
+    let total = 0;
+    for (const lv of levels) {
+      total += lv.count;
+      expect(lv.count).toBeGreaterThan(0);
+      expect(lv.x1).toBeGreaterThanOrEqual(lv.x0);
+    }
+    expect(total).toBe(480);
   });
 });
 
