@@ -5,6 +5,11 @@ import { defineConfig } from "vite";
 // public/ (which holds generated data/) is copied to dist/ verbatim at build time.
 export default defineConfig({
   base: "/",
+  test: {
+    // Agent worktrees live under .claude/worktrees/ inside the repo; without
+    // this exclusion vitest sweeps every checkout's tests/ into one run.
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.claude/**"],
+  },
   build: {
     target: "es2022",
     outDir: "dist",
