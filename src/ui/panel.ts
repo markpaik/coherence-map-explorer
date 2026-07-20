@@ -14,6 +14,10 @@
 import type { GraphCore, GraphNode, StrandId, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
 import { STRAND_COLORS } from "../scene/palette";
+import { httpsUpgrade, sourceLinkLabel } from "./urls";
+
+// Grade order for grouping the trace closure (HS → K reads foundations up).
+const PANEL_GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 
 export interface Connections {
   parts?: number[]; // sub-standards of a parent standard (node indices)
@@ -26,6 +30,9 @@ export interface Connections {
 export interface PanelRequests {
   focusCode(code: string): void;
   trace(): void;
+  /** The current focus's full ancestor closure (node indices) — for the
+   * "Foundations" trace section. Empty when nothing is focused. */
+  getAncestors(): number[];
   close(): void;
 }
 
@@ -180,7 +187,15 @@ export function createPanel(
   traceBtn.className = "panel-trace";
   traceBtn.type = "button";
   traceBtn.textContent = "Trace to foundations";
-  traceBtn.addEventListener("click", () => requests.trace());
+  traceBtn.addEventListener("click", () => {
+    requests.trace();
+    renderFoundations(requests.getAncestors());
+  });
+
+  // The trace lineage: the full ancestor closure grouped by grade (rendered on
+  // demand when "Trace to foundations" runs; cleared on every new focus).
+  const foundations = document.createElement("div");
+  foundations.className = "panel-foundations";
 
   const tasks = document.createElement("div");
   tasks.className = "panel-tasks";
@@ -192,7 +207,7 @@ export function createPanel(
   aiSlot.id = "ai-slot";
   aiSlot.hidden = true;
 
-  body.append(header, badges, desc, connections, traceBtn, tasks, progressions, aiSlot);
+  body.append(header, badges, desc, connections, traceBtn, foundations, tasks, progressions, aiSlot);
   panel.append(handle, closeBtn, body);
   container.appendChild(panel);
 
@@ -403,10 +418,17 @@ export function createPanel(
       }
       connections.appendChild(group);
     }
+    // De-duplicate: a neighbour already shown as a prerequisite (Builds on /
+    // Leads to) never repeats under Related. Family roll-up can compose both edge
+    // kinds for the same neighbour (e.g. 4.NF.B.3 → 4.MD.A.2 as leads-to AND
+    // related); precedence is prereq > related. Counts stay truthful because the
+    // header reads the deduped list length.
+    const prereqSet = new Set<number>([...conn.buildsOn, ...conn.leadsTo]);
+    const relatedDedup = conn.related.filter((i) => !prereqSet.has(i));
     const groups: [string, number[]][] = [
       ["Builds on", conn.buildsOn],
       ["Leads to", conn.leadsTo],
-      ["Related", conn.related],
+      ["Related", relatedDedup],
     ];
     for (const [label, list] of groups) {
       if (!list.length) continue;
@@ -419,7 +441,7 @@ export function createPanel(
       for (const idx of list) group.appendChild(connectionButton(idx));
       connections.appendChild(group);
     }
-    const hasAny = conn.buildsOn.length || conn.leadsTo.length || conn.related.length;
+    const hasAny = conn.buildsOn.length || conn.leadsTo.length || relatedDedup.length;
     if (!hasAny && !parts.length) {
       const none = document.createElement("p");
       none.className = "conn-empty";
@@ -430,6 +452,48 @@ export function createPanel(
     const traceable = conn.buildsOn.length > 0;
     traceBtn.disabled = !traceable;
     traceBtn.hidden = !hasAny;
+  }
+
+  // The trace lineage: the full ancestor closure, grouped by grade HS → K (the
+  // grades nearest the focus first). Each grade is a collapsible <details>; the
+  // three nearest open, deeper ones collapsed. Reuses the connection button.
+  function renderFoundations(ancestors: number[]): void {
+    foundations.replaceChildren();
+    if (!ancestors.length) return;
+
+    const h = document.createElement("h3");
+    h.className = "panel-section-h";
+    h.textContent = `Foundations · ${ancestors.length} ${ancestors.length === 1 ? "standard" : "standards"}`;
+    foundations.appendChild(h);
+
+    const byGrade = new Map<string, number[]>();
+    for (const idx of ancestors) {
+      const g = graph.nodes[idx].grade;
+      let arr = byGrade.get(g);
+      if (!arr) {
+        arr = [];
+        byGrade.set(g, arr);
+      }
+      arr.push(idx);
+    }
+    const grades = [...byGrade.keys()].sort(
+      (a, b) => PANEL_GRADE_ORDER.indexOf(b) - PANEL_GRADE_ORDER.indexOf(a),
+    );
+
+    grades.forEach((g, gi) => {
+      const members = byGrade
+        .get(g)!
+        .sort((a, b) => (graph.nodes[a].code < graph.nodes[b].code ? -1 : 1));
+      const det = document.createElement("details");
+      det.className = "foundations-grade";
+      if (gi < 3) det.open = true; // the three grades nearest the focus
+      const sum = document.createElement("summary");
+      sum.className = "foundations-grade-h";
+      sum.textContent = `${gradeLabel.get(g) ?? g} · ${members.length}`;
+      det.appendChild(sum);
+      for (const idx of members) det.appendChild(connectionButton(idx));
+      foundations.appendChild(det);
+    });
   }
 
   function renderBadges(n: GraphNode): void {
@@ -479,7 +543,7 @@ export function createPanel(
         for (const t of list) {
           const li = document.createElement("li");
           const a = document.createElement("a");
-          a.href = t.url;
+          a.href = httpsUpgrade(t.url); // promote bare http:// task URLs
           a.target = "_blank";
           a.rel = "noopener noreferrer";
           a.textContent = t.name;
@@ -522,11 +586,14 @@ export function createPanel(
         attr.className = "example-attr";
         attr.textContent = exampleAttr; // textContent attribution
         if (exampleUrl) {
+          const href = httpsUpgrade(exampleUrl); // promote bare http:// links
+          attr.append(" · ");
           const a = document.createElement("a");
-          a.href = exampleUrl;
+          a.href = href;
           a.target = "_blank";
           a.rel = "noopener noreferrer";
-          a.textContent = " (source)";
+          // Plain, honest label naming the destination (was a mystery "(source)").
+          a.textContent = sourceLinkLabel(href);
           attr.appendChild(a);
         }
         det.appendChild(attr);
@@ -640,6 +707,7 @@ export function createPanel(
       crumb.textContent = `${gradeLabel.get(n.grade) ?? n.grade} · ${n.domainName} · ${n.clusterCode}`;
       renderBadges(n);
       renderConnections(conn);
+      foundations.replaceChildren(); // the trace lineage is per-focus; clear it
       desc.innerHTML = "<p class=\"panel-loading\">Loading…</p>";
       tasks.replaceChildren();
       progressions.replaceChildren();

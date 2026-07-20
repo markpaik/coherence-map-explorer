@@ -19,6 +19,8 @@ import { loadDetails, loadSearchDocs } from "../data";
 import { STRAND_COLORS } from "../scene/palette";
 import { rollUpFamily, type Machine } from "../state/machine";
 import type { StoryPickerHandle } from "../stories/player";
+import { rankResults, type RankItem } from "./searchrank";
+import { httpsUpgrade } from "./urls";
 
 export interface BrowseDeps {
   graph: GraphCore;
@@ -77,9 +79,10 @@ function snippet(text: string | undefined, n = 90): string {
 }
 
 // Minimal shape of the MiniSearch results we consume (dynamic import keeps the
-// library out of the core chunk — same trick as search.ts).
+// library out of the core chunk — same trick as search.ts). Score feeds the
+// shared parent-boost ranking.
 interface Indexed {
-  search(query: string, options?: unknown): { id: string }[];
+  search(query: string, options?: unknown): { id: string; score: number }[];
 }
 
 // --- KaTeX (dynamic, once) — mirrors panel.ts exactly ---------------------
@@ -371,9 +374,18 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       }
       return;
     }
-    const hits = searchIndex.search(q).slice(0, SEARCH_MAX);
-    const idxs = hits
-      .map((h) => nodeById.get(h.id))
+    // Same parent-boost + grade-tiebreak ranking as the desktop search rail, so
+    // a family parent (4.NF.B.3) never sorts below its own sub-standards.
+    const items: RankItem[] = [];
+    for (const h of searchIndex.search(q)) {
+      const i = nodeById.get(h.id);
+      if (i === undefined) continue;
+      const n = graph.nodes[i];
+      items.push({ id: n.id, code: n.code, grade: n.grade, score: h.score, parentId: n.parent });
+    }
+    const idxs = rankResults(items)
+      .slice(0, SEARCH_MAX)
+      .map((it) => nodeById.get(it.id)!)
       .filter((i): i is number => i !== undefined);
     resultsEl.replaceChildren();
     if (!idxs.length) {
@@ -498,6 +510,8 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     chip.className = "browse-chip";
     chip.style.setProperty("--dot", hexColor(STRAND_COLORS[n.strand]));
     chip.textContent = n.grade;
+    // "4" alone is ambiguous to a screen reader — name the grade.
+    chip.setAttribute("aria-label", n.grade === "HS" ? "High school" : `Grade ${n.grade}`);
     return chip;
   }
   function rowText(code: string, text: string): HTMLSpanElement {
@@ -749,10 +763,16 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       related,
     );
 
+    // De-duplicate: a neighbour already shown as a prerequisite (Builds on /
+    // Leads to) never repeats under Related (precedence prereq > related). Same
+    // rule as the desktop panel; counts stay truthful from the deduped list.
+    const prereqSet = new Set<number>([...buildsOn, ...leadsTo]);
+    const relDedup = rel.filter((i) => !prereqSet.has(i));
+
     const groups: [string, number[]][] = [
       ["Builds on", [...buildsOn].sort(byGradeThenCode)],
       ["Leads to", [...leadsTo].sort(byGradeThenCode)],
-      ["Related", [...rel].sort(byGradeThenCode)],
+      ["Related", [...relDedup].sort(byGradeThenCode)],
     ];
     if (kids.length) groups.push(["Sub-standards", [...kids].sort(byGradeThenCode)]);
     if (n.parent) {
@@ -855,7 +875,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
         for (const t of list) {
           const li = document.createElement("li");
           const a = document.createElement("a");
-          a.href = t.url;
+          a.href = httpsUpgrade(t.url); // promote bare http:// task URLs
           a.target = "_blank";
           a.rel = "noopener noreferrer";
           a.textContent = t.name;

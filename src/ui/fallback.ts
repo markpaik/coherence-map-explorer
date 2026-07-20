@@ -78,6 +78,7 @@ export function createFallback(graph: GraphCore, reason: string): void {
       if (i !== undefined) openStandard(i);
     },
     trace: () => {}, // no scene to fly — trace is inert in the list view
+    getAncestors: () => [], // trace is disabled here, so no foundations section
     close: () => {
       panel.hide();
       history.replaceState(null, "", location.pathname + location.search);
