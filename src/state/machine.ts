@@ -114,6 +114,10 @@ export interface Machine {
   /** Leave focus: back to idle, close panel, clear the hash. `silent` (stories)
    *  resets emphasis without touching the hash. */
   clearFocus(opts?: { silent?: boolean }): void;
+  /** Read-only snapshot of the current focus's full ancestor closure (node
+   * indices), or [] when nothing is focused. The panel's "Foundations" trace
+   * section reads this instead of recomputing the closure. */
+  getFocusAncestors(): number[];
   /** Mark the search UI open/closed (suspends drift, reflects in `state`). */
   setSearching(on: boolean): void;
   /** Enter/leave the guided tour (suspends drift, reports state "touring"). */
@@ -742,6 +746,9 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     trace,
     reframe,
     clearFocus,
+    getFocusAncestors() {
+      return [...lastAncestors];
+    },
 
     setSearching(on) {
       searching = on;

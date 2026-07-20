@@ -15,8 +15,15 @@ import type { GraphCore, StrandId } from "../data";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
 import { STRAND_COLORS, STRAND_ORDER } from "../scene/palette";
+import { toggleChip } from "./chipgroup";
 
 const GRADES = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
+
+// How a grade reads aloud in the filter announcement ("Showing grade 4 only").
+function gradeSpoken(g: string): string {
+  if (g === "HS") return "high school";
+  return `grade ${g}`;
+}
 
 interface FiltersDeps {
   graph: GraphCore;
@@ -34,9 +41,15 @@ export interface FiltersHandle {
   setStrandsOnly(strand: StrandId): void;
   /** Restore every filter to its default (all shown). Syncs the chips. */
   reset(): void;
-  /** Whether a grade currently passes the grade-chip filter (search uses this
-   * as ranking context: filtered-in grades surface first). */
+  /** Whether a grade currently passes the grade-chip filter. */
   isGradeActive(grade: string): boolean;
+  /** Whether a node passes ALL current filters (grade + strand + lens). Search
+   * uses this to hide suppressed matches and surface a "N hidden" escape. */
+  passesFilters(nodeId: string): boolean;
+  /** True when any filter group is narrowing (not all-on / lens ≠ all). */
+  isFiltering(): boolean;
+  /** Reset every filter group to its default (all shown) — the "Show all" path. */
+  clearFilters(): void;
   /** Recompute node/edge visibility from the current filter state — used to
    * reclaim the visibility buffers after a story's spotlight override releases. */
   recompute(): void;
@@ -70,17 +83,22 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   const visN = nodes.visibleAttr.array as Float32Array;
   const visE = edges.visibleAttr.array as Float32Array;
 
+  // The single filter predicate — the SAME rule the scene visibility and the
+  // search suppression both read, so they can never disagree about a standard.
+  function nodeShown(n: GraphCore["nodes"][number]): boolean {
+    return (
+      gradeActive.has(n.grade) &&
+      strandActive.has(n.strand) &&
+      // Major/Supporting/Additional is a K-8 construct: the source stores 0
+      // for every HS cluster, so without the grade gate the Major-work lens
+      // would sweep in all 163 HS standards (2026-07 audit).
+      (lens === "all" || (lens === "major" ? n.msa === 0 && n.grade !== "HS" : n.wap))
+    );
+  }
+
   function recompute(): void {
     for (let i = 0; i < graph.nodes.length; i++) {
-      const n = graph.nodes[i];
-      const shown =
-        gradeActive.has(n.grade) &&
-        strandActive.has(n.strand) &&
-        // Major/Supporting/Additional is a K-8 construct: the source stores 0
-        // for every HS cluster, so without the grade gate the Major-work lens
-        // would sweep in all 163 HS standards (2026-07 audit).
-        (lens === "all" || (lens === "major" ? n.msa === 0 && n.grade !== "HS" : n.wap));
-      visN[i] = shown ? 1 : 0;
+      visN[i] = nodeShown(graph.nodes[i]) ? 1 : 0;
     }
     for (let i = 0; i < edges.count; i++) {
       const s = edgeS[i];
@@ -132,31 +150,70 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     },
   ];
 
-  function makeChip(
-    label: string,
-    pressed: boolean,
-    onToggle: (on: boolean) => void,
-  ): HTMLButtonElement {
+  // Polite live region for filter changes — its own region so a filter note
+  // ("Showing grade 4 only") never clobbers the machine's focus announcer.
+  const live = document.createElement("div");
+  live.className = "visually-hidden";
+  live.setAttribute("aria-live", "polite");
+  live.setAttribute("aria-atomic", "true");
+  function announceFilters(msg: string): void {
+    live.textContent = msg;
+  }
+
+  // A grade / strand chip: default ON, SOLO semantics (see chipgroup.ts). One
+  // click on a group where everything is on solos that chip; clicking a soloed
+  // chip restores all; a partial subset toggles normally. Announces every change.
+  function applyGroup(
+    kind: "grade" | "strand",
+    all: readonly string[],
+    set: Set<string>,
+    clicked: string,
+  ): void {
+    const { active, mode } = toggleChip(all, set, clicked);
+    set.clear();
+    for (const a of active) set.add(a);
+    syncChips();
+    recompute();
+    const noun = kind === "grade" ? "grades" : "strands";
+    let msg: string;
+    if (mode === "all") {
+      msg = `Showing all ${noun}`;
+    } else if (mode === "solo") {
+      const only = active[0];
+      const label =
+        kind === "grade" ? gradeSpoken(only) : graph.strands[only as StrandId].label;
+      msg = `Showing ${label} only`;
+    } else {
+      msg = `Showing ${active.length} of ${all.length} ${noun}`;
+    }
+    announceFilters(msg);
+  }
+
+  function makeGroupChip(label: string, onClick: () => void): HTMLButtonElement {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "filter-chip";
     chip.textContent = label;
-    chip.setAttribute("aria-pressed", String(pressed));
-    chip.addEventListener("click", () => {
-      const next = chip.getAttribute("aria-pressed") !== "true";
-      chip.setAttribute("aria-pressed", String(next));
-      onToggle(next);
-      recompute();
-    });
+    chip.setAttribute("aria-pressed", "true");
+    chip.addEventListener("click", onClick);
     return chip;
+  }
+
+  function groupLabel(text: string): HTMLSpanElement {
+    const el = document.createElement("span");
+    el.className = "filter-group-label";
+    el.textContent = text;
+    el.setAttribute("aria-hidden", "true"); // the group already carries aria-label
+    return el;
   }
 
   // Grade chips.
   const gradeGroup = document.createElement("div");
   gradeGroup.className = "filter-group";
   gradeGroup.setAttribute("aria-label", "Grades");
+  gradeGroup.appendChild(groupLabel("Grades"));
   for (const g of GRADES) {
-    const chip = makeChip(g, true, (on) => (on ? gradeActive.add(g) : gradeActive.delete(g)));
+    const chip = makeGroupChip(g, () => applyGroup("grade", GRADES, gradeActive, g));
     gradeChips.set(g, chip);
     gradeGroup.appendChild(chip);
   }
@@ -174,9 +231,12 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   const strandGroup = document.createElement("div");
   strandGroup.className = "filter-group";
   strandGroup.setAttribute("aria-label", "Strands");
+  strandGroup.appendChild(groupLabel("Strands"));
   for (const s of STRAND_ORDER) {
-    const chip = makeChip(graph.strands[s].label, true, (on) =>
-      on ? strandActive.add(s) : strandActive.delete(s),
+    // strandActive is Set<StrandId>; the shared helper works on Set<string> and
+    // only ever writes back ids from STRAND_ORDER, so the widening cast is safe.
+    const chip = makeGroupChip(graph.strands[s].label, () =>
+      applyGroup("strand", STRAND_ORDER as readonly string[], strandActive as Set<string>, s),
     );
     chip.classList.add("strand-chip");
     chip.title = strandMembers(s);
@@ -236,7 +296,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
 
   groups.append(gradeGroup, strandGroup, lensGroup);
   rail.append(disclosure, groups);
-  document.body.append(rail, tip);
+  document.body.append(rail, tip, live);
 
   // Reflect a strand's aria-pressed to match the active set.
   function syncChips(): void {
@@ -268,12 +328,34 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     isGradeActive(grade) {
       return gradeActive.has(grade);
     },
+    passesFilters(nodeId) {
+      const i = indexById.get(nodeId);
+      return i === undefined ? true : nodeShown(graph.nodes[i]);
+    },
+    isFiltering() {
+      return (
+        gradeActive.size < GRADES.length ||
+        strandActive.size < STRAND_ORDER.length ||
+        lens !== "all"
+      );
+    },
+    clearFilters() {
+      gradeActive.clear();
+      for (const g of GRADES) gradeActive.add(g);
+      strandActive.clear();
+      for (const s of STRAND_ORDER) strandActive.add(s);
+      lens = "all";
+      hideTip();
+      syncChips();
+      recompute();
+    },
     recompute() {
       recompute();
     },
     dispose() {
       rail.remove();
       tip.remove();
+      live.remove();
     },
   };
 }

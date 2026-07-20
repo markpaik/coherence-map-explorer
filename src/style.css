@@ -764,6 +764,33 @@ body.art-fidenza .ghost-btn:hover {
   color: var(--ink-2);
   overflow: hidden;
 }
+/* The "N more hidden by filters · Show all" escape row — an actionable option
+   set apart from the standards above it (a divider, muted text, a bright CTA). */
+.search-hidden {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  min-height: 44px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.search-hidden.active,
+.search-hidden:hover {
+  background: rgb(255 255 255 / 0.07);
+}
+.search-hidden-cta {
+  flex: none;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  color: #b6a6ec;
+}
 /* Search results stay single-line (fast scanning in a dropdown)… */
 .res-title {
   text-overflow: ellipsis;
@@ -1019,6 +1046,45 @@ body.art-fidenza .ghost-btn:hover {
   filter: brightness(1.08);
 }
 
+/* Trace lineage: the full ancestor closure, one collapsible group per grade. */
+.panel-foundations {
+  margin: -12px 0 20px; /* sit close under the trace button when present */
+}
+.panel-foundations:empty {
+  margin: 0;
+}
+.foundations-grade {
+  border-top: 1px solid var(--line);
+}
+.foundations-grade-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 0;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+}
+.foundations-grade-h::-webkit-details-marker {
+  display: none;
+}
+.foundations-grade-h::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--ink-3);
+  transition: transform 0.15s ease;
+}
+.foundations-grade[open] > .foundations-grade-h::before {
+  transform: rotate(90deg);
+}
+:root.rm .foundations-grade-h::before {
+  transition: none;
+}
+
 .panel-section-h {
   margin: 0 0 8px;
   font-family: var(--display);
@@ -1177,25 +1243,47 @@ body.art-fidenza .ghost-btn:hover {
   padding-left: 9px;
   border-left: 1px solid var(--line);
 }
+.filter-group-label {
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-right: 2px;
+  white-space: nowrap;
+}
 .filter-chip {
   min-height: 26px;
   padding: 3px 9px;
   font: inherit;
   font-size: 11.5px;
-  color: var(--ink);
-  background: rgb(255 255 255 / 0.03);
-  border: 1px solid var(--line);
   border-radius: 20px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* OFF (default polarity): outline only, muted ink. */
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
 }
-.filter-chip[aria-pressed="false"] {
-  opacity: 0.4;
+/* ON: clearly FILLED, full ink, brighter edge — unambiguous polarity. */
+.filter-chip[aria-pressed="true"] {
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.14);
+  border-color: var(--ink-3);
+}
+/* A grade / strand turned OFF (excluded) reads dimmer; its dot fades too. The
+   lens toggles default off and are opt-in, so they are exempt from the dim. */
+.filter-chip:not(.filter-toggle)[aria-pressed="false"] {
+  opacity: 0.55;
+}
+.filter-chip:not(.filter-toggle)[aria-pressed="false"] .chip-dot {
+  opacity: 0.5;
 }
 .filter-chip:hover {
-  border-color: var(--ink-3);
+  border-color: var(--ink-2);
 }
 .chip-dot {
   width: 8px;
@@ -1203,10 +1291,13 @@ body.art-fidenza .ghost-btn:hover {
   border-radius: 50%;
   background: var(--dot, var(--ink-3));
 }
+.filter-toggle[aria-pressed="false"] {
+  color: var(--ink-2);
+}
 .filter-toggle[aria-pressed="true"] {
   color: var(--ink);
   border-color: var(--ink-2);
-  background: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.14);
 }
 .filters-toggle {
   display: none;

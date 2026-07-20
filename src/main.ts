@@ -222,6 +222,9 @@ function start(graph: GraphCore): void {
   const panel = createPanel(document.body, graph, {
     focusCode: (code) => machine.focusByCode(code),
     trace: () => machine.trace(),
+    // Read-only ancestor closure of the current focus — the panel's "Foundations"
+    // trace section reuses the machine's computation rather than recomputing it.
+    getAncestors: () => machine.getFocusAncestors(),
     // The panel's X is one of the three focus-exit paths (with Esc + click-
     // outside); all route through exitFocus so the camera flies back home.
     close: () => exitFocus(),
@@ -320,7 +323,11 @@ function start(graph: GraphCore): void {
   // ?style=ringers|fidenza deep-links a skin (session-only, not persisted).
   const bootStyle = ART_STYLE_SLUGS.indexOf(params.get("style") ?? "galaxy");
   if (bootStyle > 0) applyArtStyle(bootStyle as ArtStyle);
-  search.setGradeContext((g) => filters.isGradeActive(g));
+  search.setFilterContext({
+    passes: (id) => filters.passesFilters(id),
+    isFiltering: () => filters.isFiltering(),
+    clearAll: () => filters.clearFilters(),
+  });
   const tour = createTour({
     machine,
     rig,
