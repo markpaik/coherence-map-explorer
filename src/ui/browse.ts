@@ -11,8 +11,12 @@
 // rather than importing it — panel.ts stays a scene-only concern.
 //
 // Nav is a simple in-memory stack; the header back chevron (and Escape) pop one
-// level. While a STANDARD view shows, the hash stays synced to #/s/<CODE> via
-// replaceState (the app's convention), so a deep link round-trips.
+// level. Each drill PUSHES a real browser-history entry, so the system Back
+// gesture unwinds the stack exactly like the chevron does — the chevron routes
+// through history.back() so the two never drift, and a popstate collapses one
+// level. While a STANDARD view shows, the hash reads #/s/<CODE>, so a deep link
+// round-trips; the deep-link boot baseline pushes nothing (its first back
+// collapses in place).
 
 import type { GraphCore, GraphNode, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
@@ -878,15 +882,21 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
 
   // --- stack + rendering -------------------------------------------------
   let stack: View[] = [{ t: "home" }];
+  // History entries this Browse session has PUSHED (finding: the system Back
+  // gesture must unwind the drill-down like the header chevron). Each push adds
+  // one; popstate collapses one; the chevron/Esc spend one via history.back().
+  // The boot deep-link baseline ([home, standard]) pushes nothing, so its first
+  // back collapses in place (see pop()).
+  let pushedEntries = 0;
 
-  function updateHash(view: View): void {
-    // replaceState only — the app never pushState's a standard (matches the
-    // machine's convention, so hashchange fires only for genuine back/forward).
+  function updateHash(view: View, mode: "push" | "replace"): void {
     const base = location.pathname + location.search;
-    history.replaceState(null, "", view.t === "standard" ? `${base}#/s/${view.code}` : base);
+    const url = view.t === "standard" ? `${base}#/s/${view.code}` : base;
+    if (mode === "push") history.pushState(null, "", url);
+    else history.replaceState(null, "", url);
   }
 
-  function renderTop(syncHash: boolean): void {
+  function renderTop(hash: "push" | "replace" | "none"): void {
     const view = stack[stack.length - 1];
     const token = ++renderToken;
     hidePopover();
@@ -914,7 +924,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     backBtn.style.visibility = showBack ? "visible" : "hidden";
     headerLabel.textContent = view.t === "home" ? "" : backLabelFor(stack[stack.length - 2]);
 
-    if (syncHash) updateHash(view);
+    if (hash !== "none") updateHash(view, hash);
 
     // Move focus to the new view's heading (deferred so it isn't mid-swap).
     requestAnimationFrame(() => {
@@ -932,13 +942,39 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
 
   function push(view: View): void {
     stack.push(view);
-    renderTop(true);
+    pushedEntries++;
+    renderTop("push"); // a real history entry so the system Back gesture unwinds it
   }
-  function pop(): void {
+  // The actual one-level collapse (from a Back gesture, the chevron, or the boot
+  // baseline). Never grows history — replaceState keeps the hash on the now-top
+  // view.
+  function collapse(): void {
     if (stack.length <= 1) return;
     stack.pop();
-    renderTop(true);
+    renderTop("replace");
   }
+  // Header chevron / Escape. When this session pushed history entries, spend one
+  // (history.back → popstate → collapse) so in-app back and the system Back
+  // gesture stay in lockstep; the boot deep-link baseline pushed none, so it
+  // collapses straight away.
+  function pop(): void {
+    if (stack.length <= 1) return;
+    if (pushedEntries > 0) history.back();
+    else collapse();
+  }
+  // Browser Back/Forward while the overlay owns the screen. When the map is
+  // showing (overlay hidden) the map's own hashchange router handles history and
+  // Browse stands down, so this must not fire the collapse under it.
+  function onPopState(): void {
+    if (overlay.hidden) return;
+    if (stack.length <= 1) {
+      pushedEntries = 0;
+      return;
+    }
+    if (pushedEntries > 0) pushedEntries--;
+    collapse();
+  }
+  window.addEventListener("popstate", onPopState);
 
   // Escape pops one level (never below HOME) while the overlay is up.
   overlay.addEventListener("keydown", (e) => {
@@ -962,7 +998,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     overlay.hidden = false;
     pill.hidden = true;
     document.body.classList.add("browsing");
-    renderTop(false); // re-paint the last view without clobbering the hash
+    renderTop("none"); // re-paint the last view without clobbering the hash
   }
   function enterMap(): void {
     if (overlay.hidden) return;
@@ -976,16 +1012,25 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   // The sheet's swipe-up handoff: land straight on the standard's Browse view
   // (pushed onto the stack so Back walks to wherever the user was before).
   function openStandard(code: string): void {
+    let pushed = false;
     if (nodeByCode.has(code)) {
       const top = stack[stack.length - 1];
       if (!(top && top.t === "standard" && top.code === code)) {
         stack.push({ t: "standard", code });
+        pushed = true;
       }
     }
     overlay.hidden = false;
     pill.hidden = true;
     document.body.classList.add("browsing");
-    renderTop(true);
+    // A fresh standard is a real navigation (Back should unwind it); re-opening
+    // the same one just re-syncs the hash in place.
+    if (pushed) {
+      pushedEntries++;
+      renderTop("push");
+    } else {
+      renderTop("replace");
+    }
   }
 
   // --- boot --------------------------------------------------------------
@@ -998,7 +1043,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     // Open Browse directly at the deep-linked standard's view (Back → Home).
     stack = [{ t: "home" }, { t: "standard", code: bootCode }];
   }
-  renderTop(false); // paint (into the hidden overlay) without touching the hash
+  renderTop("none"); // paint (into the hidden overlay) without touching the hash
   if (storyHashAtBoot) {
     pill.hidden = false; // stay closed; CSS hides the pill until the story ends
   } else {
@@ -1015,6 +1060,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       return !overlay.hidden;
     },
     dispose() {
+      window.removeEventListener("popstate", onPopState);
       overlay.remove();
       popover.remove();
       pill.remove();

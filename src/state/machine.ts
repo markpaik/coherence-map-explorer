@@ -20,6 +20,7 @@
 import * as THREE from "three";
 import type { GraphCore, GraphNode } from "../data";
 import { EMPHASIS, restRadius, type Emphasis } from "../scene/palette";
+import { standardHref, focusHistoryMode } from "./routing";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
 import type { TooltipHandle } from "../ui/tooltip";
@@ -59,6 +60,15 @@ export interface FocusOpts {
    * camera framing is unshifted (no panel to sit beside).
    */
   silent?: boolean;
+  /**
+   * How the hash write records in browser history. A USER-initiated open (map
+   * click, search pick, connection hop) PUSHES a new entry so the system Back
+   * gesture unwinds the hop; programmatic refocus (the deep-link router reacting
+   * to a hash that already changed, the guided tour, a story-exit restore) must
+   * REPLACE so it neither stacks a duplicate nor loops popstate. Default: push,
+   * except re-focusing the already-focused node (which replaces — no dup entry).
+   */
+  history?: "push" | "replace";
 }
 
 export interface EmphasisPatch {
@@ -490,15 +500,31 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   // mapped connections still lands in a legible local context.
   const sphereOf = (indices: number[]): THREE.Sphere => nodeBoundingSphere(nodes, indices);
 
+  // Compose the accumulated focus overrides (`curNodeOv`/`curEdgeOv`, which grow
+  // as cascade waves fire) with the LIVE hover overlay. EVERY emphasis write made
+  // while a focus is active — the resting render here AND each cascade wave — must
+  // route through this, or a wave rebuilt from the focus overrides alone would
+  // drop a resting pointer's highlight and the machine would ease it back to
+  // dimmed on the next step. With `hovered` null (hover-out, or during the focus()
+  // call itself) it degrades to the plain focus overrides, so hover-out composes
+  // correctly too.
+  function focusOverrides(): {
+    nodeOv: Map<number, Emphasis>;
+    edgeOv: Map<number, Emphasis>;
+  } {
+    const nodeOv = new Map(curNodeOv);
+    const edgeOv = new Map(curEdgeOv);
+    if (hovered !== null && hovered !== focusIndex) {
+      nodeOv.set(hovered, EMPHASIS.HOVER);
+      for (const ei of adjacency[hovered]) edgeOv.set(ei, EMPHASIS.HOVER);
+    }
+    return { nodeOv, edgeOv };
+  }
+
   // --- emphasis rendering (idle vs focus, with hover overlay) --------------
   function renderEmphasis(): void {
     if (focusIndex !== null) {
-      const nodeOv = new Map(curNodeOv);
-      const edgeOv = new Map(curEdgeOv);
-      if (hovered !== null && hovered !== focusIndex) {
-        nodeOv.set(hovered, EMPHASIS.HOVER);
-        for (const ei of adjacency[hovered]) edgeOv.set(ei, EMPHASIS.HOVER);
-      }
+      const { nodeOv, edgeOv } = focusOverrides();
       applyEmphasis({
         baseNode: EMPHASIS.DIMMED,
         baseEdge: EMPHASIS.DIMMED,
@@ -527,16 +553,22 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     return `${n.domainName} · ${n.clusterCode}`;
   }
 
-  function updateHash(code: string | null): void {
+  function updateHash(code: string | null, mode: "push" | "replace" = "replace"): void {
     const base = location.pathname + location.search;
-    const next = code ? `${base}#/s/${code}` : base;
-    history.replaceState(null, "", next);
+    const next = code ? standardHref(code, base) : base;
+    // Push only a genuinely NEW location; if the URL already reads `next` (a
+    // re-focus, or a route reacting to a hash that already changed), replace so
+    // history never grows a duplicate entry and a Back gesture can't stall on one.
+    const current = base + location.hash;
+    if (mode === "push" && next !== current) history.pushState(null, "", next);
+    else history.replaceState(null, "", next);
   }
 
   // --- focus ---------------------------------------------------------------
   function focus(nodeIndex: number, opts?: FocusOpts): void {
     if (nodeIndex < 0 || nodeIndex >= nodeCount) return;
     clearRevealTimers();
+    const prevFocus = focusIndex; // for the history push/replace decision below
     focusIndex = nodeIndex;
     hovered = null;
     tooltip.hide();
@@ -576,11 +608,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
         data.edgeReveal.forEach((rt, i) => {
           if (rt === t) curEdgeOv.set(i, data.edgeFinal.get(i)!);
         });
+        // Compose in the live hover overlay so a pointer resting on a node keeps
+        // its highlight across waves instead of dying on the next step.
+        const { nodeOv, edgeOv } = focusOverrides();
         applyEmphasis({
           baseNode: EMPHASIS.DIMMED,
           baseEdge: EMPHASIS.DIMMED,
-          nodeOverrides: curNodeOv,
-          edgeOverrides: curEdgeOv,
+          nodeOverrides: nodeOv,
+          edgeOverrides: edgeOv,
         });
         // Snap only the freshly-lit layer (bright targets) — the background's
         // REST→DIMMED fade is left to ease for a gentle settle.
@@ -624,7 +659,10 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
         `Focused ${node.code}, builds on ${data.buildsOn.length} ` +
           `${data.buildsOn.length === 1 ? "standard" : "standards"}, leads to ${data.leadsTo.length}${partsNote}`,
       );
-      updateHash(node.code);
+      // A caller may force the mode (routers/tour/restore pass "replace"); absent
+      // that, a fresh open pushes a history entry (Back unwinds the hop) but a
+      // re-focus of the same node replaces (no duplicate entry).
+      updateHash(node.code, focusHistoryMode(opts?.history, prevFocus === nodeIndex));
     }
     requestRender();
   }

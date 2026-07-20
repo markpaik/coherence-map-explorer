@@ -80,7 +80,9 @@ export function createTour(deps: TourDeps): TourHandle {
       caption:
         "Grade 3's first fraction standard. Only two quiet lines flow in, from partitioning shapes and measuring lengths. A cascade of gold flows out to everything fractions unlock.",
       enter() {
-        machine.focusByCode("3.NF.A.1");
+        // Scripted focus REPLACES the hash (never pushes) — the tour must not
+        // grow browser-history entries the Back gesture would then unwind.
+        machine.focusByCode("3.NF.A.1", { history: "replace" });
       },
     },
     {
@@ -88,7 +90,7 @@ export function createTour(deps: TourDeps): TourHandle {
       caption:
         "Proportional relationships. One of the most connected standards in school mathematics, and a Widely Applicable Prerequisite for college and careers.",
       enter() {
-        machine.focusByCode("7.RP.A.2");
+        machine.focusByCode("7.RP.A.2", { history: "replace" });
       },
     },
     {
@@ -96,7 +98,7 @@ export function createTour(deps: TourDeps): TourHandle {
       caption:
         "The high-school concept of a function, traced back through every prerequisite to counting in Kindergarten. This is what coherence means.",
       enter() {
-        machine.focusByCode("F-IF.A.1");
+        machine.focusByCode("F-IF.A.1", { history: "replace" });
         machine.trace();
       },
     },
@@ -203,6 +205,29 @@ export function createTour(deps: TourDeps): TourHandle {
   let paused = false; // user paused auto-advance (persists across stops)
   let holdRemaining = 0; // ms left before this stop auto-advances
 
+  // Pre-tour filter selection (finding: the Four-rivers stop drives the strand
+  // filters and the tour's reset() nuked a selection the reader set BEFORE the
+  // tour). The filters handle exposes no state snapshot (and filters.ts is out
+  // of scope here), so snapshot the rail's chip pressed-states and restore by
+  // re-toggling only the chips that differ — each chip's own click handler runs
+  // the recompute, so the scene ends exactly where the reader left it.
+  type FilterSnapshot = { chip: HTMLButtonElement; pressed: boolean }[];
+  let filterSnapshot: FilterSnapshot | null = null;
+  function snapshotFilters(): FilterSnapshot {
+    const chips = document.querySelectorAll<HTMLButtonElement>(".filters-rail .filter-chip");
+    return [...chips].map((chip) => ({
+      chip,
+      pressed: chip.getAttribute("aria-pressed") === "true",
+    }));
+  }
+  function restoreFilters(): void {
+    if (!filterSnapshot) return;
+    for (const { chip, pressed } of filterSnapshot) {
+      if ((chip.getAttribute("aria-pressed") === "true") !== pressed) chip.click();
+    }
+    filterSnapshot = null;
+  }
+
   function setPaused(on: boolean): void {
     paused = on;
     pauseBtn.textContent = on ? "▶" : "⏸";
@@ -240,6 +265,7 @@ export function createTour(deps: TourDeps): TourHandle {
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     index = 0;
     setPaused(false);
+    filterSnapshot = snapshotFilters(); // capture the reader's filters to restore on exit
     machine.setHover(null); // a stale pre-tour hover must not linger under the card
     machine.setTouring(true);
     // The tour breathes: skip the 20s post-interaction grace so the ethereal
@@ -261,7 +287,11 @@ export function createTour(deps: TourDeps): TourHandle {
     // Undo any lingering stop state, then return to a clean idle.
     stops[index].leave?.();
     machine.clearFocus();
+    // filters.reset() clears the Four-rivers cycling; restoreFilters then puts
+    // the reader's PRE-tour selection back (every exit — finish, Esc, skip —
+    // funnels through here, so the restore covers them all).
     filters.reset();
+    restoreFilters();
     rig.frameHome(transition());
     machine.setTouring(false);
     document.body.classList.remove("touring");

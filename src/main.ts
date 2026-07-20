@@ -51,7 +51,8 @@ import { createViewToggle } from "./ui/viewtoggle";
 import { createStyleToggle } from "./ui/styletoggle";
 import { ART_STYLE_SLUGS, FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
-import { createBrowse } from "./ui/browse";
+import { createBrowse, type BrowseHandle } from "./ui/browse";
+import { decideRoute, storyIdFromHash } from "./state/routing";
 import { createPicking } from "./interaction/picking";
 import { createDamageEngine } from "./stories/damage";
 import { createSelectorResolver } from "./stories/selectors";
@@ -362,13 +363,17 @@ function start(graph: GraphCore): void {
   const browseActive = params.has("nobrowse")
     ? false
     : params.has("browse") || isPhoneDefault;
+  // Hoisted so the deep-link router can ask whether Browse owns navigation
+  // (when its overlay is up the map router must stand down — else it steals
+  // assistive-tech focus into the covered panel).
+  let browse: BrowseHandle | null = null;
   if (browseActive) {
-    const browse = createBrowse({ graph, machine, storyPicker, onEnterMap: requestRender });
+    browse = createBrowse({ graph, machine, storyPicker, onEnterMap: requestRender });
     // Swiping the detail sheet UP from its peek hands the standard to Browse
     // (full detail lives there on phones); the map focus clears underneath.
     panel.setExpandToBrowse((code) => {
       machine.clearFocus();
-      browse.openStandard(code);
+      browse!.openStandard(code);
     });
   }
 
@@ -392,25 +397,33 @@ function start(graph: GraphCore): void {
   setReducedMotion(reducedMotion); // sync all subsystems to the initial value
 
   // -- deep-link routing (#/s/<CODE>) -------------------------------------
-  // The machine writes the hash (replaceState — no hashchange), so hashchange
-  // only fires for genuine back/forward or manual edits.
-  const codeFromHash = (): string | null => {
-    const m = /^#\/s\/(.+)$/.exec(location.hash);
-    return m ? decodeURIComponent(m[1]) : null;
-  };
-  const storyIdFromHash = (): string | null => {
-    const m = /^#\/story\/(.+)$/.exec(location.hash);
-    return m ? decodeURIComponent(m[1]) : null;
+  // The machine PUSHES the hash on a user open and REPLACEs on a programmatic
+  // refocus, so hashchange fires for genuine back/forward and manual edits. The
+  // gating (story / tour / Browse own the scene; already-in-sync is a no-op) is
+  // a pure function so it can be unit-tested away from the DOM (state/routing).
+  const focusedCode = (): string | null => {
+    const i = machine.focusedIndex;
+    return i !== null ? graph.nodes[i].code : null;
   };
   const routeFromHash = (instant: boolean): void => {
-    // A story is playing (or is being deep-linked): the player owns the scene,
-    // not the standard router.
-    if (storyPlayer.running || storyIdFromHash()) return;
-    const code = codeFromHash();
-    if (code) {
-      machine.focusByCode(code, { instant });
-    } else if (machine.focusedIndex !== null) {
-      machine.clearFocus();
+    const decision = decideRoute({
+      hash: location.hash,
+      storyRunning: storyPlayer.running,
+      tourRunning: tour.running, // finding: guard the tour like a story
+      browseOpen: browse?.isOpen ?? false, // finding: Browse owns phone nav
+      focusedCode: focusedCode(),
+    });
+    switch (decision.action) {
+      case "focus":
+        // Reacting to a hash that already changed (boot deep link, or a Back-
+        // gesture hashchange) — REPLACE, never push, or the history would loop.
+        machine.focusByCode(decision.code, { instant, history: "replace" });
+        break;
+      case "clear":
+        machine.clearFocus();
+        break;
+      // "ignore" (story/tour/Browse own the scene) and "noop" (already in sync,
+      // the popstate/hashchange loop guard) do nothing.
     }
   };
   window.addEventListener("hashchange", () => routeFromHash(true));
@@ -728,8 +741,9 @@ function start(graph: GraphCore): void {
         advance(deltaSeconds);
       },
       // Direct focus driver (bypasses the pointer pipeline) for automation.
+      // Replaces (not pushes) the hash so scripted focus can't pile history.
       focusCode(code: string): boolean {
-        return machine.focusByCode(code, { instant: true });
+        return machine.focusByCode(code, { instant: true, history: "replace" });
       },
       // Flip reduced motion at runtime (drift/shimmer/twinkle/flow + cascade cuts).
       setReducedMotion(on: boolean): void {
@@ -772,8 +786,10 @@ function start(graph: GraphCore): void {
 
   // Resolve any deep link now that the scene is ready. A story link
   // (#/story/<id>) starts that story; a standard link (#/s/<CODE>) opens the
-  // panel with an instant reveal + camera cut.
-  const deepStory = storyIdFromHash();
+  // panel with an instant reveal + camera cut — UNLESS Browse owns the phone
+  // deep link, in which case routeFromHash stands down (decideRoute → ignore)
+  // so assistive-tech focus lands once, in the Browse view, not the covered map.
+  const deepStory = storyIdFromHash(location.hash);
   if (deepStory) {
     storyPlayer.start(deepStory, { deepLink: true });
   } else {
