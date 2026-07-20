@@ -63,7 +63,7 @@ describe("per-layer focus alpha fades", () => {
 
 describe("transitOverviewKeep (unfocused-overview trunk ghost)", () => {
   it("ghosts a NON-TRUNK resting line toward ~0.08, keeps a wide trunk opaque", () => {
-    expect(transitOverviewKeep(0, 1)).toBeCloseTo(0.08, 6); // thin, resting → floor
+    expect(transitOverviewKeep(0, 1)).toBeCloseTo(0.05, 6); // thin, resting → floor
     expect(transitOverviewKeep(1, 1)).toBeCloseTo(1, 6); // wide trunk, resting → opaque
   });
   it("does NOTHING under a focus — connected or dimmed lines keep their focus grammar", () => {
@@ -75,9 +75,9 @@ describe("transitOverviewKeep (unfocused-overview trunk ghost)", () => {
     expect(transitOverviewKeep(0, 5)).toBe(1); // RELATED-to-focus
   });
   it("ramps a mid-reach resting line across the trunk thresholds (GLSL smoothstep parity)", () => {
-    // smoothstep(0.2, 0.7, 0.45) = 0.5 → 0.08 + 0.92·0.5 = 0.54. Pins the shader
-    // literals (floor 0.08, thresholds 0.2/0.7) against drift.
-    expect(transitOverviewKeep(0.45, 1)).toBeCloseTo(0.54, 6);
+    // smoothstep(0.5, 0.85, 0.675) = 0.5 → 0.05 + 0.95·0.5 = 0.525. Pins the shader
+    // literals (floor 0.05, thresholds 0.5/0.85) against drift.
+    expect(transitOverviewKeep(0.675, 1)).toBeCloseTo(0.525, 6);
   });
 });
 

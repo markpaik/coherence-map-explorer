@@ -430,7 +430,7 @@ const FRAG = /* glsl */ `
         // dimmed convention (~0.08·alpha) while wide trunks stay opaque — width and
         // opacity then agree (both key off reach). restness*m3 keeps focused Transit
         // and poses 0–2 byte-identical. (Mirrors focusgrammar.transitOverviewKeep.)
-        float trunkKeep = 0.08 + 0.92 * smoothstep(0.2, 0.7, vTrunk);
+        float trunkKeep = 0.05 + 0.95 * smoothstep(0.5, 0.85, vTrunk);
         alpha *= mix(1.0, trunkKeep, restness * m3);
         // Blueprint ink alpha (round 11): dimmed→faint 0.18, resting→0.55 legible
         // ink, connected→0.90 highlighter (= 0.55 + 0.35·lit − 0.37·dimd).

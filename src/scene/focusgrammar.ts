@@ -47,9 +47,9 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
 
 // Transit UNFOCUSED-overview trunk ghost. Kept in lockstep with the edges.ts GLSL
 // (same floor + thresholds + smoothstep) — the test pins the agreement.
-const TRUNK_GHOST_FLOOR = 0.08; // a non-trunk resting line keeps this fraction of its alpha
-const TRUNK_LO = 0.2; // trunk metric where the ghost begins to lift
-const TRUNK_HI = 0.7; // trunk metric at/above which a line reads as a full-opacity trunk
+const TRUNK_GHOST_FLOOR = 0.05; // a non-trunk resting line keeps this fraction of its alpha
+const TRUNK_LO = 0.5; // trunk metric where the ghost begins to lift
+const TRUNK_HI = 0.85; // trunk metric at/above which a line reads as a full-opacity trunk
 
 /**
  * Transit unfocused-overview alpha multiplier (the m3 == 1 / full-Transit value).
