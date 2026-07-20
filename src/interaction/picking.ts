@@ -122,6 +122,7 @@ export function createPicking(
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
     },
   };
 }

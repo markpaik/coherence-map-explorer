@@ -14,7 +14,9 @@
 import type { GraphCore, StrandId } from "../data";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
-import { STRAND_COLORS, STRAND_ORDER } from "../scene/palette";
+import { STRAND_ORDER } from "../scene/palette";
+import { strandSwatch, type ArtStyle } from "../scene/artstyle";
+import type { Pose } from "../scene/pose";
 
 const GRADES = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 
@@ -40,6 +42,12 @@ export interface FiltersHandle {
   /** Recompute node/edge visibility from the current filter state — used to
    * reclaim the visibility buffers after a story's spotlight override releases. */
   recompute(): void;
+  /** Repaint the strand-legend swatches to the active art skin's colorway (the
+   * legend mirrors the scene: Galaxy palette / Ringers pegs / Fidenza nodes). */
+  setArtStyle(style: ArtStyle): void;
+  /** Show the Transit-only metro key (interchange/line legend) at pose 3, hide it
+   * in the other poses. Called with the settled pose target. */
+  setPose(pose: Pose): void;
   dispose(): void;
 }
 
@@ -66,6 +74,9 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   // standard is WAP, so the combination only bit in HS, silently).
   type Lens = "all" | "major" | "wap";
   let lens: Lens = "all";
+  // Active art skin — the legend swatches read the SAME colorway the scene does
+  // (galaxy / ringers / fidenza), repainted by setArtStyle on every skin swap.
+  let artStyle: ArtStyle = 0;
 
   const visN = nodes.visibleAttr.array as Float32Array;
   const visE = edges.visibleAttr.array as Float32Array;
@@ -180,7 +191,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     );
     chip.classList.add("strand-chip");
     chip.title = strandMembers(s);
-    chip.style.setProperty("--dot", hexColor(STRAND_COLORS[s]));
+    chip.style.setProperty("--dot", hexColor(strandSwatch(s, artStyle)));
     chip.insertAdjacentHTML("afterbegin", '<span class="chip-dot"></span>');
     strandChips.set(s, chip);
     strandGroup.appendChild(chip);
@@ -238,6 +249,25 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   rail.append(disclosure, groups);
   document.body.append(rail, tip);
 
+  // Transit-only metro key: the strand legend names the LINE COLOURS, but the
+  // metro grammar (trunk lines, interchange capsules) needs its own key for a
+  // first-time reader. Sits just above the rail; shown only when the Transit pose
+  // is the settled target, hidden in every other pose (setPose).
+  const transitKey = document.createElement("div");
+  transitKey.className = "transit-key";
+  transitKey.setAttribute("role", "note");
+  transitKey.textContent =
+    "Lines follow the busiest prerequisite routes · capsules mark interchange standards";
+  transitKey.hidden = true;
+  document.body.append(transitKey);
+
+  // Repaint the strand-legend dots to the active skin's colorway.
+  function recolorSwatches(): void {
+    for (const [s, chip] of strandChips) {
+      chip.style.setProperty("--dot", hexColor(strandSwatch(s, artStyle)));
+    }
+  }
+
   // Reflect a strand's aria-pressed to match the active set.
   function syncChips(): void {
     for (const [s, chip] of strandChips) chip.setAttribute("aria-pressed", String(strandActive.has(s)));
@@ -271,9 +301,17 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     recompute() {
       recompute();
     },
+    setArtStyle(style) {
+      artStyle = style;
+      recolorSwatches();
+    },
+    setPose(pose) {
+      transitKey.hidden = pose !== 3;
+    },
     dispose() {
       rail.remove();
       tip.remove();
+      transitKey.remove();
     },
   };
 }

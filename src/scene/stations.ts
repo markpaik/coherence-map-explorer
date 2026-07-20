@@ -551,6 +551,11 @@ export function createStations(
   // Fold a node's live emphasis / visibility / damage into [colorDim, alphaMul]:
   // a dimmed-emphasis or damaged station goes near-black (holds its place), a
   // ghosted (filtered-out) one nearly vanishes — the exact story grammar nodes use.
+  // Writes into a single reused scratch tuple (called F+P times per rendered frame
+  // while the Transit pose is visible) — the result is consumed into the attribute
+  // arrays immediately at the call site, before the next call overwrites it, so no
+  // per-mark array is allocated each frame.
+  const st2: [number, number] = [0, 0];
   function stateOf(i: number): [number, number] {
     const e = emphA[i];
     const emphDim = e < 1 ? clamp01(e) : 1; // EMPHASIS.DIMMED(0) → fade target, REST(1)+ → full
@@ -563,7 +568,9 @@ export function createStations(
     // and the chain owns the frame. Connected + resting stations stay full; story
     // dimming still rides on `vis`.
     const alphaMul = (0.12 + 0.88 * clamp01(vis)) * stationFocusFade(e);
-    return [colorDim, alphaMul];
+    st2[0] = colorDim;
+    st2[1] = alphaMul;
+    return st2;
   }
 
   return {

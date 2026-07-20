@@ -450,7 +450,15 @@ function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    // Restored math is re-inserted via innerHTML, but a downstream consumer may
+    // place it in an ATTRIBUTE context (e.g. a title="…"); an un-escaped quote
+    // would break out of the attribute. Escape both quote forms too. The client's
+    // single innerHTML decode reverts &quot;/&#39; back to the true "/' before
+    // KaTeX reads the math, so this is transparent to rendering (& is escaped
+    // first above, so the & in these entities is never double-escaped).
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 /**
@@ -496,6 +504,14 @@ export function sanitizeField(html: string | undefined): string {
   // Neutralize any pre-existing sentinel delimiters so injected source text
   // cannot forge a placeholder token (and thus smuggle a stored index).
   let work = html.split(MATH_TOKEN_DELIM).join("");
+  // …including ENTITY-ENCODED forms of the U+2063 sentinel. A math span captured
+  // below is restored via escapeHtml(decodeEntitiesForMath(src)); decodeEntities-
+  // ForMath turns `&#x2063;`/`&#8291;` back into a LITERAL U+2063, which would
+  // re-materialize a delimiter INSIDE a restored span and let the restoration loop
+  // splice in another span's stored index. Strip the hex (`&#x2063;`) and decimal
+  // (`&#8291;`) forms — any case, any leading zeros — up front, matching exactly the
+  // grammar decodeEntitiesForMath would later decode (both require the trailing `;`).
+  work = work.replace(/&#x0*2063;|&#0*8291;/gi, "");
   for (const re of MATH_PATTERNS) {
     work = work.replace(re, (m) => {
       const token = `${MATH_TOKEN_DELIM}MATH${store.length}${MATH_TOKEN_DELIM}`;

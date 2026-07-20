@@ -76,3 +76,19 @@ The pose toggle stays at three. New formations enter as:
 2. SEASONAL FORMS via the evolving-sky clock: on some days the Constellation
    leans toward the cosmic-web variant; formations as weather, not menu rows.
 3. Previews from real data before any build (standing law).
+
+## Transit unfocused overview (2026-07-20)
+
+The Transit map is legible when a standard is focused (the chain lights, the rest
+of the city ghosts toward the background). But with NO focus, every one of the
+~757 prerequisite lines rests at full metro opacity (~0.95) and the ~142 related
+walking-transfers add to the pile, so at full zoom the schematic collapses into an
+edge tangle and the trunk grammar disappears. The unfocused overview therefore
+FEATURES THE TRUNK NETWORK: non-trunk (low-reach) resting lines fade toward the
+dimmed convention (~0.08 alpha, per DESIGN.md's dimmed edge table) while wide trunk
+lines stay opaque and the stations/interchanges carry the reading. "Trunk-ness" is
+the reach-normalized signal that already sets a line's metro WIDTH (source
+descendant reach), so width and opacity agree — a wide line is never ghosted. This
+is a RESTING-state treatment only: the moment a standard is focused the existing
+grammar takes over untouched (connected chain saturates, the city ghosts), and it
+is gated entirely on the Transit morph so the other poses are unaffected.

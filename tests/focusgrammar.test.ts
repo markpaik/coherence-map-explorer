@@ -12,6 +12,7 @@ import {
   draftFocusFade,
   srgbToLinear,
   cityFadeTarget,
+  transitOverviewKeep,
 } from "../src/scene/focusgrammar";
 
 // Emphasis scale: 0 DIMMED | 1 REST | 2 HOVER | 3 FOCUS | 4 CHAIN | 5 RELATED.
@@ -57,6 +58,26 @@ describe("per-layer focus alpha fades", () => {
     expect(draftFocusFade(0)).toBeCloseTo(0.18, 6); // DIMMED
     expect(draftFocusFade(1)).toBe(1); // REST
     expect(draftFocusFade(4)).toBe(1); // CHAIN
+  });
+});
+
+describe("transitOverviewKeep (unfocused-overview trunk ghost)", () => {
+  it("ghosts a NON-TRUNK resting line toward ~0.08, keeps a wide trunk opaque", () => {
+    expect(transitOverviewKeep(0, 1)).toBeCloseTo(0.08, 6); // thin, resting → floor
+    expect(transitOverviewKeep(1, 1)).toBeCloseTo(1, 6); // wide trunk, resting → opaque
+  });
+  it("does NOTHING under a focus — connected or dimmed lines keep their focus grammar", () => {
+    // restness is 0 for every non-resting emphasis, so the multiplier is 1: the
+    // focus's own connected (0.95) / unconnected (0.12) alphas above are untouched.
+    expect(transitOverviewKeep(0, 4)).toBe(1); // CHAIN (connected), even a thin line
+    expect(transitOverviewKeep(0, 0)).toBe(1); // DIMMED (unconnected)
+    expect(transitOverviewKeep(0, 2)).toBe(1); // HOVER (the hovered line stays lit)
+    expect(transitOverviewKeep(0, 5)).toBe(1); // RELATED-to-focus
+  });
+  it("ramps a mid-reach resting line across the trunk thresholds (GLSL smoothstep parity)", () => {
+    // smoothstep(0.2, 0.7, 0.45) = 0.5 → 0.08 + 0.92·0.5 = 0.54. Pins the shader
+    // literals (floor 0.08, thresholds 0.2/0.7) against drift.
+    expect(transitOverviewKeep(0.45, 1)).toBeCloseTo(0.54, 6);
   });
 });
 

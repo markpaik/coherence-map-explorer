@@ -19,6 +19,9 @@
 // setArtStyle(style) for its own geometry/material/uniform swaps, and main.ts
 // fans one applyArtStyle() out to all of them.
 
+import type { StrandId } from "../data";
+import { STRAND_COLORS } from "./palette";
+
 export type ArtStyle = 0 | 1 | 2;
 
 // User-facing option labels. Style 0's label is "Let it Ride" (round 11): with
@@ -74,6 +77,19 @@ export const ART_CREDITS: readonly { html: string }[] = [
       'After <a href="https://www.tylerxhobbs.com/works" target="_blank" rel="noopener">Tyler Hobbs</a>’s <a href="https://www.curated.xyz/editorial/collecting-fidenza" target="_blank" rel="noopener">Fidenza</a>',
   },
 ];
+
+/**
+ * The strand SWATCH colour for the active art style — the single source of truth
+ * the legend reads so its dots track the scene on every skin swap: Galaxy's
+ * validated palette, Ringers' peg colorway, or Fidenza's node colorway. (The
+ * scene's own node materials bake these same colours per style; the legend just
+ * mirrors them rather than owning a parallel copy.)
+ */
+export function strandSwatch(strand: StrandId, style: ArtStyle): number {
+  if (style === 1) return RINGERS.peg[strand] ?? RINGERS.pegWhite;
+  if (style === 2) return FIDENZA.node[strand] ?? FIDENZA.bg;
+  return STRAND_COLORS[strand];
+}
 
 /** Deterministic per-id hash in [0,1) — matches the preview script's grammar. */
 export function artHash(s: string): number {
