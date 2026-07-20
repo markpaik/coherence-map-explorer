@@ -166,18 +166,35 @@ export function createAside(rand: () => number): AsideHandle {
   }
   show(index);
 
-  // A hidden pleasure: clicking the aside deals the next line.
-  const onClick = (): void => {
+  // A hidden pleasure: activating the aside deals the next line. It is a real
+  // button (role/tabindex/title set in index.html; re-asserted here so the
+  // module owns the contract) — pointer AND keyboard both deal a new line, and
+  // the global :focus-visible ring makes it reachable for keyboard/AT. The
+  // aria-label stays the poetic completion ("(is art)"), so the H1 landmark
+  // still reads "Coherence (is art)"; the title carries the action hint.
+  host.setAttribute("role", "button");
+  host.tabIndex = 0;
+  host.setAttribute("title", "Deal a new line");
+  const deal = (): void => {
     index = (index + 1) % ASIDES.length;
     show(index);
+  };
+  const onClick = (): void => deal();
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      deal();
+    }
   };
   host.style.pointerEvents = "auto";
   host.style.cursor = "pointer";
   host.addEventListener("click", onClick);
+  host.addEventListener("keydown", onKey);
 
   return {
     dispose() {
       host.removeEventListener("click", onClick);
+      host.removeEventListener("keydown", onKey);
       current?.remove();
     },
   };

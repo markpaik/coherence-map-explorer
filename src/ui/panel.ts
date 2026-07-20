@@ -368,6 +368,14 @@ export function createPanel(
     title.className = "conn-title";
     // Generous word budget — CSS clamps to 3 lines; this is just a safety cap.
     title.textContent = shortTitle(docsById?.get(n.id)?.text, 26);
+    // Explicit accessible name — overrides the concatenated chip+code+title text
+    // so AT announces "Grade 8, 8.F.A.3, <title>" instead of "88.F.A.3". The
+    // grade chip's bare digit would otherwise run straight into the code.
+    const gradeName = gradeLabel.get(n.grade) ?? n.grade;
+    btn.setAttribute(
+      "aria-label",
+      title.textContent ? `${gradeName}, ${n.code}, ${title.textContent}` : `${gradeName}, ${n.code}`,
+    );
     btn.append(chip, code, title);
     btn.addEventListener("click", () => requests.focusCode(n.code));
     return btn;
@@ -650,7 +658,13 @@ export function createPanel(
       // frame so it isn't hidden. preventScroll keeps the sheet from jumping.
       // The guided tour owns focus (its card is a focus-trapped dialog), so the
       // panel must not steal it while touring.
-      if (!wasOpen && !document.body.classList.contains("touring")) {
+      //
+      // Fire on a fresh open AND on IN-PANEL navigation: activating a
+      // Builds-on / Leads-to / Related button re-renders connections
+      // (replaceChildren destroys the button that held focus), which would
+      // otherwise strand focus on <body> with no visible ring. Re-homing focus
+      // on the new heading keeps keyboard/AT inside the panel across every hop.
+      if (!document.body.classList.contains("touring")) {
         requestAnimationFrame(() => {
           if (open) codeEl.focus({ preventScroll: true });
         });

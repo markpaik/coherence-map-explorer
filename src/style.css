@@ -289,6 +289,8 @@ body.art-fidenza .headline-art {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 13px;
+  /* Glides aside when the desktop panel opens (see the panel-open shift below). */
+  transition: right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .view-seg {
   min-height: 44px; /* touch target */
@@ -336,7 +338,7 @@ body.art-fidenza .headline-art {
   border: 1px solid var(--line);
   border-radius: 13px;
   cursor: pointer;
-  transition: color 150ms ease;
+  transition: color 150ms ease, right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .art-tab:hover,
 .art-tab[aria-expanded="true"] {
@@ -356,6 +358,7 @@ body.art-fidenza .headline-art {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 13px;
+  transition: right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .art-toggle.art-toggle-open {
   display: inline-flex;
@@ -373,7 +376,7 @@ body.art-fidenza .headline-art {
   color: var(--ink-2);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 300ms ease;
+  transition: opacity 300ms ease, right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .art-credit a {
   color: inherit;
@@ -386,6 +389,26 @@ body.art-fidenza .headline-art {
 }
 body.art-open .art-credit {
   transform: translateY(-166px); /* clears the unfolded segmented row too */
+}
+
+/* Detail panel ↔ bottom-right cluster (desktop): the panel slides in over the
+   right edge (480px wide, z 18) and would bury the pose toggle + the
+   Style-overrides tab / segments / credit (z 11), which live in the same corner
+   — elementFromPoint lands on the panel, so they can't be clicked. While the
+   panel is open, slide the whole cluster left of the panel's edge (panel width
+   + the cluster's own edge gap) so both stay usable; it glides back on close
+   (the base rules above carry the right-transition). The panel is an earlier
+   body sibling of every cluster element, so the general-sibling combinator
+   reaches them with no JS state flag. Desktop only — on phones the panel is a
+   bottom sheet and the cluster is repositioned to clear it (see the 720px
+   block). Verified no overlap at 1280px and 1456px (28px clearance each). */
+@media (min-width: 721px) {
+  .panel.panel-open ~ .view-toggle,
+  .panel.panel-open ~ .art-tab,
+  .panel.panel-open ~ .art-toggle,
+  .panel.panel-open ~ .art-credit {
+    right: calc(480px + clamp(16px, 2.5vw, 28px));
+  }
 }
 
 /* -- depth scale hint (left edge; visible in the Ascent) -------------------- */
@@ -571,6 +594,21 @@ body.env-light .nav-hints span {
 body.env-light .headline-art {
   --tag-ink: #2b2b33;
   opacity: 1;
+}
+/* Ghost buttons ("Show me around" / "Stories") are transparent pills — a --line
+   border + --ink-2 label tuned for the dark sky, which wash out on the light
+   dawn / daylight fields. Re-ink them as free-standing dark-slate chrome using
+   the SAME slate the title takes (primary #2b2b33 label, secondary #4a4a55
+   outline) so both the label and the pill edge read on the light field. This is
+   Galaxy-only chrome (env-light never coexists with the body.art-* re-inks). */
+body.env-light .ghost-btn {
+  color: #2b2b33;
+  border-color: #4a4a55;
+}
+body.env-light .ghost-btn:hover {
+  color: #2b2b33;
+  border-color: #2b2b33;
+  background: rgb(43 43 51 / 0.08);
 }
 
 /* Search-rail buttons ("Show me around" / "Stories"). The base .ghost-btn is a
@@ -2852,11 +2890,20 @@ body.storying .browse-pill {
 }
 
 /* While Browse is open, hide the scene chrome behind the opaque overlay so it
-   can't take keyboard focus (the ?browse=1 desktop path has a Tab key). */
+   can't take keyboard focus (the ?browse=1 desktop path has a Tab key).
+   display:none removes it from layout, the a11y tree, AND the tab order.
+   Covers every free-standing control that sits behind the overlay: the title,
+   search rail, filter rail, pose toggle, the Style-overrides tab/segments/credit,
+   the Ascent depth legend, and the nav hints. (The story-HUD formation switcher
+   — .formation-pick — lives inside the story card, which is not mounted during
+   Browse, so it needs no rule here.) */
 body.browsing .title-block,
 body.browsing .search-rail,
 body.browsing .filters-rail,
 body.browsing .view-toggle,
+body.browsing .art-tab,
+body.browsing .art-toggle,
+body.browsing .art-credit,
 body.browsing .depth-scale,
 body.browsing .nav-hints {
   display: none;

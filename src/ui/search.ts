@@ -45,6 +45,10 @@ export interface SearchHandle {
 
 export function createSearch(deps: SearchDeps): SearchHandle {
   const { graph, machine } = deps;
+  // Spoken grade names ("Grade 8", "Kindergarten", "High School") so an option's
+  // accessible name doesn't run the grade chip's digit into the code — "8" + the
+  // code "8.F.A.3" would otherwise announce as "88.F.A.3".
+  const gradeLabel = new Map(graph.grades.map((g) => [g.id, g.label]));
   let gradeContext: ((grade: string) => boolean) | null = null;
   const rail = document.getElementById("search-rail");
   const inputEl = document.getElementById("search-input") as HTMLInputElement | null;
@@ -157,6 +161,13 @@ export function createSearch(deps: SearchDeps): SearchHandle {
       const title = document.createElement("span");
       title.className = "res-title";
       title.textContent = shortTitle(d.text);
+
+      // Explicit accessible name — overrides the concatenated chip+code+title
+      // text so AT announces "Grade 8, 8.F.A.3, <title>" rather than "88.F.A.3".
+      li.setAttribute(
+        "aria-label",
+        `${gradeLabel.get(d.grade) ?? d.grade}, ${d.code}, ${title.textContent}`,
+      );
 
       li.append(chip, code, title);
       // pointerdown (not click) so selection wins the race with input blur.
