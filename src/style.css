@@ -315,6 +315,75 @@ body.art-fidenza .headline-art {
   cursor: default;
 }
 
+/* -- pose orientation caption (one line per formation) ---------------------- */
+/* Appears for ~4s after a formation change and while a switcher option is
+   hovered/focused; a glass chip centered above the legend. aria-live in the DOM
+   carries the same orientation to assistive tech. */
+.view-caption {
+  position: fixed;
+  left: 50%;
+  bottom: clamp(96px, 14vh, 120px);
+  transform: translateX(-50%) translateY(6px);
+  z-index: 12;
+  max-width: min(90vw, 460px);
+  padding: 7px 14px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.view-caption-on {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+/* Reduced motion: no slide, just appear/disappear (instant, no transform easing). */
+:root.rm .view-caption {
+  transition: none;
+  transform: translateX(-50%);
+}
+
+/* -- Transit metro key (legend line, pose 3 only) --------------------------- */
+.transit-key {
+  position: fixed;
+  left: 50%;
+  bottom: clamp(64px, 9vh, 78px);
+  transform: translateX(-50%);
+  z-index: 11;
+  max-width: min(92vw, 520px);
+  padding: 6px 13px;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-2);
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  pointer-events: none;
+}
+.transit-key[hidden] {
+  display: none;
+}
+
+/* Both are scene-chrome: gone in story / OG-capture / phone Browse modes. */
+body.storying .view-caption,
+body.storying .transit-key,
+body.og .view-caption,
+body.og .transit-key,
+body.browsing .view-caption,
+body.browsing .transit-key {
+  display: none;
+}
+
 /* -- art-style toggle (under the pose toggle) + credit line ----------------- */
 
 /* Discovery tab: the labeled pill that unfolds the segmented control. */

@@ -283,6 +283,7 @@ function start(graph: GraphCore): void {
   createAside(clockRand);
   const viewToggle = createViewToggle({ driver: poseDriver });
   let lastReflectedPose = poseDriver.pose;
+  filters.setPose(poseDriver.target); // sync the Transit metro key to the boot pose
 
   // -- art styles (Galaxy / Ringers / Fidenza) ------------------------------
   // A style is a LOOK: geometry skins + field color + UI ink swap in place;
@@ -310,6 +311,9 @@ function start(graph: GraphCore): void {
     (scene.background as THREE.Color).setHex(ART_BG[style]);
     document.body.classList.toggle("art-ringers", style === 1);
     document.body.classList.toggle("art-fidenza", style === 2);
+    // The strand legend mirrors the scene: repaint its swatches to this skin's
+    // colorway (galaxy palette / Ringers pegs / Fidenza nodes).
+    filters.setArtStyle(style);
     styleToggle.reflect(style);
     requestRender();
   }
@@ -492,6 +496,7 @@ function start(graph: GraphCore): void {
     if (poseDriver.pose !== lastReflectedPose) {
       lastReflectedPose = poseDriver.pose;
       viewToggle.reflect(poseDriver.pose, poseDriver.target);
+      filters.setPose(poseDriver.target); // show the Transit metro key only at pose 3
     }
     // Idle drift: normally suspended whenever the user is engaged. Stories are
     // the exception — while a scene HOLDS (settled, awaiting auto-advance/Next)

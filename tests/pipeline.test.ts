@@ -621,6 +621,34 @@ describe("math-span sanitization (no placeholder bypass)", () => {
     expect(out).toContain("$y&lt;z$"); // the real math still gets index 0
   });
 
+  it("neutralizes an ENTITY-ENCODED forged sentinel (hex/decimal, so no cross-span smuggle)", () => {
+    // The forge: a math span whose source carries entity-encoded U+2063 delimiters
+    // around a second span's index. decodeEntitiesForMath would turn `&#x2063;`
+    // back into a LITERAL sentinel mid-restoration, and the restoration loop would
+    // then splice store[1] (here a "secret" span) into span 0's slot. Stripping the
+    // entity forms up front keeps the forged token inert plain text.
+    const out = sanitizeField("<p>$&#x2063;MATH1&#x2063;$ then $secret<tag$</p>");
+    expect(out).not.toContain("⁣"); // no literal sentinel re-materialized
+    expect(out).toContain("$MATH1$"); // the forged token stayed inert literal text
+    expect(out).toContain("$secret&lt;tag$"); // the genuine span still restores
+    // Decimal form and leading zeros are stripped the same way.
+    const dec = sanitizeField("<p>$&#08291;MATH1&#8291;$ then $z<w$</p>");
+    expect(dec).not.toContain("⁣");
+    expect(dec).toContain("$MATH1$");
+    expect(dec).toContain("$z&lt;w$");
+  });
+
+  it("escapes ' and \" in restored math so it can't break out of an attribute", () => {
+    // escapeHtml now escapes both quote forms; a single innerHTML decode on the
+    // client reverts &#39;/&quot; to the true '/" before KaTeX reads the math, so
+    // rendering is unchanged while an attribute context can no longer be broken.
+    const out = sanitizeField("<p>$x'y$ and $p\"q$</p>");
+    expect(out).toContain("$x&#39;y$");
+    expect(out).toContain("$p&quot;q$");
+    expect(out).not.toContain("$x'y$"); // no raw single-quote span survives
+    expect(out).not.toContain('$p"q$'); // no raw double-quote span survives
+  });
+
   it("emits no raw event-handler markup or <img inside math in any shard", () => {
     const corpus = Object.values(detailShards)
       .map((s) => JSON.stringify(s))

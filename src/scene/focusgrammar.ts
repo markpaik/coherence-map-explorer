@@ -39,6 +39,39 @@ export const stationFocusFade = (e: number): number => (e < 1 ? 0.15 + 0.85 * cl
  */
 export const draftFocusFade = (e: number): number => (e < 1 ? 0.18 + 0.82 * clamp01(e) : 1);
 
+/** GLSL-parity smoothstep (Hermite), clamped — matches the edge shader exactly. */
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+};
+
+// Transit UNFOCUSED-overview trunk ghost. Kept in lockstep with the edges.ts GLSL
+// (same floor + thresholds + smoothstep) — the test pins the agreement.
+const TRUNK_GHOST_FLOOR = 0.08; // a non-trunk resting line keeps this fraction of its alpha
+const TRUNK_LO = 0.2; // trunk metric where the ghost begins to lift
+const TRUNK_HI = 0.7; // trunk metric at/above which a line reads as a full-opacity trunk
+
+/**
+ * Transit unfocused-overview alpha multiplier (the m3 == 1 / full-Transit value).
+ * With no focus, every prerequisite line rests at ~0.95 and the ~757 opaque ribbons
+ * collapse into a tangle at full zoom, burying the metro grammar. Feature the trunk
+ * network by fading NON-TRUNK (low-reach) RESTING lines toward the DESIGN dimmed
+ * convention (~0.08·alpha) while wide trunks stay opaque.
+ *
+ * `trunkMetric` is the reach-normalized 0..1 signal that also sets a line's trunk
+ * WIDTH (clamp((sourceRadius−1.6)·2, 0, 4)·0.25), so width and opacity agree: wide ⇒
+ * opaque, thin ⇒ ghosted. restness = (1−connectedness)(1−unconnectedness) is 1 only
+ * for a RESTING edge (no focus, and not the hovered line), so a focus's connected/
+ * dimmed grammar is left completely untouched. The GLSL gates the whole thing on the
+ * pose-3 morph amount m3, so poses 0–2 are byte-identical.
+ */
+export function transitOverviewKeep(trunkMetric: number, emphasis: number): number {
+  const restness = (1 - connectedness(emphasis)) * (1 - unconnectedness(emphasis));
+  const trunkKeep =
+    TRUNK_GHOST_FLOOR + (1 - TRUNK_GHOST_FLOOR) * smoothstep(TRUNK_LO, TRUNK_HI, clamp01(trunkMetric));
+  return 1 - restness * (1 - trunkKeep); // mix(1, trunkKeep, restness)
+}
+
 /** sRGB channel (0..1) → linear. Matches THREE.Color's sRGB→working conversion. */
 export const srgbToLinear = (c: number): number =>
   c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);

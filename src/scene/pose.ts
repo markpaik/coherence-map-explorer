@@ -37,6 +37,14 @@ import { createEvolveField } from "./evolve";
 const STAGGER_MS = 35; // per unit of dependency depth (poses 0/1)
 const COLUMN_MS = 35; // per grade-column index, left→right (entering pose 2)
 const NODE_MS = 650; // each node's own transition length
+// Refresh the pick proxy's bounding sphere every Nth MORPH frame (not just at the
+// endpoints). During a morph the per-instance proxy matrices already move every
+// frame, but the mesh-level bounding sphere — the raycaster's broad-phase reject —
+// is only recomputed when a morph settles, so a node that travels outside the
+// last-settled bounds becomes momentarily un-hoverable/-clickable (a pick dead-
+// zone). computeBoundingSphere over the 480-instance proxy measured ~13µs (≈0.08%
+// of a 60fps frame), so a small interval keeps the bounds fresh for negligible cost.
+const PICK_REFRESH_EVERY = 3;
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smoothstep = (x: number): number => {
   const t = clamp01(x);
@@ -219,6 +227,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
   let elapsed = 0;
   let totalMs = NODE_MS;
   let pendingResolve: (() => void) | null = null;
+  let morphPickFrames = 0; // throttles the mid-morph pick-bounds refresh
 
   function delayFor(dest: Pose, i: number): number {
     if (dest >= 2) return colIndex[i] * COLUMN_MS; // Blueprint + Transit stagger by grade column
@@ -414,9 +423,17 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
       if (landed) {
         morphing = false;
         originPose = dest; // settled ⇒ origin === target
+        morphPickFrames = 0;
         nodes.refreshPickBounds();
         settleCamera(dest, true);
         resolvePending();
+      } else if (++morphPickFrames >= PICK_REFRESH_EVERY) {
+        // Keep the pick proxy's bounding sphere tracking the traveling nodes so a
+        // node that has moved far from its start never falls into a pick dead-zone
+        // mid-morph. Throttled (see PICK_REFRESH_EVERY) — the refresh is cheap but
+        // pointless to run every single frame of a ~1.7s morph.
+        morphPickFrames = 0;
+        nodes.refreshPickBounds();
       }
 
       requestRender();

@@ -99,6 +99,10 @@ const VERT = /* glsl */ `
   // the ribbon edge over a fixed pixel span regardless of the instance's width,
   // so thin lines keep a full-alpha core while their silhouette anti-aliases.
   out float vHalfPx;
+  // Transit trunk metric (reach-normalized 0..1): the SAME signal that sets the
+  // metro trunk WIDTH below, exported so the fragment can ghost non-trunk lines in
+  // the unfocused Transit overview. Inert everywhere but Galaxy-Transit.
+  out float vTrunk;
 
   vec3 bezier(float s) {
     float u = 1.0 - s;
@@ -160,6 +164,10 @@ const VERT = /* glsl */ `
 
   void main() {
     float m3 = clamp(uPose - 2.0, 0.0, 1.0); // pose-3 morph amount (0 off, 1 Transit)
+    // Reach-normalized trunk metric (0..1), the same basis as the metro trunk WIDTH
+    // (clamp((radA-1.6)*2,0,4)); wide ⇔ trunk. Written for every style so the varying
+    // is always defined; only the Galaxy-Transit fragment path reads it.
+    vTrunk = clamp((aArtScalars.z - 1.6) * 2.0, 0.0, 4.0) * 0.25;
     if (uArtStyle < 0.5) {
       // ===================== GALAXY (shipped, byte-identical) ===============
       // At m3 == 0 curveAt returns the exact shipped bezier point + analytic
@@ -353,6 +361,7 @@ const FRAG = /* glsl */ `
   in float vDamage;
   in float vSide; // Fidenza pipe cross-position (-1..+1); round-tube shading
   in float vHalfPx; // Galaxy ribbon half-width (device px) — silhouette AA at Transit/Blueprint
+  in float vTrunk; // Transit trunk metric 0..1 (reach) — unfocused-overview ghost
 
   out vec4 fragColor;
 
@@ -379,6 +388,10 @@ const FRAG = /* glsl */ `
       // poses 0–2 — stay untouched.
       float lit  = clamp(e - 1.0, 0.0, 1.0);
       float dimd = clamp(1.0 - e, 0.0, 1.0);
+      // restness is 1 ONLY for a resting edge (no focus, not the hovered line): both
+      // lit and dimd are 0. It gates the Transit unfocused-overview trunk ghost below
+      // so a focus's connected/dimmed grammar is never disturbed.
+      float restness = (1.0 - lit) * (1.0 - dimd);
       int i0 = int(floor(e));
       int i1 = int(min(floor(e) + 1.0, 5.0));
       float f = fract(e);
@@ -411,6 +424,14 @@ const FRAG = /* glsl */ `
         // lines to ~0.12 so they dissolve into the city and the chain owns the frame.
         // max() keeps a hot/chain edge bright; mix(...,m3) leaves poses 0–2 unchanged.
         alpha = mix(alpha, mix(max(alpha, 0.95), 0.12, dimd), m3);
+        // Transit UNFOCUSED-overview trunk ghost (FORMATIONS metro grammar): with no
+        // focus, ~757 resting lines all sit at ~0.95 and tangle at full zoom. Feature
+        // the trunk network by fading NON-TRUNK (low vTrunk) resting lines toward the
+        // dimmed convention (~0.08·alpha) while wide trunks stay opaque — width and
+        // opacity then agree (both key off reach). restness*m3 keeps focused Transit
+        // and poses 0–2 byte-identical. (Mirrors focusgrammar.transitOverviewKeep.)
+        float trunkKeep = 0.08 + 0.92 * smoothstep(0.2, 0.7, vTrunk);
+        alpha *= mix(1.0, trunkKeep, restness * m3);
         // Blueprint ink alpha (round 11): dimmed→faint 0.18, resting→0.55 legible
         // ink, connected→0.90 highlighter (= 0.55 + 0.35·lit − 0.37·dimd).
         alpha = mix(alpha, 0.55 + 0.35 * lit - 0.37 * dimd, m2);
@@ -431,6 +452,10 @@ const FRAG = /* glsl */ `
         // opaque dashed link; a focus collapses UNCONNECTED transfers to ~0.12 (they
         // dissolve into the city with the rest of the ghosted map).
         aRel = mix(aRel, mix(max(aRel, 0.34), 0.12, dimd), m3);
+        // Walking transfers are never a trunk line: in the unfocused overview they
+        // recede too (restness*m3), so the resting Transit map reads as its trunk
+        // network + stations, not 899 overlapping ribbons.
+        aRel *= mix(1.0, 0.10, restness * m3);
         // Blueprint: connected related re-saturate (dashed highlighter); unconnected
         // fade faint (= 0.50 + 0.35·lit − 0.32·dimd).
         aRel = mix(aRel, 0.50 + 0.35 * lit - 0.32 * dimd, m2);

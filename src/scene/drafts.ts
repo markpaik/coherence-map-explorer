@@ -420,6 +420,10 @@ export function createDrafts(
   // pulls the colour to the missed target (colorDim) and a ghost still nearly
   // vanishes (vis): the story dark-baseline and husk grammar are untouched (every
   // story lights only its focus closure, so no lit node is ever emphasis-dimmed).
+  // Writes into a single reused scratch tuple (called R+D times per rendered frame
+  // while the Blueprint pose is visible); the result is consumed at the call site
+  // before the next call overwrites it, so no per-mark array is allocated per frame.
+  const st3: [number, number, number] = [0, 0, 0];
   function stateOf(i: number): [number, number, number] {
     const e = emphA[i];
     const dmg = dmgA[i];
@@ -427,7 +431,10 @@ export function createDrafts(
     const colorDim = clamp01(1 - 0.85 * dmg);
     const lit = connectedness(e);
     const alphaMul = (0.12 + 0.88 * clamp01(vis)) * draftFocusFade(e);
-    return [colorDim, alphaMul, lit];
+    st3[0] = colorDim;
+    st3[1] = alphaMul;
+    st3[2] = lit;
+    return st3;
   }
 
   return {
