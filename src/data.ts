@@ -49,7 +49,9 @@ export interface GraphNode {
    *  columns (depth-banded), y = barycenter row, z = per-line level
    *  (number +16, algebra +6, geometry -6, data -16). */
   pos4: [number, number, number];
-  /** Dependency-chain depth (0 = foundation … up to 30 = deepest chain). */
+  /** Ascent altitude: longest prerequisite chain (0 = foundation), then
+   *  family-rolled so a family shares its umbrella's altitude (see
+   *  docs/audits/family-altitude-rollup.md). */
   depth: number;
   /** High-school course memberships (e.g. ["A1","A2"]); K-8 nodes omit it. */
   courses?: string[];

@@ -142,7 +142,11 @@ interface OutNode {
   pos2: [number, number, number]; // pose B: the Ascent (y = dependency depth)
   pos3: [number, number, number]; // pose C: the Blueprint (flat grade-column circuit board)
   pos4: [number, number, number]; // pose D: the Transit Map (octolinear metro, per-line z-levels)
-  /** Longest prerequisite chain beneath this standard (0 = foundation). */
+  /** Ascent altitude: the longest prerequisite chain beneath this standard
+   *  (0 = foundation), then family-rolled — a parent rides at least as high as
+   *  its highest sub-standard and a sub-standard at least as high as its
+   *  parent's own-edge base, with edges re-propagated so every prereq still
+   *  points upward. See docs/audits/family-altitude-rollup.md. */
   depth: number;
   /** Sub-standard ids (e.g. 4.NF.B.3 -> its .a-.d), code-derived; omitted when none. */
   children?: string[];
@@ -1056,7 +1060,8 @@ export function buildGraph(): BuildResult {
   // constellation into this pose; a view toggle offers it to everyone.
   const depthById = new Map<string, number>();
   {
-    // Longest-path layering over the prereq DAG (Kahn order, then relax).
+    // Base longest-path layering over the prereq DAG (Kahn order, then relax):
+    // every standard sits one layer above its deepest prerequisite chain.
     const indegD = new Map<string, number>();
     for (const id of validIds) {
       indegD.set(id, 0);
@@ -1068,13 +1073,108 @@ export function buildGraph(): BuildResult {
       if (!succD.has(e.s)) succD.set(e.s, []);
       succD.get(e.s)!.push(e.t);
     }
+    const topo: string[] = [];
     const queue = [...validIds].filter((id) => indegD.get(id) === 0).sort(numAsc);
     while (queue.length) {
       const u = queue.shift()!;
+      topo.push(u);
       for (const v of succD.get(u) ?? []) {
         depthById.set(v, Math.max(depthById.get(v)!, depthById.get(u)! + 1));
         indegD.set(v, indegD.get(v)! - 1);
         if (indegD.get(v) === 0) queue.push(v);
+      }
+    }
+
+    // --- Family altitude roll-up ---------------------------------------------
+    // Applied here, immediately after the base DP, so EVERY downstream consumer
+    // of depthById reads final altitudes: pos2 (the Ascent y), the depth-layer
+    // x-relaxation below, the isoline contours (src/scene/contours.ts), the
+    // Transit within-column depth band, and the emitted `depth` field (which
+    // the client's pose stagger and contour derivation key off). See
+    // docs/audits/family-altitude-rollup.md.
+    //
+    // The connections panel already rolls a family's sub-standard edges up to
+    // the parent (the project's "universal family roll-up" convention). Altitude
+    // must obey the same rule, or the Ascent misreads whole families:
+    //   * Parent floor — an umbrella parent whose prerequisites live on its
+    //     SUB-standards (e.g. F-BF.A.1, whose children reach depth 23) otherwise
+    //     falls to the massif FLOOR (depth 0) and reads as a foundation. Fix:
+    //     a parent rides at least as high as its highest child.
+    //   * Child floor (the symmetric mirror) — an elaboration sub-standard with
+    //     no prerequisites of its own (e.g. F-LE.A.1.a/.b/.c) otherwise falls to
+    //     the floor while its umbrella parent (F-LE.A.1, depth 23) sits high.
+    //     Fix: a sub-standard rides at least as high as its parent's OWN-edge
+    //     BASE depth — the parent's structural altitude BEFORE roll-up captured
+    //     in `parentOwnBase`, deliberately NOT the rolled value, so a genuinely
+    //     shallow sibling that carries no edges under an edgeless parent keeps
+    //     its real depth instead of being flattened up to the family peak.
+    //   * Edge monotonicity — re-propagate every lift down the prereq DAG so
+    //     each standard still rests strictly above everything it builds on.
+    // All three are lower-bound (max) constraints, so the system is monotone;
+    // its least fixpoint is unique and independent of iteration order (hence
+    // deterministic / byte-identical). Depths only ever increase and are bounded
+    // by the DAG's longest path, so it converges in a few rounds.
+    const parentOwnBase = new Map<string, number>(); // pre-roll-up base depth per parent
+    for (const pid of childrenOf.keys()) {
+      if (depthById.has(pid)) parentOwnBase.set(pid, depthById.get(pid)!);
+    }
+    let changed = true;
+    let rounds = 0;
+    while (changed) {
+      changed = false;
+      for (const [pid, kids] of childrenOf) {
+        if (!depthById.has(pid)) continue;
+        // Parent floor: parent >= max child depth.
+        let m = depthById.get(pid)!;
+        for (const k of kids) {
+          const dk = depthById.get(k);
+          if (dk !== undefined && dk > m) m = dk;
+        }
+        if (m > depthById.get(pid)!) {
+          depthById.set(pid, m);
+          changed = true;
+        }
+        // Child floor: child >= parent's own-edge BASE depth (fixed snapshot).
+        const base = parentOwnBase.get(pid) ?? 0;
+        for (const k of kids) {
+          const dk = depthById.get(k);
+          if (dk !== undefined && base > dk) {
+            depthById.set(k, base);
+            changed = true;
+          }
+        }
+      }
+      // Edge monotonicity: re-propagate lifted altitudes down the prereq DAG in
+      // topological order (one pass fully propagates within a round).
+      for (const u of topo) {
+        const du = depthById.get(u)!;
+        for (const v of succD.get(u) ?? []) {
+          if (du + 1 > depthById.get(v)!) {
+            depthById.set(v, du + 1);
+            changed = true;
+          }
+        }
+      }
+      assert(++rounds < 1000, "family altitude roll-up did not converge (positive cycle?)");
+    }
+
+    // The Ascent invariants (hard fail): every prerequisite edge points strictly
+    // upward AND every family parent sits at or above its highest sub-standard.
+    for (const e of prereq) {
+      assert(
+        depthById.get(e.t)! >= depthById.get(e.s)! + 1,
+        `ascent depth invariant: ${codeById.get(e.s)} (d=${depthById.get(e.s)}) -> ${codeById.get(e.t)} (d=${depthById.get(e.t)}) not upward`,
+      );
+    }
+    for (const [pid, kids] of childrenOf) {
+      if (!depthById.has(pid)) continue;
+      for (const k of kids) {
+        const dk = depthById.get(k);
+        if (dk === undefined) continue;
+        assert(
+          depthById.get(pid)! >= dk,
+          `family altitude roll-up: parent ${codeById.get(pid)} (d=${depthById.get(pid)}) below child ${codeById.get(k)} (d=${dk})`,
+        );
       }
     }
   }
