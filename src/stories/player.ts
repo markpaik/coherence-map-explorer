@@ -31,6 +31,7 @@ import type { CameraRig } from "../scene/camera";
 import type { FiltersHandle } from "../ui/filters";
 import type { DamageEngine } from "./damage";
 import type { SelectorResolver } from "./selectors";
+import { storyHref } from "../state/routing";
 import { STORIES, scenePose, sceneBody, sceneTitle, type Story, type StoryScene, type Formation } from "./scripts";
 import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
 import { createFormationPick, type FormationPickHandle } from "./formationpick";
@@ -155,6 +156,11 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   let currentIndex = 0;
   let priorPose: Pose = 0; // widened to the driver's Pose when Transit (3) landed
   let deepLink = false;
+  // Pre-story routing snapshot (finding: a story must not orphan the standard
+  // deep link the reader left in the URL). If a standard was focused when the
+  // story began, its code is captured here and re-focused on exit — panel, hash,
+  // and emphasis restored together, symmetric with entry. Null = entered idle.
+  let preStoryFocusCode: string | null = null;
   let navToken = 0;
 
   // Grade rank per node (K=0 … HS=9) for directional reveals: a left-to-right
@@ -506,6 +512,13 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       console.warn(`[cme] unknown story: ${storyId}`);
       return;
     }
+    // Snapshot the pre-story focus BEFORE anything clears it — but only on a
+    // fresh entry (a story→story restart preserves the ORIGINAL pre-story focus,
+    // never the outgoing story's silent focus).
+    if (!running) {
+      preStoryFocusCode =
+        machine.focusedIndex !== null ? graph.nodes[machine.focusedIndex].code : null;
+    }
     if (running) stopImmediate(); // restart cleanly (no pose return churn)
 
     running = true;
@@ -517,6 +530,13 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
 
     machine.setHover(null); // a stale hover must not linger under the backdrop
     machine.setStorying(true);
+    // Keep the hash coherent while the story owns the scene: switch to the
+    // story's own scheme (deep links already arrive with it) so a mid-story
+    // reload/share resurrects the STORY — not the pre-story #/s/<CODE>, which
+    // would otherwise be orphaned in the URL and resurrect on reload. The player
+    // owns the #/story/ hash (as it already did on deep-link exit); replaceState,
+    // so the router never re-routes off it.
+    history.replaceState(null, "", storyHref(story.id, location.pathname + location.search));
     // Phones: the story card covers the lower ~40% of the screen — every scene
     // fit rides the model up clear of it. Desktop card sits bottom-left; no lift.
     rig.setFrameLiftPx(
@@ -571,6 +591,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   async function stop(): Promise<void> {
     if (!running) return;
     const returnPose = priorPose;
+    const restoreCode = preStoryFocusCode; // pre-story focus to re-open on exit
     stopImmediate();
     requestRender();
 
@@ -582,10 +603,19 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     backdrop.hidden = true;
     document.body.classList.remove("storying");
     machine.setStorying(false);
-    if (deepLink) {
+    // Restore the pre-story routing, symmetric with entry. A standard the reader
+    // had focused before the story returns — panel, hash, AND emphasis — through
+    // the machine (still the single writer of #/s/); REPLACE so it overwrites the
+    // story's own hash entry rather than stacking one. With no prior focus (incl.
+    // a #/story/ deep link, where preStoryFocusCode is null), the hash clears to
+    // the bare base — the old deep-link behavior, now the general case.
+    if (restoreCode) {
+      machine.focusByCode(restoreCode, { history: "replace" });
+    } else {
       history.replaceState(null, "", location.pathname + location.search);
-      deepLink = false;
     }
+    preStoryFocusCode = null;
+    deepLink = false;
     currentStory = null;
     const btn = document.getElementById("story-btn");
     if (btn instanceof HTMLElement) btn.focus();
