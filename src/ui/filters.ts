@@ -38,9 +38,21 @@ function hexColor(v: number): string {
   return `#${v.toString(16).padStart(6, "0")}`;
 }
 
+/** Exact filter state, for snapshot/restore (the tour's Four-rivers stop). */
+export interface FilterSelection {
+  grades: string[];
+  strands: string[];
+  lens: "all" | "major" | "wap";
+}
+
 export interface FiltersHandle {
   /** Show only the given strand (used by the tour). Syncs the chips. */
   setStrandsOnly(strand: StrandId): void;
+  /** Current selection as plain data. */
+  getSelection(): FilterSelection;
+  /** Restore an exact selection (sets, not click replay — chip clicks carry
+   * solo semantics, so replaying them cannot reconstruct arbitrary subsets). */
+  setSelection(sel: FilterSelection): void;
   /** Restore every filter to its default (all shown). Syncs the chips. */
   reset(): void;
   /** Whether a grade currently passes the grade-chip filter. */
@@ -341,6 +353,20 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       strandActive.add(strand);
       for (const g of GRADES) gradeActive.add(g);
       lens = "all";
+      hideTip();
+      syncChips();
+      recompute();
+    },
+    getSelection() {
+      return { grades: [...gradeActive], strands: [...strandActive], lens };
+    },
+    setSelection(sel) {
+      gradeActive.clear();
+      for (const g of sel.grades) if (GRADES.includes(g)) gradeActive.add(g);
+      strandActive.clear();
+      for (const s of sel.strands)
+        if ((STRAND_ORDER as readonly string[]).includes(s)) strandActive.add(s as StrandId);
+      lens = sel.lens;
       hideTip();
       syncChips();
       recompute();

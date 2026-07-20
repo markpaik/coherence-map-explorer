@@ -14,7 +14,7 @@
 import type { StrandId } from "../data";
 import type { Machine } from "../state/machine";
 import type { CameraRig } from "../scene/camera";
-import type { FiltersHandle } from "./filters";
+import type { FiltersHandle, FilterSelection } from "./filters";
 import type { SearchHandle } from "./search";
 
 interface TourDeps {
@@ -207,24 +207,16 @@ export function createTour(deps: TourDeps): TourHandle {
 
   // Pre-tour filter selection (finding: the Four-rivers stop drives the strand
   // filters and the tour's reset() nuked a selection the reader set BEFORE the
-  // tour). The filters handle exposes no state snapshot (and filters.ts is out
-  // of scope here), so snapshot the rail's chip pressed-states and restore by
-  // re-toggling only the chips that differ — each chip's own click handler runs
-  // the recompute, so the scene ends exactly where the reader left it.
-  type FilterSnapshot = { chip: HTMLButtonElement; pressed: boolean }[];
-  let filterSnapshot: FilterSnapshot | null = null;
-  function snapshotFilters(): FilterSnapshot {
-    const chips = document.querySelectorAll<HTMLButtonElement>(".filters-rail .filter-chip");
-    return [...chips].map((chip) => ({
-      chip,
-      pressed: chip.getAttribute("aria-pressed") === "true",
-    }));
+  // tour). Snapshot/restore goes through filters.getSelection/setSelection —
+  // exact state, not click replay: chip clicks carry solo semantics, so
+  // replaying clicks cannot reconstruct an arbitrary multi-chip subset.
+  let filterSnapshot: FilterSelection | null = null;
+  function snapshotFilters(): FilterSelection {
+    return filters.getSelection();
   }
   function restoreFilters(): void {
     if (!filterSnapshot) return;
-    for (const { chip, pressed } of filterSnapshot) {
-      if ((chip.getAttribute("aria-pressed") === "true") !== pressed) chip.click();
-    }
+    filters.setSelection(filterSnapshot);
     filterSnapshot = null;
   }
 

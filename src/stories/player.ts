@@ -595,12 +595,11 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     stopImmediate();
     requestRender();
 
-    // Return to the pre-story pose (awaited), backdrop still up so the closing
-    // unravel plays uninterrupted, then leave the storying state.
-    await poseDriver.setPose(returnPose, { instant: reducedMotion() });
-    if (running) return; // a new story started during the return — don't tear down
-
-    backdrop.hidden = true;
+    // Leave the storying state and restore routing SYNCHRONOUSLY — the exit
+    // must never be hostage to an animation promise (a hidden tab or an
+    // interrupted morph would otherwise strand the app in story mode with the
+    // chrome gone). Only the backdrop, a pure visual, waits for the pose
+    // return below so the closing unravel still plays against it.
     document.body.classList.remove("storying");
     machine.setStorying(false);
     // Restore the pre-story routing, symmetric with entry. A standard the reader
@@ -619,6 +618,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     currentStory = null;
     const btn = document.getElementById("story-btn");
     if (btn instanceof HTMLElement) btn.focus();
+    requestRender();
+
+    // Return to the pre-story pose; the backdrop drops when the unravel lands.
+    await poseDriver.setPose(returnPose, { instant: reducedMotion() });
+    if (running) return; // a new story started during the return — leave its backdrop
+    backdrop.hidden = true;
     requestRender();
   }
 
