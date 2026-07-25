@@ -217,11 +217,12 @@ describe("formation pin: sceneBody (heldBody) resolver", () => {
     expect(sceneBody(plain, other)).toBe(plain.card.body);
   });
 
-  it("held copy stays a rare, deliberate exception: two heldBody, two heldTitle", () => {
+  it("held copy stays a rare, deliberate exception: one heldBody, two heldTitle", () => {
     // Only scenes whose authored copy names its own pose's literal geometry
-    // carry variants — the counting story's summit pair (Ascent) and the
-    // walk-back opener's "board" (Blueprint). Growing this census is a designer
-    // decision, not a side effect.
+    // carry variants, and every story now plays in the Constellation or the
+    // Ascent (both dark-baseline), so the census is the counting story's summit
+    // pair: one heldBody and two heldTitle. Growing it is a designer decision,
+    // not a side effect.
     let bodies = 0;
     let titles = 0;
     for (const story of STORIES)
@@ -229,7 +230,7 @@ describe("formation pin: sceneBody (heldBody) resolver", () => {
         if (scene.heldBody) bodies++;
         if (scene.heldTitle) titles++;
       }
-    expect(bodies).toBe(2);
+    expect(bodies).toBe(1);
     expect(titles).toBe(2);
   });
 

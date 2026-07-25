@@ -567,13 +567,11 @@ export const STORIES: Story[] = [
       {
         year: "The struggle",
         state: { lit: ["code:7.RP.A.2"], focus: "7.RP.A.2" },
-        camera: { fit: ["code:7.RP.A.2"], pose: 2 },
+        camera: { fit: ["code:7.RP.A.2"], pose: 1 },
         card: {
           title: "A student is failing proportional reasoning",
-          body: "One light on the board, the seventh-grade standard this student keeps failing. The grade label says to reteach seventh grade, slower and louder. The structure is about to disagree.",
+          body: "One light on the map, the seventh-grade standard this student keeps failing. The grade label says to reteach seventh grade, slower and louder. The structure is about to disagree.",
         },
-        heldBody:
-          "One light on the map, the seventh-grade standard this student keeps failing. The grade label says to reteach seventh grade, slower and louder. The structure is about to disagree.",
         holdMs: 10000,
         transition: "lapse",
       },
@@ -581,7 +579,7 @@ export const STORIES: Story[] = [
         year: "The map",
         state: { lit: ["ancestry:7.RP.A.2"], focus: "7.RP.A.2" },
         reveal: { dir: "rtl", ms: 3600 },
-        camera: { fit: ["ancestry:7.RP.A.2"], pose: 2 },
+        camera: { fit: ["ancestry:7.RP.A.2"], pose: 1 },
         card: {
           title: "Light what it stands on",
           body: "The chain runs from this standard back through 75 earlier ones, all the way to kindergarten. Somewhere along it is the last thing this student can do securely, and everything after that point leans on the gap.",
@@ -592,7 +590,7 @@ export const STORIES: Story[] = [
       {
         year: "Walk back",
         state: { lit: ["ancestry:7.RP.A.2"], focus: "7.RP.A.2" },
-        camera: { fit: ["code:6.RP.A.2", "code:5.NF.B.4", "code:3.OA.A.2"], pose: 2 },
+        camera: { fit: ["code:6.RP.A.2", "code:5.NF.B.4", "code:3.OA.A.2"], pose: 1 },
         card: {
           title: "Walk back until the ground is solid",
           body: "Check unit rates: shaky. Check fraction multiplication: shaky. Check division as sharing: solid. Stop there. Three checks reached it, and the ground floor is a third-grade skill, four school years below the label on the struggle.",
@@ -604,7 +602,7 @@ export const STORIES: Story[] = [
         year: "Build up",
         state: { lit: ["ancestry:7.RP.A.2"], focus: "7.RP.A.2" },
         reveal: { dir: "ltr", ms: 3200 },
-        camera: { fit: ["ancestry:7.RP.A.2"], pose: 2 },
+        camera: { fit: ["ancestry:7.RP.A.2"], pose: 1 },
         card: {
           title: "Build back up from there",
           body: "Now light the chain the other way. From solid ground, each missing step is targeted work on one named standard, not a year of going backward. Fraction knowledge in elementary school predicts high school algebra better than almost anything else researchers measured, so every step rebuilt here keeps paying.",
@@ -618,7 +616,7 @@ export const STORIES: Story[] = [
         year: "Your turn",
         state: { lit: ["all"] },
         reveal: { dir: "ltr", ms: 2800 },
-        camera: { fit: "all", pose: 2 },
+        camera: { fit: "all", pose: 1 },
         card: {
           title: "Do this with a real student",
           body: "Close this story, search for any standard your students struggle with, and follow Builds on backward until you find solid ground. The map is the diagnostic. You are the treatment.",
