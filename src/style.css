@@ -252,12 +252,15 @@ body.art-fidenza .headline-art {
   white-space: nowrap;
 }
 
-/* -- navigation hints, bottom-right ---------------------------------------- */
+/* -- navigation hints, bottom-right, stacked ABOVE the view toggle ----------
+   The filter rail's right end (the lens chips) reaches into the old baseline
+   slot at common widths and buried the hints (Mark's report); above the
+   switcher the right column stacks hints over toggle and nothing collides. */
 
 .nav-hints {
   position: fixed;
   right: clamp(16px, 2.5vw, 28px);
-  bottom: clamp(14px, 2.5vh, 24px);
+  bottom: calc(clamp(46px, 7vh, 62px) + 62px);
   margin: 0;
   z-index: 10;
   font-size: 12px;
@@ -274,7 +277,7 @@ body.art-fidenza .headline-art {
   opacity: 0.45;
 }
 
-/* -- view toggle (Constellation / Ascent), bottom-right above the hints ----- */
+/* -- view toggle (Constellation / Ascent), bottom-right below the hints ----- */
 
 .view-toggle {
   position: fixed;
