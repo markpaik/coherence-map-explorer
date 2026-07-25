@@ -31,12 +31,14 @@ import type { CameraRig } from "../scene/camera";
 import type { FiltersHandle } from "../ui/filters";
 import type { DamageEngine } from "./damage";
 import type { SelectorResolver } from "./selectors";
+import { expandFamilies, bfsHops, contagionTargets, type BeaconTarget } from "./contagion";
 import { storyHref } from "../state/routing";
 import { STORIES, scenePose, sceneBody, sceneTitle, type Story, type StoryScene, type Formation } from "./scripts";
 import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
 import { createFormationPick, type FormationPickHandle } from "./formationpick";
 
 const LAPSE_MS = 2000; // "lapse" transition length (damage crossfade)
+const RING_FLOOR = 0.1; // a node rings only once its damage clears this floor
 const DEFAULT_HOLD_MS = 10500; // auto-advance dwell when a scene omits holdMs
 const LIT_FADE_MS = 1200; // lit-set crossfade when a scene has no directional reveal
 const DEFAULT_REVEAL_MS = 3200; // directional reveal duration when unspecified
@@ -103,6 +105,27 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     edgeS[j] = indexById.get(e.s) ?? -1;
     edgeT[j] = indexById.get(e.t) ?? -1;
   });
+
+  // Prereq-successor adjacency (kind 0, s → t meaning s is a prerequisite of t):
+  // the leads-to direction the contagion wave spreads along. The BFS over this
+  // never touches predecessors, so ancestors of the missed set stay unranked —
+  // the same forward-only guarantee the damage engine gives.
+  const succ: number[][] = Array.from({ length: N }, () => []);
+  for (const e of graph.edges) {
+    if (e.k !== 0) continue;
+    const s = indexById.get(e.s);
+    const t = indexById.get(e.t);
+    if (s !== undefined && t !== undefined) succ[s].push(t);
+  }
+  // Sub-standard indices per node (for the family expansion of a missed parent):
+  // the coherence map draws a family as one card, and the prereq DAG holds no
+  // parent↔child edge, so a missed parent must pull its sub-standards in itself.
+  const childIdx: number[][] = graph.nodes.map((node) =>
+    (node.children ?? [])
+      .map((id) => indexById.get(id))
+      .filter((i): i is number => i !== undefined),
+  );
+  const childrenOf = (i: number): number[] => childIdx[i];
 
   // --- backdrop (blocks scene + chrome input, like the tour) --------------
   const backdrop = document.createElement("div");
@@ -253,10 +276,13 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     else machine.clearFocus({ silent: true });
   }
 
-  function damageTargetFor(scene: StoryScene): Float32Array {
-    const missed = scene.state?.missed;
-    if (!missed || missed.length === 0) return new Float32Array(N);
-    const missedIdx = resolveUnion(missed);
+  // The settled damage for a scene, given its FAMILY-EXPANDED missed index set
+  // (a missed parent pulls its sub-standards in; see goto). damage:true runs the
+  // engine (downstream exposure); damage:false shows the missed set as husks with
+  // no downstream. The engine's compute() semantics are untouched — expansion
+  // happens on the missed set before it arrives here.
+  function damageTargetFor(scene: StoryScene, missedIdx: Set<number>): Float32Array {
+    if (missedIdx.size === 0) return new Float32Array(N);
     if (scene.state?.damage) {
       return damage.compute(idsFromIndices(missedIdx));
     }
@@ -267,8 +293,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   }
 
   // Returns the crossfade duration so goto() can size the settle window.
-  function applyDamage(scene: StoryScene, ease: boolean): number {
-    const target = damageTargetFor(scene);
+  function applyDamage(scene: StoryScene, target: Float32Array, ease: boolean): number {
     damageTo = target;
     if (!ease) {
       damageCur.set(target);
@@ -311,6 +336,24 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     }
   }
 
+  // The contagion: ring every damaged node (intensity = its damage, so the
+  // directly-missed set keeps today's full ring and downstream nodes fade), and
+  // stage the rings in hop order from the missed set over the leads-to direction
+  // so the spread reads as a wave. A scene's `spotlight` codes ring at full
+  // strength on the first hop (the healed holes the reader still needs to find).
+  // `cut` (reduced motion, or a scene cut) shows the whole set instantly — the
+  // motion is cut, never the information.
+  function armBeacons(scene: StoryScene, missedIdx: Set<number>, damageArr: Float32Array, cut: boolean): void {
+    const hops = bfsHops(missedIdx, succ, N);
+    const byIndex = new Map<number, BeaconTarget>();
+    for (const t of contagionTargets(damageArr, hops, RING_FLOOR)) byIndex.set(t.index, t);
+    if (scene.spotlight) {
+      for (const i of resolveUnion(scene.spotlight)) byIndex.set(i, { index: i, intensity: 1, hop: 0 });
+    }
+    const targets = [...byIndex.values()];
+    beacons.setTargets(targets.length ? targets : null, { instant: cut });
+  }
+
   // --- "Lose a year" (the interactive story) ------------------------------
   // The player owns the behavior: a grade-chip row mounts into the card, and
   // choosing a grade recomputes structural damage live, crossfading node by
@@ -320,8 +363,11 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   const LOSE_YEAR_MS = 2200;
 
   function armYearDamage(g: string, ease: boolean): number {
-    const missedIdx = resolve(`grade:${g}`);
+    const missedIdx = expandFamilies(resolve(`grade:${g}`), childrenOf);
     const target = damage.compute(idsFromIndices(missedIdx));
+    // Ring intensities read the TRUE engine damage, captured before the
+    // near-binary display floor below rewrites the node-dimming values.
+    const ringDamage = new Float32Array(target);
     const gRank = gradeRank.get(g) ?? 0;
     let missedCount = 0;
     let ahead = 0;
@@ -345,9 +391,15 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     for (let i = 0; i < N; i++) {
       if (target[i] > 0.0001 && target[i] < 0.35) target[i] = 0.35;
     }
-    // Spotlight the hollowed year itself: ringed, so the hole the user chose
-    // stays findable while its shadow spreads to the right.
-    beacons.setTargets([...missedIdx]);
+    // Contagion rings: the hollowed year and everything downstream of it, faint
+    // with exposure, staged as a wave from the missed grade along the leads-to
+    // direction. `delta` keeps rings that survive a year switch from re-popping,
+    // so a newly chosen year sends a fresh wave only through the standards it
+    // newly touches (the "subsequent dimmings" Mark asked for). Reduced motion
+    // shows the full set instantly.
+    const yearHops = bfsHops(missedIdx, succ, N);
+    const yearRings = contagionTargets(ringDamage, yearHops, RING_FLOOR);
+    beacons.setTargets(yearRings.length ? yearRings : null, { instant: !ease, delta: true });
     const yearName = g === "K" ? "kindergarten" : `grade ${g}`;
     const sc = currentStory!.scenes[0];
     sc.card.title = `Losing ${yearName}`;
@@ -485,17 +537,21 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     if (token !== navToken || !running) return; // superseded or stopped mid-morph
 
     applyFocus(scene, cut); // emphasis (silent) — camera below overrides framing
+    // Family-expanded missed set: a missed parent standard drags its
+    // sub-standards in (one card in the original map), and this expanded set
+    // drives BOTH the damage engine and the contagion rings. Grade selectors
+    // already include their sub-standards, so it is a no-op for them.
+    const missedIdx = expandFamilies(resolveUnion(scene.state?.missed ?? []), childrenOf);
     // Interactive story: the chosen year drives damage, not the scene state.
     const damageMs =
       currentStory.interactive === "lose-a-year"
         ? armYearDamage(loseYearSel ?? "3", !cut)
-        : applyDamage(scene, !cut);
-    // Gap spotlight: every missed standard gets a beacon ring, plus any the
-    // scene explicitly spotlights (the fix scenes ring the healed holes). The
-    // interactive story arms its own beacons inside armYearDamage.
+        : applyDamage(scene, damageTargetFor(scene, missedIdx), !cut);
+    // Contagion: rings spread from the missed set out along the leads-to
+    // direction, faint with distance, staged as a wave. The interactive story
+    // arms its own beacons inside armYearDamage.
     if (currentStory.interactive !== "lose-a-year") {
-      const flagged = resolveUnion([...(scene.state?.missed ?? []), ...(scene.spotlight ?? [])]);
-      beacons.setTargets(flagged.size ? [...flagged] : null);
+      armBeacons(scene, missedIdx, damageTo, cut);
     }
     const revealMs = armLit(scene, cut);
     applyCamera(scene, !cut);
