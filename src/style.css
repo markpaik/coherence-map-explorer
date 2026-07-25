@@ -1138,7 +1138,9 @@ body.art-fidenza .ghost-btn:hover {
   display: block;
   width: 100%;
   min-height: 44px;
-  margin: 4px 0 20px;
+  /* Sits directly under the description as a primary action, above the
+     connection groups — always in view on a connection-heavy standard. */
+  margin: 14px 0 14px;
   padding: 11px 14px;
   font: inherit;
   font-weight: 600;
@@ -1153,9 +1155,10 @@ body.art-fidenza .ghost-btn:hover {
   filter: brightness(1.08);
 }
 
-/* Trace lineage: the full ancestor closure, one collapsible group per grade. */
+/* Trace lineage: the full ancestor closure, one collapsible group per grade.
+   Renders below the connection groups (the button/chip moved above them). */
 .panel-foundations {
-  margin: -12px 0 20px; /* sit close under the trace button when present */
+  margin: 10px 0 20px;
 }
 .panel-foundations:empty {
   margin: 0;
@@ -1197,7 +1200,7 @@ body.art-fidenza .ghost-btn:hover {
 .panel-direction {
   display: flex;
   gap: 4px;
-  margin: -12px 0 16px;
+  margin: -2px 0 16px; /* tucks under the trace button, above the connections */
   padding: 3px;
   background: rgb(255 255 255 / 0.03);
   border: 1px solid var(--line);

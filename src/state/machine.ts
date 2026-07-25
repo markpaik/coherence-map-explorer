@@ -32,7 +32,7 @@
 
 import * as THREE from "three";
 import type { GraphCore, GraphNode } from "../data";
-import { EMPHASIS, restRadius, type Emphasis } from "../scene/palette";
+import { EMPHASIS, STRAND_VIVID, restRadius, type Emphasis } from "../scene/palette";
 import { standardHref, focusHistoryMode } from "./routing";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
@@ -52,6 +52,13 @@ const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 // moderate value keeps the wide→close traverse legible (perceived arrival ≈ 2×).
 const DIVE_DELAY_MS = 750;
 const DIVE_SMOOTH_TIME = 0.85;
+
+// The wide closure box fit: grow the box by this world margin so lit orbs at the
+// frame edge are not clipped, and floor each axis to this minimum extent so a
+// small closure does not dive absurdly close.
+const BOX_NODE_MARGIN = 16;
+const MIN_BOX_EXTENT = 140;
+const JOURNEY_PAD_FRAC = 0.1; // ~10% breathing room per axis on the closure fit
 
 /** The camera framing after a focus: the one-hop neighbourhood or the closure. */
 export type FocusFraming = "local" | "journey";
@@ -159,6 +166,19 @@ export interface MachineDeps {
   getDocText?: (nodeId: string) => string | undefined;
   /** Whether the standard carries a worked example (hover advertises it). */
   hasExample?: (nodeId: string) => boolean;
+  /**
+   * Mark the focused standard with a strand-tinted ring (the beacon-ring
+   * grammar) so it stays discernible among the full lit closure. null clears.
+   * Never called for a silent (story) focus — in stories rings mean damage.
+   */
+  setFocusRing?: (nodeIndex: number | null, color?: number) => void;
+  /**
+   * Hand the filters the currently-lit node set so an active focus temporarily
+   * un-ghosts its lit closure through the filter (connected off-filter standards
+   * reappear). null clears the override; the filter's own view returns. Never
+   * called for a silent (story) focus (stories own their own masks).
+   */
+  setFilterOverride?: (nodeIndices: number[] | null) => void;
 }
 
 export interface Machine {
@@ -470,18 +490,28 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   //   moderate → the legible wide↔close zoom, restores base when it settles
   //   normal   → base damping (the lateral hop between one-hop frames)
   //   instant  → a hard cut
-  function flyTo(sphere: THREE.Sphere, offset: number, mode: "moderate" | "normal" | "instant"): void {
+  type FlyMode = "moderate" | "normal" | "instant";
+  function fly(mode: FlyMode, run: (transition: boolean) => Promise<void>): void {
     clearDiveTimer();
     const token = ++cameraToken;
     if (mode === "instant") {
       rig.controls.smoothTime = baseSmoothTime;
-      void rig.focusOn(sphere, false, offset);
+      void run(false);
       return;
     }
     rig.controls.smoothTime = mode === "moderate" ? DIVE_SMOOTH_TIME : baseSmoothTime;
-    void rig.focusOn(sphere, true, offset).finally(() => {
+    void run(true).finally(() => {
       if (token === cameraToken) rig.controls.smoothTime = baseSmoothTime;
     });
+  }
+  // The compact one-hop fit (a sphere reads fine for a tight neighbourhood).
+  function flyTo(sphere: THREE.Sphere, offset: number, mode: FlyMode): void {
+    fly(mode, (t) => rig.focusOn(sphere, t, offset));
+  }
+  // The wide closure fit: a Box3 of the actual extents (a bounding sphere would
+  // push the camera far back for the elongated grade-band closures).
+  function flyToBox(box: THREE.Box3, offset: number, mode: FlyMode): void {
+    fly(mode, (t) => rig.focusOnBox(box, t, offset, JOURNEY_PAD_FRAC));
   }
   // Hold the current (wide) view, then dive in to the one-hop frame — the
   // fresh-focus signature move.
@@ -710,6 +740,29 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   // mapped connections still lands in a legible local context.
   const sphereOf = (indices: number[]): THREE.Sphere => nodeBoundingSphere(nodes, indices);
 
+  // Box3 of a set of node indices, from live positions (correct after a pose
+  // morph). Grown by the orb margin so lit nodes are not clipped at the frame
+  // edge, then floored to a minimum per-axis extent. The wide journey fit uses
+  // this (fitToBox) instead of a bounding sphere so an elongated grade-band
+  // closure fills the frame rather than being pushed far back by its diagonal.
+  const boxOf = (indices: number[]): THREE.Box3 => {
+    const box = new THREE.Box3();
+    const v = new THREE.Vector3();
+    for (const i of indices) box.expandByPoint(nodes.getPosition(i, v));
+    box.expandByScalar(BOX_NODE_MARGIN);
+    const size = box.getSize(v);
+    if (size.x < MIN_BOX_EXTENT || size.y < MIN_BOX_EXTENT) {
+      const c = box.getCenter(new THREE.Vector3());
+      const hx = Math.max(size.x, MIN_BOX_EXTENT) / 2;
+      const hy = Math.max(size.y, MIN_BOX_EXTENT) / 2;
+      box.min.x = c.x - hx;
+      box.max.x = c.x + hx;
+      box.min.y = c.y - hy;
+      box.max.y = c.y + hy;
+    }
+    return box;
+  };
+
   // Compose the accumulated focus overrides (`curNodeOv`/`curEdgeOv`, which grow
   // as cascade waves fire) with the LIVE hover overlay. EVERY emphasis write made
   // while a focus is active — the resting render here AND each cascade wave — must
@@ -828,6 +881,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     }
   }
 
+  // Hand the filters the currently-lit node set so an active focus un-ghosts its
+  // lit closure through a grade/strand filter (connected off-filter standards
+  // reappear). Never during a silent story focus — stories own their own masks.
+  function pushFilterOverride(l: Lighting): void {
+    if (silentFocus) return;
+    deps.setFilterOverride?.([...l.nodeFinal.keys()]);
+  }
+
   // --- focus ---------------------------------------------------------------
   function focus(nodeIndex: number, opts?: FocusOpts): void {
     if (nodeIndex < 0 || nodeIndex >= nodeCount) return;
@@ -854,7 +915,13 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
     // Lighting is ALWAYS the full both-direction closure with the grade cascade;
     // the camera choreography below is what changes with the interaction.
-    revealLighting(journeyLighting(model, "both"), cut);
+    const lit = journeyLighting(model, "both");
+    revealLighting(lit, cut);
+    pushFilterOverride(lit);
+
+    // Mark the clicked standard with a strand-tinted ring so it stays discernible
+    // among the lit closure. Never during a story (rings mean damage there).
+    if (!silentFocus && !storying) deps.setFocusRing?.(nodeIndex, STRAND_VIVID[node.strand]);
 
     // The one-hop frame: focus + its DIRECT neighbours (+ family), related capped.
     const directed = [nodeIndex, ...model.familyLit, ...model.buildsOn, ...model.leadsTo];
@@ -940,10 +1007,12 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     journeyDirection = dir;
     // Instant re-light: the closure is already on screen, so a subset just
     // filters it (a downward ease would flash back through the FOCUS band).
-    revealLighting(journeyLighting(focusModel, dir), true);
+    const lit = journeyLighting(focusModel, dir);
+    revealLighting(lit, true);
+    pushFilterOverride(lit); // the filter override tracks the narrowed lit set
     if (!silentFocus)
-      flyTo(
-        sphereOf(journeyFitSet(focusModel, dir)),
+      flyToBox(
+        boxOf(journeyFitSet(focusModel, dir)),
         focusPanelOffsetPx(),
         reducedMotion ? "instant" : "moderate",
       );
@@ -975,7 +1044,9 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     if (focusIndex === null || focusModel === null) return;
     stage = "local";
     journeyDirection = "both";
-    revealLighting(journeyLighting(focusModel, "both"), true);
+    const lit = journeyLighting(focusModel, "both");
+    revealLighting(lit, true);
+    pushFilterOverride(lit); // full closure lit again → override the full set
     if (!silentFocus)
       flyTo(
         sphereAround(focusIndex, lastNeighborhood, lastRelated),
@@ -1001,12 +1072,13 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     if (focusIndex === null || focusModel === null) return;
     // Refit whichever frame is current — only the positions moved with the pose.
     // Reuse the stored sets, no cascade re-run: the one-hop sphere in local, the
-    // active direction's closure sphere in journey.
-    const sphere =
-      stage === "journey"
-        ? sphereOf(journeyFitSet(focusModel, journeyDirection))
-        : sphereAround(focusIndex, lastNeighborhood, lastRelated);
-    flyTo(sphere, focusPanelOffsetPx(), reducedMotion ? "instant" : "normal");
+    // active direction's closure BOX in journey (the tight crop).
+    const mode: FlyMode = reducedMotion ? "instant" : "normal";
+    if (stage === "journey") {
+      flyToBox(boxOf(journeyFitSet(focusModel, journeyDirection)), focusPanelOffsetPx(), mode);
+    } else {
+      flyTo(sphereAround(focusIndex, lastNeighborhood, lastRelated), focusPanelOffsetPx(), mode);
+    }
     requestRender();
   }
 
@@ -1028,6 +1100,8 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     lastRelated = [];
     tooltip.hide();
     canvas.style.cursor = "";
+    deps.setFocusRing?.(null); // retire the focus marker
+    deps.setFilterOverride?.(null); // the filter's own view returns exactly
     applyEmphasis({ baseNode: EMPHASIS.REST, baseEdge: EMPHASIS.REST });
     panel.hide();
     // The panel is gone — slide the framed content back to center.
@@ -1134,6 +1208,13 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
     setStorying(on) {
       storying = on;
+      // A story owns the ring/filter grammars (rings = damage there). Retire any
+      // lingering exploration focus marker + filter override so they never bleed
+      // into playback (a story may start over an existing focus).
+      if (on) {
+        deps.setFocusRing?.(null);
+        deps.setFilterOverride?.(null);
+      }
     },
 
     setReducedMotion(on) {

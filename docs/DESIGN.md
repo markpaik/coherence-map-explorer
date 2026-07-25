@@ -168,15 +168,16 @@ noise, disabled with reduced-motion.
   collapses to a single "Filters" button < 720px.
 - Detail panel: right side, 400px (100% bottom sheet ≤ 720px, snap points 40%/
   90%), glass surface. Order: code (Space Grotesk 600, strand-colored dot) +
-  grade·domain breadcrumb → badges row → standard text → Connections
-  (three groups: "Builds on" / "Leads to" / "Related", each entry a real
-  <button> with code + 6-word title clamp) → "Trace the full journey" primary
-  action (zooms out to the closure) → direction chip (wide frame only) →
-  Foundations + Onward closures (wide frame only) → Tasks (external links,
-  attribution) → Progression note
-  (collapsed <details>) → v2 slot (hidden div#ai-slot). Close = Esc / ×.
-  Inherit case (an edgeless sub-standard): the Connections open with a note
-  naming the family standard plus a "Family" group (parent first, then
+  grade·domain breadcrumb → badges row → standard text → "Trace the full
+  journey" primary action (zooms out to the closure) → direction chip (wide
+  frame only) → Connections (three groups: "Builds on" / "Leads to" / "Related",
+  each entry a real <button> with code + 6-word title clamp) → Foundations +
+  Onward closures (wide frame only) → Tasks (external links, attribution) →
+  Progression note (collapsed <details>) → v2 slot (hidden div#ai-slot). Close =
+  Esc / ×. The button + chip sit ABOVE the connection groups so they stay in
+  view on a connection-heavy standard (they used to sit below and dropped under
+  the fold). Inherit case (an edgeless sub-standard): the Connections open with a
+  note naming the family standard plus a "Family" group (parent first, then
   siblings), and the groups below are the family's inherited connections.
 - Hover tooltip: small glass chip near cursor: code + first 8 words of the
   standard, 120ms delay in, no delay out. An edgeless sub-standard reads
@@ -204,9 +205,25 @@ full both-direction closure; the two "framings" are a CAMERA concern.
   predicate (prior focus presence + current framing).
 - **The wide frame** is a pure camera zoom-out over the already-lit closure,
   reached by re-clicking the focused node or the panel's "Trace the full journey"
-  button. Re-clicking the focused node toggles the camera between the one-hop and
-  wide frames (no cascade replay, no hash change). Escape, the panel's ×, or a
-  background click clear the focus entirely.
+  button. It fits the closure's actual Box3 extents (`rig.focusOnBox`, camera-
+  controls `fitToBox`, ~10% per-axis padding) rather than a bounding sphere, so an
+  elongated grade-band closure fills the frame tightly instead of being pushed far
+  back by its diagonal. The compact one-hop dive keeps the sphere fit. Re-clicking
+  the focused node toggles the camera between the one-hop and wide frames (no
+  cascade replay, no hash change). Escape, the panel's ×, or a background click
+  clear the focus entirely.
+- **Focus ring.** While an exploration focus is active (both frames), the focused
+  standard wears a thin breathing camera-facing ring in its strand's high-
+  luminance tint (the beacon-ring grammar, own single-instance channel) so the
+  clicked orb stays discernible among the lit closure. It sits just outside the
+  FOCUS-scaled orb and NEVER appears during story playback or the story player's
+  silent focus (there, rings mean damage — the grammars must not collide).
+- **Focus overrides the filter.** With a grade/strand filter narrowing the
+  resting view, an active focus temporarily un-ghosts exactly its lit set (and the
+  edges among it) so chain ribbons never flow to invisible standards. The direction
+  chip narrows the override with the lighting (Foundations / Onward). Filters stay
+  the single writer of visibility (`filters.setFocusOverride`); clearing the focus
+  returns the filter's own view exactly. Off during the story's silent focus.
 - **Direction chip (wide frame).** A three-way segmented radiogroup in the panel:
   Foundations (ancestors), Both (default), Onward (descendants). Both frames the
   whole closure; Foundations / Onward frame that half AND filter the lighting to
@@ -223,6 +240,13 @@ full both-direction closure; the two "framings" are a CAMERA concern.
 - **Not hash-encoded.** The URL carries only the focused standard (`#/s/<CODE>`).
   The camera framing and chip direction are session state, never written to the
   hash, so a shared link always opens at the fresh-click behaviour.
+- **Bottom safe-area inset.** Every fit (home, focus, journey, pose switch) lifts
+  the framed content UP by the fixed bottom chrome height (filter rail +
+  formation switcher), measured from the DOM at resize so it tracks the ≤720px
+  collapse to a pill. The scene floor and its grade / course etch markers compose
+  ABOVE the buttons instead of behind them (`rig.setBottomInsetPx`, applied
+  through the focal-offset lift that already handles the story card and panel
+  shift).
 
 ## Motion
 

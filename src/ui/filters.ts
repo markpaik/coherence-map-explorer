@@ -21,6 +21,34 @@ import { toggleChip } from "./chipgroup";
 
 const GRADES = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 
+/**
+ * Compose node + edge visibility from the base filter predicate and an optional
+ * focus override. A node is visible if the filter shows it OR the override
+ * (a focus's lit closure) includes it; an edge is visible iff BOTH endpoints are
+ * — so revealing the override nodes naturally reveals the lit-closure edges,
+ * while an edge to a still-hidden neighbour stays ghosted. Pure (fills the
+ * provided arrays) so the composition rule is unit-testable.
+ */
+export function composeVisibility(
+  nodeCount: number,
+  shown: (i: number) => boolean,
+  override: Set<number> | null,
+  edgeCount: number,
+  edgeS: ArrayLike<number>,
+  edgeT: ArrayLike<number>,
+  visN: Float32Array | number[],
+  visE: Float32Array | number[],
+): void {
+  for (let i = 0; i < nodeCount; i++) {
+    visN[i] = shown(i) || override?.has(i) ? 1 : 0;
+  }
+  for (let i = 0; i < edgeCount; i++) {
+    const s = edgeS[i];
+    const t = edgeT[i];
+    visE[i] = s >= 0 && t >= 0 && visN[s] === 1 && visN[t] === 1 ? 1 : 0;
+  }
+}
+
 // How a grade reads aloud in the filter announcement ("Showing grade 4 only").
 function gradeSpoken(g: string): string {
   if (g === "HS") return "high school";
@@ -67,6 +95,14 @@ export interface FiltersHandle {
   /** Recompute node/edge visibility from the current filter state — used to
    * reclaim the visibility buffers after a story's spotlight override releases. */
   recompute(): void;
+  /**
+   * An active focus temporarily overrides the filter for exactly its lit closure:
+   * the given node indices (and the edges among them) become visible even when a
+   * grade/strand filter ghosts them, so chain ribbons never flow to invisible
+   * standards. null clears the override and the filter's own view returns exactly.
+   * Filters stay the SINGLE writer of visibleAttr — the machine only hands the set.
+   */
+  setFocusOverride(nodeIndices: number[] | null): void;
   /** Repaint the strand-legend swatches to the active art skin's colorway (the
    * legend mirrors the scene: Galaxy palette / Ringers pegs / Fidenza nodes). */
   setArtStyle(style: ArtStyle): void;
@@ -119,15 +155,22 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     );
   }
 
+  // An active focus's lit closure, un-ghosted through the filter (null = none).
+  // Unions into the computed node mask; the both-endpoints edge rule below then
+  // naturally reveals the edges among the lit set.
+  let focusOverride: Set<number> | null = null;
+
   function recompute(): void {
-    for (let i = 0; i < graph.nodes.length; i++) {
-      visN[i] = nodeShown(graph.nodes[i]) ? 1 : 0;
-    }
-    for (let i = 0; i < edges.count; i++) {
-      const s = edgeS[i];
-      const t = edgeT[i];
-      visE[i] = s >= 0 && t >= 0 && visN[s] === 1 && visN[t] === 1 ? 1 : 0;
-    }
+    composeVisibility(
+      graph.nodes.length,
+      (i) => nodeShown(graph.nodes[i]),
+      focusOverride,
+      edges.count,
+      edgeS,
+      edgeT,
+      visN,
+      visE,
+    );
     nodes.visibleAttr.needsUpdate = true;
     edges.visibleAttr.needsUpdate = true;
     requestRender();
@@ -406,6 +449,10 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       recompute();
     },
     recompute() {
+      recompute();
+    },
+    setFocusOverride(nodeIndices) {
+      focusOverride = nodeIndices && nodeIndices.length ? new Set(nodeIndices) : null;
       recompute();
     },
     setArtStyle(style) {

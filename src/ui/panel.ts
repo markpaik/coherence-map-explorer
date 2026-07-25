@@ -284,13 +284,18 @@ export function createPanel(
   aiSlot.id = "ai-slot";
   aiSlot.hidden = true;
 
+  // The journey button + its direction chip sit ABOVE the connection groups so
+  // they stay visible without scrolling on a connection-heavy standard (Mark's
+  // 6.SP.B.5.a / 7.RP.A.2): a primary action right under the description, before
+  // the Family / Builds on / Leads to / Related list. The Foundations + Onward
+  // closures still render below the connections.
   body.append(
     header,
     badges,
     desc,
-    connections,
     traceBtn,
     chip,
+    connections,
     foundations,
     onward,
     tasks,

@@ -9,11 +9,12 @@
 //   3. Filters rail — the "Filters" pill (≤720px) then the grade / strand /
 //      toggle chips (aria-pressed buttons), left→right.
 //   4. Detail panel (when open) — focus is MOVED to the code heading on open;
-//      from there Tab runs Close → connection buttons → "Trace the full journey"
-//      → the direction chip (a radiogroup; arrows move + re-aim it) → the
-//      Foundations / Onward closures → task links → the collapsible details. Esc
-//      closes it and returns focus to the trigger (or the search input). The
-//      panel is a labeled region, not a modal.
+//      from there Tab runs Close → "Trace the full journey" → the direction chip
+//      (a radiogroup; arrows move + re-aim it) → connection buttons → the
+//      Foundations / Onward closures → task links → the collapsible details. The
+//      button + chip sit above the connections so they stay in view. Esc closes
+//      it and returns focus to the trigger (or the search input). The panel is a
+//      labeled region, not a modal.
 //   5. Tour card (when running) — a focus-TRAPPED dialog: Back / Skip / Next
 //      cycle; ArrowLeft/Right navigate, Esc skips. The backdrop blocks the
 //      scene and the rest of the chrome while it runs.
@@ -194,6 +195,7 @@ function start(graph: GraphCore): void {
     edges.mesh,
     filaments.object,
     beacons.object,
+    beacons.focusObject,
     stations.group,
     drafts.group,
     stars.points,
@@ -280,6 +282,11 @@ function start(graph: GraphCore): void {
     requestRender,
     getDocText: (nodeId) => hoverDocs?.get(nodeId)?.text,
     hasExample: (nodeId) => hoverDocs?.get(nodeId)?.ex ?? false,
+    // Strand-tinted marker ring around the focused standard (beacons channel).
+    setFocusRing: (i, color) => beacons.setFocusRing(i, color),
+    // An active focus un-ghosts its lit closure through a grade/strand filter
+    // (filters declared below; the closure is only called after boot).
+    setFilterOverride: (idx) => filters.setFocusOverride(idx),
   });
 
   // Click on empty canvas exits an active focus (same path as X / Esc). The
@@ -679,6 +686,25 @@ function start(graph: GraphCore): void {
     minDpr: MIN_PIXEL_RATIO,
   });
 
+  // The fixed bottom chrome (filter rail + formation switcher) measured from the
+  // DOM, so the framing reserves it instead of composing the scene floor + etch
+  // markers behind the buttons. Measuring (not hard-coding) tracks the ≤720px
+  // collapse where the rail becomes a pill. A display:none element yields a 0
+  // rect and is skipped, so a hidden chrome reserves nothing.
+  function measureBottomInset(): number {
+    let top = window.innerHeight;
+    for (const sel of [".filters-rail", ".view-toggle"]) {
+      const el = document.querySelector(sel);
+      if (!(el instanceof HTMLElement)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.height <= 0 || r.width <= 0) continue; // hidden
+      if (r.bottom < window.innerHeight * 0.5) continue; // not bottom chrome
+      top = Math.min(top, r.top);
+    }
+    const band = window.innerHeight - top;
+    return band > 0 ? Math.min(band, window.innerHeight * 0.3) : 0; // clamp defensively
+  }
+
   // -- sizing ------------------------------------------------------------
   // The actual resize is expensive (reallocates every postprocessing buffer),
   // so coalesce a burst of resize events into one apply on the next frame.
@@ -689,6 +715,7 @@ function start(graph: GraphCore): void {
     renderer.setPixelRatio(dpr);
     bloom.setSize(w, h); // composer sizes the renderer + all buffers
     rig.setAspect(w / h);
+    rig.setBottomInsetPx(measureBottomInset()); // reserve the bottom chrome band
     edges.setViewport(w * dpr, h * dpr, dpr);
     stars.setPixelRatio(dpr);
     requestRender();
@@ -726,6 +753,10 @@ function start(graph: GraphCore): void {
   }
   watchPixelRatio();
   applyResize();
+  // The rig framed home at construction before the bottom inset was measured;
+  // re-frame once (instant, pre-veil) so the initial constellation composes
+  // above the chrome. A deep-link focus/story below overrides this if present.
+  rig.frameHome(false);
 
   // Etches sync asynchronously (font parse in a worker); repaint when ready.
   void etches.ready.then(requestRender);

@@ -33,6 +33,9 @@ const MAX = 480; // one ring per standard: the whole graph, in one instanced dra
 const HOP_SEC = 0.2; // wave spacing: ~200 ms per hop so the spread reads as spread
 const FADE_SEC = 0.22; // how long each ring eases in once its hop arrives
 const APPEARED = -1e6; // an appear time far in the past → fully shown immediately
+// The focus ring (exploration marker) sits this many radii out, clear OUTSIDE
+// the FOCUS-emphasized orb (which scales to 1.5×): inner band edge ≈ 2×radius.
+const FOCUS_RING_SCALE = 3.2;
 
 const VERT = /* glsl */ `
   attribute vec3 aCenter;
@@ -90,6 +93,9 @@ const FRAG = /* glsl */ `
 
 export interface BeaconsHandle {
   object: THREE.Mesh;
+  /** The single focus-marker ring (a separate channel, own strand tint); add to
+   *  the scene alongside `object`. */
+  focusObject: THREE.Mesh;
   /**
    * Ring these targets. Each carries a node index, a 0..1 intensity (1 = today's
    * full ring, fainter downstream) and a hop (0 = missed, 1 = its successors …)
@@ -99,7 +105,14 @@ export interface BeaconsHandle {
    * newly-added rings wave in (the interactive "subsequent dimmings" path).
    */
   setTargets(targets: BeaconTarget[] | null, opts?: { instant?: boolean; delta?: boolean }): void;
-  /** True while any beacon is armed (main gates the per-frame update on it). */
+  /**
+   * Mark the EXPLORATION-focused standard with a single strand-tinted ring so it
+   * stays discernible among the full lit closure. `color` is a strand hex.
+   * null clears it. Distinct channel from the damage beacons above — the machine
+   * drives it, and never during a story (there, rings mean damage).
+   */
+  setFocusRing(nodeIndex: number | null, color?: number): void;
+  /** True while any beacon OR the focus ring is armed (main gates update on it). */
   readonly active: boolean;
   /** Re-read the flagged nodes' live positions (pose morphs); cheap. */
   update(): void;
@@ -163,12 +176,63 @@ export function createBeacons(
   mesh.name = "beacons";
   mesh.visible = false;
 
+  // --- focus marker ring (a separate single-instance channel) --------------
+  // Own material so it carries the focused standard's STRAND tint (a marker),
+  // never the damage gold (a wound). Same breathing ring shader + reduced-motion
+  // freeze; own uColor uniform; renders above the damage beacons.
+  const fGeom = new THREE.InstancedBufferGeometry();
+  fGeom.index = base.index;
+  fGeom.setAttribute("position", base.getAttribute("position"));
+  const fCenter = new Float32Array(3);
+  const fCenterAttr = new THREE.InstancedBufferAttribute(fCenter, 3);
+  fCenterAttr.setUsage(THREE.DynamicDrawUsage);
+  const fScaleAttr = new THREE.InstancedBufferAttribute(new Float32Array([1]), 1);
+  const fPhaseAttr = new THREE.InstancedBufferAttribute(new Float32Array([0]), 1);
+  fGeom.setAttribute("aCenter", fCenterAttr);
+  fGeom.setAttribute("aScale", fScaleAttr);
+  fGeom.setAttribute("aPhase", fPhaseAttr);
+  fGeom.setAttribute("aIntensity", new THREE.InstancedBufferAttribute(new Float32Array([1]), 1));
+  fGeom.setAttribute("aAppear", new THREE.InstancedBufferAttribute(new Float32Array([APPEARED]), 1));
+  fGeom.instanceCount = 0;
+  const fUniforms = {
+    uTime: { value: 0 },
+    uColor: { value: new THREE.Color(0xffffff) },
+    uMul: { value: 1.6 },
+    uAlpha: { value: 0.95 },
+    uFadeSec: { value: FADE_SEC },
+  };
+  const fMaterial = new THREE.ShaderMaterial({
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    uniforms: fUniforms,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  const fMesh = new THREE.Mesh(fGeom, fMaterial);
+  fMesh.frustumCulled = false;
+  fMesh.renderOrder = 4; // above the damage beacons
+  fMesh.name = "focus-ring";
+  fMesh.visible = false;
+  let focusIndex: number | null = null;
+
   let targetIdx: number[] = [];
   let time = 0;
   // Per-node appear time from the LAST setTargets, so a `delta` update can keep a
   // still-showing ring from re-popping while newly-added rings stage from scratch.
   let appearByIndex = new Map<number, number>();
   const v = new THREE.Vector3();
+
+  function updateFocus(): void {
+    if (focusIndex === null) return;
+    nodes.getPosition(focusIndex, v);
+    fCenter[0] = v.x;
+    fCenter[1] = v.y;
+    fCenter[2] = v.z;
+    fCenterAttr.needsUpdate = true;
+  }
 
   function update(): void {
     for (let k = 0; k < targetIdx.length; k++) {
@@ -178,12 +242,31 @@ export function createBeacons(
       centers[k * 3 + 2] = v.z;
     }
     centerAttr.needsUpdate = true;
+    updateFocus();
   }
 
   return {
     object: mesh,
+    focusObject: fMesh,
     get active() {
-      return targetIdx.length > 0;
+      return targetIdx.length > 0 || focusIndex !== null;
+    },
+    setFocusRing(nodeIndex, color) {
+      if (nodeIndex === null) {
+        focusIndex = null;
+        fGeom.instanceCount = 0;
+        fMesh.visible = false;
+        return;
+      }
+      focusIndex = nodeIndex;
+      fScaleAttr.array[0] = radii[nodeIndex] * FOCUS_RING_SCALE;
+      fScaleAttr.needsUpdate = true;
+      fPhaseAttr.array[0] = (nodeIndex * 2.399963) % (Math.PI * 2);
+      fPhaseAttr.needsUpdate = true;
+      if (color !== undefined) fUniforms.uColor.value.setHex(color);
+      fGeom.instanceCount = 1;
+      fMesh.visible = true;
+      updateFocus();
     },
     setTargets(targets, opts) {
       const instant = opts?.instant === true;
@@ -222,6 +305,7 @@ export function createBeacons(
     setTime(t) {
       time = t;
       uniforms.uTime.value = t;
+      fUniforms.uTime.value = t; // the focus ring breathes on the same clock
     },
     setArtStyle(style) {
       // Galaxy: HDR-grazing gold, additive. Art styles: solid ink rings, normal
@@ -237,11 +321,18 @@ export function createBeacons(
         uniforms.uAlpha.value = 0.85;
         material.blending = THREE.NormalBlending;
       }
+      // The focus ring KEEPS its strand tint (set per focus); only its blend/mul
+      // follow the skin — additive HDR graze in the Galaxy, flat ink on paper.
+      fUniforms.uMul.value = style === 0 ? 1.6 : 1.0;
+      fUniforms.uAlpha.value = style === 0 ? 0.95 : 0.9;
+      fMaterial.blending = style === 0 ? THREE.AdditiveBlending : THREE.NormalBlending;
     },
     dispose() {
       geometry.dispose();
       base.dispose();
       material.dispose();
+      fGeom.dispose();
+      fMaterial.dispose();
     },
   };
 }

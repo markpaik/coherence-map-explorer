@@ -30,6 +30,19 @@ export interface CameraRig {
    * panel doesn't sit on top of the focus — 0 clears any prior offset.
    */
   focusOn(sphere: THREE.Sphere, transition?: boolean, panelOffsetPx?: number): Promise<void>;
+  /**
+   * Tight flight to frame a Box3's actual extents (camera-controls fitToBox),
+   * padded by `padFrac` of each axis so an ELONGATED closure (a wide flat band
+   * across grades) fills the frame instead of being pushed far back by a
+   * bounding sphere's half-diagonal. transition=false cuts. panelOffsetPx shifts
+   * as in focusOn.
+   */
+  focusOnBox(
+    box: THREE.Box3,
+    transition?: boolean,
+    panelOffsetPx?: number,
+    padFrac?: number,
+  ): Promise<void>;
   /** Return to the heroic landing framing and clear any panel focal offset. */
   frameHome(transition?: boolean): void;
   /**
@@ -58,6 +71,14 @@ export interface CameraRig {
    * viewport so the card doesn't cover the model; 0 restores.
    */
   setFrameLiftPx(px: number): void;
+  /**
+   * Bottom safe-area inset in CSS px: the fixed bottom chrome (filter rail +
+   * formation switcher). Every fit lifts the framed content UP by this much so
+   * the scene floor (grade / course etch markers) composes ABOVE the buttons
+   * instead of behind them. Measured from the DOM at resize (it differs when the
+   * filters collapse to a pill ≤720px). Composes with setFrameLiftPx.
+   */
+  setBottomInsetPx(px: number): void;
   /**
    * Clear the idle-resume timer so drift may run on the very next unsuspended
    * frame (skipping the 20s post-interaction grace). Used when a story scene
@@ -101,7 +122,6 @@ export function createCameraRig(
   // (fitToSphere over-shoots badly on this wide flat layout: the sphere is
   // dominated by the x-extent, leaving the cloud small in frame).
   function frameHome(transition = false): void {
-    applyPanelOffset(0, transition);
     void controls.rotateTo(0.42, Math.PI / 2 - 0.22, transition);
     void controls.fitToBox(homeBox, transition, {
       paddingTop: 30,
@@ -109,11 +129,12 @@ export function createCameraRig(
       paddingLeft: 40,
       paddingRight: 40,
     });
+    // AFTER the fit so the bottom-inset lift is computed at the new distance.
+    applyPanelOffset(0, transition);
   }
   // Head-on framing for the flat Blueprint pose: reset azimuth/polar to look
   // straight down the +z axis at the plane, then fit its box from that angle.
   function frameHomeFrontOn(transition = false): void {
-    applyPanelOffset(0, transition);
     void controls.rotateTo(0, Math.PI / 2, transition);
     void controls.fitToBox(homeBox, transition, {
       paddingTop: 30,
@@ -121,18 +142,25 @@ export function createCameraRig(
       paddingLeft: 40,
       paddingRight: 40,
     });
+    applyPanelOffset(0, transition);
   }
 
   // Convert a screen-space nudge (CSS px) at the current fitted distance into
   // world units, then push the framed target LEFT of center via focalOffset.
   const _pos = new THREE.Vector3();
   const _tgt = new THREE.Vector3();
+  const _boxSize = new THREE.Vector3();
   // A persistent vertical bias (CSS px): during stories on phones the card
   // covers the lower ~40% of the screen, so the framed content rides UP by
   // this much. 0 everywhere else. Applied by every fit (focusOn + frameHome).
   let frameLiftPx = 0;
+  // Bottom safe-area inset (the fixed bottom chrome height, CSS px); every fit
+  // lifts the framed content UP by this much so the scene floor + etch markers
+  // clear the filter rail + formation switcher. Composes with frameLiftPx.
+  let bottomInsetPx = 0;
   function applyPanelOffset(panelOffsetPx: number, transition: boolean): void {
-    if (!panelOffsetPx && !frameLiftPx) {
+    const lift = frameLiftPx + bottomInsetPx;
+    if (!panelOffsetPx && !lift) {
       void controls.setFocalOffset(0, 0, 0, transition);
       return;
     }
@@ -142,13 +170,9 @@ export function createCameraRig(
     const worldPerPx =
       (2 * distance * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(window.innerHeight, 1);
     // +x focalOffset pans the camera right → the target rides to the LEFT.
-    // -y pans the camera down → the target rides UP (clear of the story card).
-    void controls.setFocalOffset(
-      panelOffsetPx * worldPerPx,
-      -frameLiftPx * worldPerPx,
-      0,
-      transition,
-    );
+    // -y pans the camera down → the target rides UP (clear of the story card
+    // and the bottom chrome band).
+    void controls.setFocalOffset(panelOffsetPx * worldPerPx, -lift * worldPerPx, 0, transition);
   }
 
   frameHome(false);
@@ -195,6 +219,23 @@ export function createCameraRig(
       applyPanelOffset(panelOffsetPx, transition);
       await done;
     },
+    async focusOnBox(box, transition = true, panelOffsetPx = 0, padFrac = 0.1) {
+      // Per-axis padding (world units) proportional to each side's own extent,
+      // so neither axis of an elongated closure is over-padded — the crop stays
+      // tight both ways. fitToBox rounds the view to the nearest axis; at the
+      // usual near-front orientation world x → horizontal, world y → vertical.
+      box.getSize(_boxSize);
+      const padX = _boxSize.x * padFrac;
+      const padY = _boxSize.y * padFrac;
+      const done = controls.fitToBox(box, transition, {
+        paddingLeft: padX,
+        paddingRight: padX,
+        paddingTop: padY,
+        paddingBottom: padY,
+      });
+      applyPanelOffset(panelOffsetPx, transition);
+      await done;
+    },
     frameHome(transition = true) {
       frameHome(transition);
     },
@@ -217,6 +258,9 @@ export function createCameraRig(
     },
     setFrameLiftPx(px) {
       frameLiftPx = px;
+    },
+    setBottomInsetPx(px) {
+      bottomInsetPx = px;
     },
     resumeDriftNow() {
       lastInteraction = -Infinity;
