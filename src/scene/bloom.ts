@@ -35,6 +35,18 @@ export interface BloomRig {
 export interface BloomOptions {
   /** Bloom render-target scale. 0.5 halves the buffers (mobile perf). */
   resolutionScale?: number;
+  /**
+   * MSAA sample count for the composer's HDR geometry pass (WebGL2 only; the
+   * composer clamps to gl.MAX_SAMPLES and ignores it on WebGL1). Hardware AA is
+   * off on the renderer (main.ts) because MSAA on the default backbuffer can't
+   * coexist with a postprocessing chain — but the composer CAN multisample its
+   * own intermediate render target. Without it the orb InstancedMesh silhouettes
+   * and HDR cores get NO antialiasing and the flat screen-space edge ribbons
+   * alias as the camera drifts / the shimmer pulses their size — a constant
+   * sub-pixel-coverage sizzle. 4 samples resolves the silhouettes cleanly at a
+   * negligible fill cost on this budget; 0 disables (mobile / low-power path).
+   */
+  multisampling?: number;
 }
 
 export function createBloom(
@@ -45,6 +57,7 @@ export function createBloom(
 ): BloomRig {
   const composer = new EffectComposer(renderer, {
     frameBufferType: HalfFloatType,
+    multisampling: opts.multisampling ?? 0,
   });
 
   const BASE_INTENSITY = 0.95;
@@ -52,7 +65,13 @@ export function createBloom(
     // 0.9 (vs the original 1.0): shimmer peaks and the brightest strand tones
     // breathe a gentle halo at idle — "galaxy", not "black room".
     luminanceThreshold: 0.9,
-    luminanceSmoothing: 0.25,
+    // 0.5 (vs 0.25): widen the soft knee around the threshold so a pixel whose
+    // luminance rides UP THROUGH 0.9 (a shimmer peak, a node easing into focus,
+    // an edge comet cresting) fades into bloom instead of popping on/off between
+    // frames. The threshold itself is unchanged — bloom stays reserved for
+    // genuinely HDR emphasis per DESIGN.md; this only softens the transition so
+    // the threshold crossing stops flickering during click/trace cascades.
+    luminanceSmoothing: 0.5,
     intensity: BASE_INTENSITY,
     radius: 0.7,
     mipmapBlur: true,

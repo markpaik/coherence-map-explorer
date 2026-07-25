@@ -38,6 +38,7 @@ import { mulberry32 } from "./scene/evolve";
 import { createAside } from "./ui/aside";
 import { createCameraRig } from "./scene/camera";
 import { createBloom } from "./scene/bloom";
+import { createDprGovernor } from "./scene/dprgovernor";
 import { createStarfield } from "./scene/starfield";
 import { createNebula } from "./scene/nebula";
 import { createPlanets } from "./scene/planets";
@@ -62,6 +63,13 @@ import { createSelectorResolver } from "./stories/selectors";
 import { createStoryPlayer, createStoryPicker } from "./stories/player";
 
 const MAX_PIXEL_RATIO = 2;
+// Adaptive floor for the pixel-ratio cap: on a weak GPU the full-res HalfFloat
+// bloom chain + composer MSAA can miss 60fps, so the governor may step the cap
+// down toward this before restoring it when headroom returns. 1.5 keeps a Retina
+// panel visibly crisp while shedding ~44% of the fragment work vs 2.0. On this
+// project's own hardware the frame sits ~5x under budget and the governor never
+// engages; it is a safety net for weaker devices, not a normal-path behavior.
+const MIN_PIXEL_RATIO = 1.5;
 
 // Probe: is a WebGL2 context obtainable at all? (Cheap throwaway canvas.)
 function supportsWebGL2(): boolean {
@@ -202,6 +210,12 @@ function start(graph: GraphCore): void {
 
   const bloom = createBloom(renderer, scene, rig.camera, {
     resolutionScale: lowPowerBloom ? 0.5 : 1.0,
+    // Composer-level MSAA replaces the disabled hardware AA: it antialiases the
+    // orb silhouettes + HDR cores and the flat edge ribbons on the HDR geometry
+    // pass, killing the idle sizzle. Off on the low-power path (touch / small
+    // viewports already halve the bloom buffers; MSAA there is not worth the
+    // fill). 4 samples is plenty and stays well under this budget's headroom.
+    multisampling: lowPowerBloom ? 0 : 4,
   });
 
   // -- render-on-demand loop (declared before UI so callbacks can request) --
@@ -647,7 +661,23 @@ function start(graph: GraphCore): void {
     last = now;
     if (document.hidden) return;
     advance(delta);
+    // Adaptive DPR: feed the real inter-frame time (ms). A non-null return means
+    // the cap changed; re-apply the pixel ratio + reallocate buffers to match.
+    // The governor clamps pauses internally, so the post-thaw frame is harmless.
+    const newCap = dprGovernor.sample(delta * 1000);
+    if (newCap !== null) applyResize();
   }
+
+  // -- adaptive pixel-ratio cap -------------------------------------------
+  // Dormant on capable hardware (frame ~5x under budget here). On a weak GPU it
+  // steps the cap from MAX_PIXEL_RATIO toward MIN_PIXEL_RATIO under sustained
+  // misses and restores it when headroom returns — hysteretic so the cap can
+  // never oscillate (an oscillating DPR is itself flicker). Fed the rAF delta in
+  // the frame loop; a non-null return means the cap changed and we re-apply.
+  const dprGovernor = createDprGovernor({
+    maxDpr: MAX_PIXEL_RATIO,
+    minDpr: MIN_PIXEL_RATIO,
+  });
 
   // -- sizing ------------------------------------------------------------
   // The actual resize is expensive (reallocates every postprocessing buffer),
@@ -655,7 +685,7 @@ function start(graph: GraphCore): void {
   function applyResize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+    const dpr = Math.min(window.devicePixelRatio || 1, dprGovernor.current());
     renderer.setPixelRatio(dpr);
     bloom.setSize(w, h); // composer sizes the renderer + all buffers
     rig.setAspect(w / h);
