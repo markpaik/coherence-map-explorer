@@ -1,6 +1,14 @@
 // Thematic environments — the sky each pose earns once it settles. The
 // Constellation keeps the galaxy (stars + planets); the three structured poses
-// each raise a place instead:
+// each raise a place instead.
+//
+// NOTE (Ascent revert): the Sierra dawn (home 1) is currently HELD OFF — the
+// Ascent reads as the dark constellation baseline with its elevation isolines,
+// the design we shipped before the dawn (see docs/FORMATIONS.md). The switch is
+// a single DAWN_HELD flag in update() below; the dawn's shell/mist/gate code is
+// kept intact and dormant so restoring it is a one-line change. The studio
+// (Blueprint) and daylight (Transit) environments are likewise dormant now that
+// those poses have no switcher entry. Everything below is described as designed.
 //   · home 1 (the Ascent)    → a Sierra DAWN: an inside-out gradient sky with a
 //                              gold horizon band and low valley mist. The dawn
 //                              lives entirely ON/AROUND the 360° shell (gradient +
@@ -365,7 +373,15 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
       storyMul = storyActive ? Math.max(0, storyMul - step) : Math.min(1, storyMul + step);
 
       const artOff = artStyle !== 0;
-      const aDawn = artOff ? 0 : environAmount(1, p, gate) * storyMul;
+      // Sierra dawn ON HOLD (Ascent reverted to the dark constellation baseline —
+      // see docs/FORMATIONS.md). Holding the dawn amount at 0 here, rather than
+      // deleting the shell/mist machinery below, keeps the revert a one-line change
+      // and keeps the pure environAmount()/dawnWindow() math (and its tests) intact.
+      // With aDawn pinned to 0 the planets stay full, the stars stay full, dawn01()
+      // returns 0, and main.ts never flips body.env-light or the vivid enamel for
+      // the Ascent — exactly the pre-dawn presentation.
+      const DAWN_HELD = true;
+      const aDawn = artOff || DAWN_HELD ? 0 : environAmount(1, p, gate) * storyMul;
       const aStudio = artOff ? 0 : environAmount(2, p, gate) * storyMul;
       const aDay = artOff ? 0 : environAmount(3, p, gate) * storyMul;
 

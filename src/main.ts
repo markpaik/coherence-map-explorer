@@ -48,8 +48,9 @@ import { createSearch } from "./ui/search";
 import { createFilters } from "./ui/filters";
 import { createTour } from "./ui/tour";
 import { createViewToggle } from "./ui/viewtoggle";
-import { createStyleToggle } from "./ui/styletoggle";
-import { ART_STYLE_SLUGS, FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
+// The art-style switcher (createStyleToggle) is on hold — see docs/DESIGN.md.
+// applyArtStyle stays below so the shader/skin fan-out remains intact and dormant.
+import { FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
 import { decideRoute, storyIdFromHash } from "./state/routing";
@@ -294,6 +295,11 @@ function start(graph: GraphCore): void {
   // poses, focus, filters, and stories keep operating identically. The sky
   // (stars/nebula/planets) belongs to the Galaxy alone — paper has no stars.
   // Style 0 must stay pixel-identical to the shipped Galaxy.
+  //
+  // ON HOLD: the "Style overrides" switcher and the ?style= deep-link are removed
+  // for now (see docs/DESIGN.md). Style stays pinned to 0 (the galaxy). The whole
+  // fan-out below is left intact and dormant — re-mount createStyleToggle and the
+  // boot deep-link to bring the skins back.
   let artStyle: ArtStyle = 0;
   const ART_BG: readonly number[] = [BG, RINGERS.bg, FIDENZA.bg];
   function applyArtStyle(style: ArtStyle): void {
@@ -318,16 +324,11 @@ function start(graph: GraphCore): void {
     // The strand legend mirrors the scene: repaint its swatches to this skin's
     // colorway (galaxy palette / Ringers pegs / Fidenza nodes).
     filters.setArtStyle(style);
-    styleToggle.reflect(style);
     requestRender();
   }
-  const styleToggle = createStyleToggle({
-    apply: applyArtStyle,
-    initial: 0,
-  });
-  // ?style=ringers|fidenza deep-links a skin (session-only, not persisted).
-  const bootStyle = ART_STYLE_SLUGS.indexOf(params.get("style") ?? "galaxy");
-  if (bootStyle > 0) applyArtStyle(bootStyle as ArtStyle);
+  // The "Style overrides" switcher and the ?style= deep-link are on hold; style
+  // stays 0. applyArtStyle remains reachable only through the debug hook so the
+  // skin machinery keeps compiling and can be re-exposed later.
   search.setFilterContext({
     passes: (id) => filters.passesFilters(id),
     isFiltering: () => filters.isFiltering(),
