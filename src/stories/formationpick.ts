@@ -1,8 +1,11 @@
 // Formation picker — the story-HUD sibling of the pose view-toggle
 // (src/ui/viewtoggle.ts). While a story plays, every scene normally uses its
 // AUTHORED pose (scene.camera.pose); this control lets the reader PIN the whole
-// story to one formation instead — Constellation, Ascent, Blueprint, or Transit
-// — or return to AUTHORED. The pin persists across stories for the life of the
+// story to one live formation instead — Constellation or Ascent — or return to
+// AUTHORED. Blueprint and Transit are on hold (see docs/FORMATIONS.md), so they
+// are pruned from the pin options here to match the view-toggle; the Formation
+// type and the player still resolve those poses, so any story AUTHORED into them
+// keeps playing untouched. The pin persists across stories for the life of the
 // page (module state; no localStorage). The player owns what a change DOES
 // (setPose + refit + heldBody copy swap); this module owns only the control.
 //
@@ -32,14 +35,13 @@ export interface FormationPickHandle {
   dispose(): void;
 }
 
-// AUTHORED plus the four formations. Labels for the four match the view-toggle
-// exactly so the two controls read as siblings.
+// AUTHORED plus the two live formations. Labels match the view-toggle exactly so
+// the two controls read as siblings. Blueprint (2) and Transit (3) are on hold
+// and intentionally omitted here — restoring them is adding the two rows back.
 const OPTIONS: { label: string; value: Formation | null }[] = [
   { label: "Authored", value: null },
   { label: "Constellation", value: 0 },
   { label: "Ascent", value: 1 },
-  { label: "Blueprint", value: 2 },
-  { label: "Transit", value: 3 },
 ];
 
 export function createFormationPick(deps: FormationPickDeps): FormationPickHandle {

@@ -33,8 +33,20 @@ mathematics assemble into a load-bearing structure; entering the Blueprint,
 columns assemble in reading order (35ms per column); returning to the galaxy,
 the summit releases first. Morphs start from live positions, so re-targeting
 mid-flight stays continuous. Stories auto-pose per scene (the trace-back
-story runs in the Blueprint); a three-way toggle (bottom-right) offers every
-pose to everyone. Reduced motion cuts instantly.
+story runs in the Blueprint); the toggle (bottom-right) offers the live poses.
+Reduced motion cuts instantly.
+
+**Status (2026-07-24): user-facing options pared back.** The switcher now
+offers only Constellation and Ascent. The Blueprint (pose 2) and Transit
+(pose 3) segments, the "Style overrides" art-style switcher, and those two
+choices in the story-HUD Formation pin are all ON HOLD (removed from the UI,
+"for now"). The poses/shaders/stories underneath stay intact and dormant:
+poses 2/3 still live in the driver, and any story authored into them still
+plays. Style is pinned to 0 (the galaxy) — the `?style=` deep-link is disabled
+too. And the Ascent reverted to the dark constellation baseline with its
+elevation isolines (see the Environments note below); the Sierra dawn is held
+off, not deleted. Restoring any of these is re-adding a segment / re-mounting a
+control / flipping a single flag.
 
 The high-school arc in both poses is organized by CCSS Appendix A's
 traditional pathway: Algebra I, Geometry, Algebra II sub-bands (23 standards
@@ -288,19 +300,31 @@ every treatment is a pure function of the eased pose value (RM-safe, no drift).
 
 ## Environments (round 11: each formation wears its own world)
 
+**ON HOLD (2026-07-24).** The Ascent's Sierra dawn is held off (`DAWN_HELD` in
+`environs.update()`) so the Ascent reverts to the dark constellation baseline —
+full starfield/nebula/planets plus the elevation isolines — which reads far
+easier. With the dawn at 0 the planets stay full, the stars stay full, and
+main.ts never flips `body.env-light` or the vivid enamel for the Ascent; the
+isolines appear/disappear with the Ascent morph exactly as they did before the
+dawn landed. The studio (Blueprint) and daylight (Transit) environments are
+dormant too, since those poses no longer have a switcher entry. The full
+`environs.ts` machinery below is kept intact and reversible; the bullets
+describe it as designed.
+
 Style 0 gives every formation a designed environment (src/scene/environs.ts,
 Galaxy-style only — Ringers/Fidenza fields ARE their environments; stories
 suppress all environments back to the dark baseline, which also preserves the
 neon night Transit):
 
 - **Constellation** — the shipped galaxy. Untouched.
-- **Ascent, "Sierra dawn"** — pre-dawn indigo grading to a narrow gold horizon
-  band biased toward the summit side; four static mist planes pooling at the
-  foundations; stars hold at 0.35 (dawn keeps its stars), planets gone. The
+- **Ascent, "Sierra dawn" (ON HOLD)** — pre-dawn indigo grading to a narrow gold
+  horizon band biased toward the summit side; four static mist planes pooling at
+  the foundations; stars hold at 0.35 (dawn keeps its stars), planets gone. The
   dawn lives entirely on the 360° shell — ridge planes were removed in round
   12 (they ended and broke on orbit). The STRUCTURE stays bold against the
   sky: in light environments edges flip to normal-blend enamel in the VIVID
   palette (below) at width ×1.25, and orbs pull to deep vivid hues ×1.15.
+  Held off for now — the Ascent presents as the dark baseline + isolines.
 - **Blueprint, "studio"** — quiet slate shell; the sheet is the show (frame,
   grid, corner registers — the title block was cut in round 12), it has a
   BACK (mirrored bleed-through plate), and the domain blocks LIFT on paper
@@ -327,8 +351,9 @@ day) at ~0.12 while the chain holds full saturation ×1.3 — this is also the
 fix for the "shimmer": the washout WAS the flicker (z-fighting was disproven;
 edge ribbons never write depth).
 
-Labels: the styles tab reads "Style overrides"; style 0 is "Let it Ride"
-(slug `galaxy` unchanged) — override nothing, let each formation do its thing.
+Labels (ON HOLD with the switcher): the styles tab read "Style overrides";
+style 0 is "Let it Ride" (slug `galaxy` unchanged) — override nothing, let each
+formation do its thing.
 
 FOCUS EXIT (round 12): every exit path — panel X, Esc, and a genuine click on
 empty canvas (6px click-vs-drag threshold, inactive during stories/tour) —
@@ -338,6 +363,12 @@ scale: title 22 · standard text 15 · body/cards/links/worked examples 13 ·
 metadata 11.5 · section caps 11.
 
 ## Art styles
+
+**ON HOLD (2026-07-24).** The "Style overrides" switcher and the `?style=`
+deep-link are removed from the UI for now, so style is pinned to 0 (the galaxy).
+The two skins below (Ringers / Fidenza) and the whole `applyArtStyle` fan-out
+are kept intact and dormant — re-mount `createStyleToggle` and the boot deep-
+link to bring them back. Everything below describes the skins as designed.
 
 The scene ships three render skins, switchable live from the bottom-right
 toggle and deep-linkable by URL. A style is a LOOK, not a layout: all four

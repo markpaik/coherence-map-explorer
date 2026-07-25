@@ -92,3 +92,33 @@ descendant reach), so width and opacity agree — a wide line is never ghosted. 
 is a RESTING-state treatment only: the moment a standard is focused the existing
 grammar takes over untouched (connected chain saturates, the city ghosts), and it
 is gated entirely on the Transit morph so the other poses are unaffected.
+
+## Pared back to two live poses + galaxy (2026-07-24)
+
+Mark's call: pull the extra surfaces back for now and let the galaxy carry the
+map. What changed in the UI, all reversible ("for now"):
+
+- **Blueprint (pose 2) and Transit (pose 3)** — removed from the view switcher
+  (src/ui/viewtoggle.ts) and from the story-HUD Formation pin
+  (src/stories/formationpick.ts). ON HOLD alongside Watershed and Reef. The
+  poses stay in the driver and still render — any story authored into Blueprint
+  or Transit still plays its authored pose untouched; there is just no toggle or
+  pin entry for a reader to reach them cold. Restoring is re-adding the two rows.
+- **Art styles (Ringers / Fidenza) + the "Style overrides" tab** — the switcher
+  (src/ui/styletoggle.ts) is unmounted and the `?style=` deep-link is disabled,
+  so style is pinned to 0 (the galaxy). The `applyArtStyle` fan-out and both
+  skins stay intact and dormant (src/scene/artstyle.ts and the per-scene
+  `setArtStyle` handles are unchanged).
+- **Ascent reverted to the galaxy design.** The Sierra dawn environment
+  (src/scene/environs.ts) is held off at its gate (`DAWN_HELD` in `update()`),
+  so the Ascent reads as the dark constellation baseline again — full
+  starfield/nebula/planets, no mist/ridges/gold horizon, no `body.env-light`
+  chrome flip, no vivid enamel — with the topographic elevation isolines
+  (src/scene/contours.ts) visible once more. The isolines were already wired to
+  the Ascent morph; the bright dawn sky had been washing them out. The dawn's
+  shell/mist/gate code is kept intact and dormant; flip the one flag to restore
+  it. No bloom/exposure change was tied to the dawn (bloom keys off the Transit
+  concrete daylight only), so nothing else reverts with it.
+
+The pose toggle is back to two live entries; the shipping strategy above still
+holds — a formation earns a switcher row by proving itself in a story first.

@@ -1,6 +1,8 @@
 // View toggle — a small glass segmented control (bottom-right, above the nav
-// hints) that switches the scene between the four poses: "Constellation"
-// (pose 0), "Ascent" (pose 1), "Blueprint" (pose 2), and "Transit" (pose 3).
+// hints) that switches the scene between the two live poses: "Constellation"
+// (pose 0) and "Ascent" (pose 1). The Blueprint (pose 2) and Transit (pose 3)
+// segments are on hold (see docs/FORMATIONS.md): those poses stay in the driver
+// and still play inside stories, they just have no switcher entry for now.
 // It drives the pose morph ONLY through the driver's public setPose; while a
 // transition plays the control disables itself until the promise settles, so a
 // rapid double-click can't stack morphs.
@@ -8,18 +10,20 @@
 // In the Ascent it also reveals a subtle vertical scale hint on the left edge —
 // "foundations" at the bottom, "30 prerequisites deep" at the top — naming the
 // axis the massif is built on: prerequisite-chain depth. The hint fades in for
-// the Ascent ONLY and is gone in the flat Blueprint and the Transit map (neither
-// has a depth axis); it tracks the continuous pose value via main's per-frame
-// reflect() — the triangular fade reads 0 at pose 0, 2, and 3.
+// the Ascent ONLY; it tracks the continuous pose value via main's per-frame
+// reflect() — the triangular fade reads 0 at pose 0 (and at the held poses 2/3).
 //
-// Accessibility: four real <button>s in a labeled group, the aria-pressed
-// toggle pattern (matching the filter chips), 44px touch targets, and the global
+// Accessibility: real <button>s in a labeled group, the aria-pressed toggle
+// pattern (matching the filter chips), 44px touch targets, and the global
 // :focus-visible ring. The scale hint is decorative (aria-hidden).
 
 import type { Pose, PoseDriver } from "../scene/pose";
 
 // One orientation line per formation. Shown for ~4s after a formation change and
-// while a segment is hovered or focused. Copy is fixed.
+// while a segment is hovered or focused. Copy is fixed. Poses 2/3 have no
+// switcher segment while they are on hold, so their lines only ever flash on a
+// story pose pin (and the caption is hidden during stories anyway); they stay in
+// the record so it still covers every Pose and re-enabling is a one-line change.
 const CAPTIONS: Record<Pose, string> = {
   0: "The galaxy: every standard, a star in its strand.",
   1: "Altitude shows how much mathematics stands beneath a standard.",
@@ -101,11 +105,11 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
     return btn;
   }
 
+  // Blueprint (2) and Transit (3) are on hold — only the two live poses get a
+  // segment. The poses themselves remain in the driver for stories.
   const segments: { btn: HTMLButtonElement; target: Pose }[] = [
     { btn: makeSegment("Constellation", 0, true), target: 0 },
     { btn: makeSegment("Ascent", 1, false), target: 1 },
-    { btn: makeSegment("Blueprint", 2, false), target: 2 },
-    { btn: makeSegment("Transit", 3, false), target: 3 },
   ];
   group.append(...segments.map((s) => s.btn));
 
@@ -150,8 +154,8 @@ export function createViewToggle(deps: ViewToggleDeps): ViewToggleHandle {
       flashCaption(target);
     }
     // The depth scale belongs to the Ascent alone: opacity peaks at pose 1 and
-    // falls to 0 at both the Constellation (0) and the flat Blueprint (2), which
-    // has no depth axis. Triangular fade; clamp tiny float noise to 0/1.
+    // falls to 0 at the Constellation (0) and at the held poses (2/3), which have
+    // no depth axis. Triangular fade; clamp tiny float noise to 0/1.
     const d = 1 - Math.abs(pose - 1);
     scale.style.opacity = String(d < 0.001 ? 0 : d > 0.999 ? 1 : d);
   }
