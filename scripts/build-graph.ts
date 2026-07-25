@@ -2052,6 +2052,11 @@ export function buildGraph(): BuildResult {
     edges: outEdges,
   };
 
+  // Edge-provenance audit: every standard falls into exactly one connection
+  // class, recomputed from the BUILT graph. Hard-fails on any drift; emits
+  // nothing (positions/edges/shards are untouched). See the function below.
+  auditEdgeProvenance(core);
+
   // Details, sharded by grade.
   const details = {} as Record<Grade, Record<string, DetailEntry>>;
   for (const g of GRADE_ORDER) details[g] = {};
@@ -2131,6 +2136,109 @@ export function buildGraph(): BuildResult {
       bounds: { x: [round2(xmin), round2(xmax)], y: [round2(ymin), round2(ymax)], z: [round2(zmin), round2(zmax)] },
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Edge-provenance audit (build-time)
+// ---------------------------------------------------------------------------
+// Recompute the 406 / 13 / 59 / 2 connection classification from the BUILT
+// graph (nodes + drawn edges only) and hard-fail if the four classes do not sum
+// to the node count or if any standard lands in no class. This is the structural
+// invariant the two-stage focus ladder rests on: ONLY direct edges are drawn;
+// family roll-up and child inheritance are focus-time semantics that never add a
+// drawn edge, so a standard is "connected" iff it owns a drawn edge OR its family
+// carries one. See docs/audits/edge-provenance.md.
+//
+// The four classes:
+//   direct           — owns >=1 drawn edge (builds-on / leads-to / related).
+//   edgelessParent   — owns none; its sub-standards carry the edges (rolls up).
+//   edgelessChild    — owns none; its parent/family carries the edges (inherits).
+//   solo             — owns none, and no family carries any: genuinely isolated.
+function auditEdgeProvenance(core: GraphCore): void {
+  const idx = new Map<string, number>();
+  core.nodes.forEach((n, i) => idx.set(n.id, i));
+  const N = core.nodes.length;
+  const preds: number[][] = core.nodes.map(() => []);
+  const succ: number[][] = core.nodes.map(() => []);
+  const rel: number[][] = core.nodes.map(() => []);
+  for (const e of core.edges) {
+    const s = idx.get(e.s);
+    const t = idx.get(e.t);
+    if (s === undefined || t === undefined) continue;
+    if (e.k === 0) {
+      succ[s].push(t);
+      preds[t].push(s);
+    } else {
+      rel[s].push(t);
+      rel[t].push(s);
+    }
+  }
+  const partsOf = core.nodes.map((n) =>
+    (n.children ?? []).map((c) => idx.get(c)).filter((x): x is number => x !== undefined),
+  );
+  const parentOf = core.nodes.map((n) => (n.parent !== undefined ? idx.get(n.parent) : undefined));
+
+  // Whether rollUpFamily(focus) would yield any external neighbour: the focus's
+  // own drawn edges plus each sub-standard's, family-internal members excluded.
+  const familyRollNonEmpty = (focus: number): boolean => {
+    const parts = partsOf[focus];
+    if (parts.length === 0)
+      return preds[focus].length + succ[focus].length + rel[focus].length > 0;
+    const fam = new Set<number>([focus, ...parts]);
+    const has = (own: number[], adj: number[][]): boolean => {
+      for (const nb of own) if (!fam.has(nb)) return true;
+      for (const c of parts) for (const nb of adj[c]) if (!fam.has(nb)) return true;
+      return false;
+    };
+    return has(preds[focus], preds) || has(succ[focus], succ) || has(rel[focus], rel);
+  };
+
+  let direct = 0;
+  let edgelessParents = 0;
+  let edgelessChildren = 0;
+  let solo = 0;
+  const unclassified: string[] = [];
+  for (let i = 0; i < N; i++) {
+    const ownDeg = preds[i].length + succ[i].length + rel[i].length;
+    const p = parentOf[i];
+    // Positive, mutually-exclusive predicates: a standard with no class (or more
+    // than one) is a structural defect the build must refuse to ship.
+    const isDirect = ownDeg > 0;
+    const isEdgelessParent = ownDeg === 0 && partsOf[i].length > 0 && familyRollNonEmpty(i);
+    const isEdgelessChild =
+      ownDeg === 0 && partsOf[i].length === 0 && p !== undefined && familyRollNonEmpty(p);
+    const isSolo =
+      ownDeg === 0 &&
+      partsOf[i].length === 0 &&
+      (p === undefined || !familyRollNonEmpty(p));
+    const matched = [isDirect, isEdgelessParent, isEdgelessChild, isSolo].filter(Boolean).length;
+    if (matched !== 1) {
+      unclassified.push(`${core.nodes[i].code} (matched ${matched} classes)`);
+      continue;
+    }
+    if (isDirect) direct++;
+    else if (isEdgelessParent) edgelessParents++;
+    else if (isEdgelessChild) edgelessChildren++;
+    else solo++;
+  }
+
+  const sum = direct + edgelessParents + edgelessChildren + solo;
+  console.log(
+    `edge provenance:  ${direct} direct · ${edgelessParents} edgeless parents · ` +
+      `${edgelessChildren} edgeless children · ${solo} solo (sum ${sum} / ${N})`,
+  );
+  assert(
+    unclassified.length === 0,
+    `edge-provenance: standard(s) in no single class: ${unclassified.join(", ")}`,
+  );
+  assert(sum === N, `edge-provenance: classes sum to ${sum}, expected ${N}`);
+  // The verified classification (against data/raw/data.js). A change here means
+  // the data or the family logic shifted — fail loudly rather than ship a wrong
+  // "No mapped connections." dead end.
+  assert(direct === 406, `edge-provenance: expected 406 direct, got ${direct}`);
+  assert(edgelessParents === 13, `edge-provenance: expected 13 edgeless parents, got ${edgelessParents}`);
+  assert(edgelessChildren === 59, `edge-provenance: expected 59 edgeless children, got ${edgelessChildren}`);
+  assert(solo === 2, `edge-provenance: expected 2 solo, got ${solo}`);
 }
 
 // ---------------------------------------------------------------------------

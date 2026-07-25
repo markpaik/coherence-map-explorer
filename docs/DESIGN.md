@@ -158,19 +158,57 @@ noise, disabled with reduced-motion.
   90%), glass surface. Order: code (Space Grotesk 600, strand-colored dot) +
   grade·domain breadcrumb → badges row → standard text → Connections
   (three groups: "Builds on" / "Leads to" / "Related", each entry a real
-  <button> with code + 6-word title clamp) → "Trace to foundations" primary
-  action → Tasks (external links, attribution) → Progression note (collapsed
-  <details>) → v2 slot (hidden div#ai-slot). Close = Esc / ×.
+  <button> with code + 6-word title clamp) → "Trace the full journey" primary
+  action → direction chip (journey only) → Foundations + Onward closures
+  (journey only) → Tasks (external links, attribution) → Progression note
+  (collapsed <details>) → v2 slot (hidden div#ai-slot). Close = Esc / ×.
+  Inherit case (an edgeless sub-standard): the Connections open with a note
+  naming the family standard plus a "Family" group (parent first, then
+  siblings), and the groups below are the family's inherited connections.
 - Hover tooltip: small glass chip near cursor: code + first 8 words of the
-  standard, 120ms delay in, no delay out.
+  standard, 120ms delay in, no delay out. An edgeless sub-standard reads
+  "Mapped on <parent code>" with the family's builds-on / leads-to counts, not
+  "No mapped connections".
+
+## Interaction grammar (the two-stage focus ladder)
+
+A click does NOT dump the whole lineage at once. It runs a two-stage ladder so a
+reader meets one hop first, then chooses to walk the whole journey.
+
+- **Stage 1 (local, the default first click).** Lights only the one-hop
+  neighbourhood: the standard (FOCUS), its family (CHAIN), its direct builds-on
+  / leads-to (CHAIN) and related (RELATED), and only the edges between the
+  family and those neighbours. Everything else dims. Camera frames the one-hop
+  set (the directed neighbourhood always fits; related widens only up to 1.6x).
+- **Stage 2 (journey).** Triggered by re-clicking the focused node, or the
+  panel's "Trace the full journey" button. Lights the full ancestor and
+  descendant closures with the grade-stepped cascade (the payoff moment) and
+  pulls the camera back to frame them. A third click on the focused node toggles
+  back to stage 1. Escape, the panel's ×, or a background click clear the focus
+  entirely.
+- **Direction chip (stage 2 only).** A three-way segmented radiogroup in the
+  panel: Foundations (ancestors), Both (default on every fresh journey), Onward
+  (descendants). It re-aims which side lights and reframes the camera; a change
+  re-lights instantly, no cascade replay. Keyboard-operable with a visible focus
+  ring; direction changes announce on the aria-live channel.
+- **Consistency (the inheritance rule).** Every one of the 480 standards gets a
+  meaningful stage 1. A family parent rolls its sub-standards' connections up;
+  an edgeless sub-standard inherits its family's connections
+  (`resolveConnections`, the one resolver the panel and Browse share). Only the
+  two genuinely isolated solo standards say "No mapped connections." See
+  `docs/audits/edge-provenance.md`.
+- **Not hash-encoded.** The URL carries only the focused standard (`#/s/<CODE>`).
+  The journey stage and direction are session state, never written to the hash,
+  so a shared link always opens at stage 1.
 
 ## Motion
 
 | Move | Spec |
 |---|---|
 | camera focus flight | camera-controls `setLookAt` smooth-damped, ~1.1s perceived; `fitToSphere` on focus neighborhood with 1.35 padding |
-| cascade reveal | ancestors ignite in grade order stepping backward, 80ms stagger per grade layer; descendants forward at half brightness after 200ms |
-| trace-to-foundations | same cascade but full ancestor closure; camera pulls back to frame it (fitToSphere on closure bounding sphere) |
+| stage-1 local reveal | one-hop only: focus + related at 0ms, the family + builds-on/leads-to neighbours one short wave at ~100ms; no grade cascade |
+| stage-2 journey cascade | the payoff: ancestors ignite in grade order stepping backward, 80ms stagger per grade layer; descendants forward after 200ms; camera pulls back to frame the active direction's closure (fitToSphere on its bounding sphere) |
+| direction change / toggle-down | instant snap, no cascade replay (a downward ease would flash back through the brighter FOCUS band) |
 | panel | 280ms translateX cubic-bezier(.2,.8,.2,1) |
 | idle drift | slow orbit, one revolution ≈ 240s; pauses on any interaction, resumes after 20s idle |
 | reduced motion | camera cuts (≤150ms), no cascade stagger (all at once), no particles, no twinkle, no drift |

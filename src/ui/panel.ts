@@ -2,8 +2,9 @@
 // that is the accessible mirror of a focused standard. Content order follows
 // DESIGN's "Detail panel" layout: code + strand dot + breadcrumb → badges →
 // standard text → Connections (Builds on / Leads to / Related, each a real
-// <button>) → Trace to foundations → Tasks (+ worked example, attributed) →
-// Progression note (collapsed) → hidden v2 slot.
+// <button>) → "Trace the full journey" → direction chip + Foundations + Onward
+// closures (journey only) → Tasks (+ worked example, attributed) → Progression
+// note (collapsed) → hidden v2 slot.
 //
 // Sync scaffolding (header, badges, connection buttons) paints instantly from
 // graph-core; the desc / example / progressions HTML and the connection titles
@@ -13,10 +14,12 @@
 
 import type { GraphCore, GraphNode, StrandId, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
+import type { JourneyDirection } from "../state/machine";
 import { STRAND_COLORS } from "../scene/palette";
 import { httpsUpgrade, sourceLinkLabel } from "./urls";
 
-// Grade order for grouping the trace closure (HS → K reads foundations up).
+// Grade order for grouping the journey closures (Foundations reads HS → K, up
+// toward the roots; Onward reads K → HS, out toward what the standard unlocks).
 const PANEL_GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 
 export interface Connections {
@@ -25,19 +28,36 @@ export interface Connections {
   buildsOn: number[]; // node indices — direct incoming prerequisites
   leadsTo: number[]; // node indices — direct outgoing prerequisites
   related: number[]; // node indices — related neighbours
+  /** Parent node index when an edgeless sub-standard inherits its family's
+   *  connections; the connection groups below are the family's. */
+  inheritedFrom?: number;
+  /** Inherit case: [parent, ...siblings] for the "Family" group (parent first). */
+  family?: number[];
+  /** The journey button is meaningful only when the closure runs past one hop. */
+  journeyable?: boolean;
 }
 
 export interface PanelRequests {
   focusCode(code: string): void;
-  trace(): void;
+  /** Enter/re-aim stage 2 (the full journey). Undefined direction = Both. */
+  traceJourney(direction?: JourneyDirection): void;
   /** The current focus's full ancestor closure (node indices) — for the
-   * "Foundations" trace section. Empty when nothing is focused. */
+   * "Foundations" journey section. Empty when nothing is focused. */
   getAncestors(): number[];
+  /** The current focus's full descendant closure — for the "Onward" section. */
+  getDescendants(): number[];
   close(): void;
 }
 
 export interface PanelHandle {
   show(focusIndex: number, connections: Connections): void;
+  /** Enter/refresh the journey UI: reveal the direction chip (set to `direction`)
+   *  and render the Foundations + Onward closures. */
+  showJourney(direction: JourneyDirection, ancestors: number[], descendants: number[]): void;
+  /** A direction change: update the chip's selection only (sections unchanged). */
+  setJourneyDirection(direction: JourneyDirection): void;
+  /** Toggle back to stage 1: hide the chip and clear the journey sections. */
+  hideJourney(): void;
   hide(): void;
   /**
    * When set, swiping the phone bottom sheet UP from its peek expands into
@@ -186,16 +206,73 @@ export function createPanel(
   const traceBtn = document.createElement("button");
   traceBtn.className = "panel-trace";
   traceBtn.type = "button";
-  traceBtn.textContent = "Trace to foundations";
-  traceBtn.addEventListener("click", () => {
-    requests.trace();
-    renderFoundations(requests.getAncestors());
-  });
+  traceBtn.textContent = "Trace the full journey";
+  // The button always enters the journey at direction Both; the chip re-aims it.
+  traceBtn.addEventListener("click", () => requests.traceJourney());
 
-  // The trace lineage: the full ancestor closure grouped by grade (rendered on
-  // demand when "Trace to foundations" runs; cleared on every new focus).
+  // Direction chip (stage 2 only): a segmented radiogroup — Foundations / Both /
+  // Onward — that re-aims which side of the journey lights. Hidden until the
+  // journey is active; reset to Both on every fresh focus or toggle-down.
+  const CHIP_OPTIONS: { dir: JourneyDirection; label: string; hint: string }[] = [
+    { dir: "foundations", label: "Foundations", hint: "Light only what this standard builds on" },
+    { dir: "both", label: "Both", hint: "Light the whole journey, foundations and onward" },
+    { dir: "onward", label: "Onward", hint: "Light only what this standard leads to" },
+  ];
+  const chip = document.createElement("div");
+  chip.className = "panel-direction";
+  chip.setAttribute("role", "radiogroup");
+  chip.setAttribute("aria-label", "Which side of the journey to light");
+  chip.hidden = true;
+  const chipButtons = new Map<JourneyDirection, HTMLButtonElement>();
+  let chipDir: JourneyDirection = "both";
+  for (const opt of CHIP_OPTIONS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "panel-direction-opt";
+    b.textContent = opt.label;
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-label", `${opt.label}. ${opt.hint}`);
+    b.setAttribute("aria-checked", "false");
+    b.tabIndex = -1;
+    b.addEventListener("click", () => requests.traceJourney(opt.dir));
+    chipButtons.set(opt.dir, b);
+    chip.appendChild(b);
+  }
+  // Roving tabindex + arrow-key navigation. Moving selection activates it (the
+  // native radiogroup contract), so an arrow both moves and re-aims the journey.
+  function reflectChip(dir: JourneyDirection): void {
+    chipDir = dir;
+    for (const [d, b] of chipButtons) {
+      const on = d === dir;
+      b.setAttribute("aria-checked", String(on));
+      b.tabIndex = on ? 0 : -1;
+      b.classList.toggle("is-selected", on);
+    }
+  }
+  chip.addEventListener("keydown", (e) => {
+    let next: JourneyDirection | null = null;
+    const order = CHIP_OPTIONS.map((o) => o.dir);
+    const i = order.indexOf(chipDir);
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = order[(i + 1) % order.length];
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
+      next = order[(i - 1 + order.length) % order.length];
+    else if (e.key === "Home") next = order[0];
+    else if (e.key === "End") next = order[order.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    chipButtons.get(next)!.focus();
+    requests.traceJourney(next);
+  });
+  reflectChip("both");
+
+  // The journey lineage: the full ancestor closure (Foundations) grouped by
+  // grade, rendered when the journey is active; cleared on every new focus.
   const foundations = document.createElement("div");
   foundations.className = "panel-foundations";
+
+  // The mirror: the full descendant closure (Onward) grouped by grade.
+  const onward = document.createElement("div");
+  onward.className = "panel-onward";
 
   const tasks = document.createElement("div");
   tasks.className = "panel-tasks";
@@ -207,7 +284,19 @@ export function createPanel(
   aiSlot.id = "ai-slot";
   aiSlot.hidden = true;
 
-  body.append(header, badges, desc, connections, traceBtn, foundations, tasks, progressions, aiSlot);
+  body.append(
+    header,
+    badges,
+    desc,
+    connections,
+    traceBtn,
+    chip,
+    foundations,
+    onward,
+    tasks,
+    progressions,
+    aiSlot,
+  );
   panel.append(handle, closeBtn, body);
   container.appendChild(panel);
 
@@ -399,6 +488,28 @@ export function createPanel(
   function renderConnections(conn: Connections): void {
     connections.replaceChildren();
     const parts = conn.parts ?? [];
+    // Inherit case: an edgeless sub-standard whose family carries the edges. A
+    // note names the family standard, and a "Family" group links the parent
+    // first, then the siblings, before the inherited Builds on / Leads to /
+    // Related groups render below (so a sub-standard is never a dead end).
+    if (conn.inheritedFrom !== undefined) {
+      const note = document.createElement("p");
+      note.className = "conn-inherit-note";
+      const parentCode = graph.nodes[conn.inheritedFrom].code;
+      note.textContent = `These connections are mapped on ${parentCode}. This sub-standard is part of that family.`;
+      connections.appendChild(note);
+      const fam = conn.family ?? [];
+      if (fam.length) {
+        const group = document.createElement("div");
+        group.className = "conn-group conn-family";
+        const h = document.createElement("h3");
+        h.className = "conn-h";
+        h.textContent = `Family · ${fam.length}`;
+        group.appendChild(h);
+        for (const idx of fam) group.appendChild(connectionButton(idx));
+        connections.appendChild(group);
+      }
+    }
     // A parent standard: name its sub-standards, and explain that the
     // connections below are theirs rolled up (so the panel is never a dead end
     // for a cluster-heading standard whose edges live on its children).
@@ -442,32 +553,39 @@ export function createPanel(
       connections.appendChild(group);
     }
     const hasAny = conn.buildsOn.length || conn.leadsTo.length || relatedDedup.length;
-    if (!hasAny && !parts.length) {
+    if (!hasAny && !parts.length && conn.inheritedFrom === undefined) {
       const none = document.createElement("p");
       none.className = "conn-empty";
       none.textContent = "No mapped connections.";
       connections.appendChild(none);
     }
-    // Trace only means something with a prerequisite chain to walk back.
-    const traceable = conn.buildsOn.length > 0;
-    traceBtn.disabled = !traceable;
+    // The journey button lights up only when the closure runs past the one-hop
+    // set (ancestors + descendants); the machine resolves that and passes it.
+    traceBtn.disabled = !conn.journeyable;
     traceBtn.hidden = !hasAny;
   }
 
-  // The trace lineage: the full ancestor closure, grouped by grade HS → K (the
-  // grades nearest the focus first). Each grade is a collapsible <details>; the
-  // three nearest open, deeper ones collapsed. Reuses the connection button.
-  function renderFoundations(ancestors: number[]): void {
-    foundations.replaceChildren();
-    if (!ancestors.length) return;
+  // A journey closure, grouped by grade. Each grade is a collapsible <details>;
+  // the three grades NEAREST the focus open, deeper ones collapsed. Foundations
+  // reads HS → K (up toward the roots); Onward reads K → HS (out toward what the
+  // standard unlocks). Reuses the connection button.
+  function renderClosure(
+    host: HTMLElement,
+    title: string,
+    label: string,
+    indices: number[],
+    gradesDescending: boolean,
+  ): void {
+    host.replaceChildren();
+    if (!indices.length) return;
 
     const h = document.createElement("h3");
     h.className = "panel-section-h";
-    h.textContent = `Foundations · ${ancestors.length} ${ancestors.length === 1 ? "standard" : "standards"}`;
-    foundations.appendChild(h);
+    h.textContent = `${title} · ${indices.length} ${indices.length === 1 ? "standard" : "standards"}`;
+    host.appendChild(h);
 
     const byGrade = new Map<string, number[]>();
-    for (const idx of ancestors) {
+    for (const idx of indices) {
       const g = graph.nodes[idx].grade;
       let arr = byGrade.get(g);
       if (!arr) {
@@ -476,8 +594,10 @@ export function createPanel(
       }
       arr.push(idx);
     }
-    const grades = [...byGrade.keys()].sort(
-      (a, b) => PANEL_GRADE_ORDER.indexOf(b) - PANEL_GRADE_ORDER.indexOf(a),
+    const grades = [...byGrade.keys()].sort((a, b) =>
+      gradesDescending
+        ? PANEL_GRADE_ORDER.indexOf(b) - PANEL_GRADE_ORDER.indexOf(a)
+        : PANEL_GRADE_ORDER.indexOf(a) - PANEL_GRADE_ORDER.indexOf(b),
     );
 
     grades.forEach((g, gi) => {
@@ -485,15 +605,22 @@ export function createPanel(
         .get(g)!
         .sort((a, b) => (graph.nodes[a].code < graph.nodes[b].code ? -1 : 1));
       const det = document.createElement("details");
-      det.className = "foundations-grade";
+      det.className = `${label}-grade`;
       if (gi < 3) det.open = true; // the three grades nearest the focus
       const sum = document.createElement("summary");
-      sum.className = "foundations-grade-h";
+      sum.className = `${label}-grade-h`;
       sum.textContent = `${gradeLabel.get(g) ?? g} · ${members.length}`;
       det.appendChild(sum);
       for (const idx of members) det.appendChild(connectionButton(idx));
-      foundations.appendChild(det);
+      host.appendChild(det);
     });
+  }
+
+  function renderFoundations(ancestors: number[]): void {
+    renderClosure(foundations, "Foundations", "foundations", ancestors, true);
+  }
+  function renderOnward(descendants: number[]): void {
+    renderClosure(onward, "Onward", "onward", descendants, false);
   }
 
   function renderBadges(n: GraphNode): void {
@@ -707,7 +834,13 @@ export function createPanel(
       crumb.textContent = `${gradeLabel.get(n.grade) ?? n.grade} · ${n.domainName} · ${n.clusterCode}`;
       renderBadges(n);
       renderConnections(conn);
-      foundations.replaceChildren(); // the trace lineage is per-focus; clear it
+      // The journey UI is per-focus and stage 1 by default: clear both closure
+      // sections, hide the direction chip, and reset it to Both.
+      foundations.replaceChildren();
+      onward.replaceChildren();
+      chip.hidden = true;
+      reflectChip("both");
+      traceBtn.removeAttribute("aria-pressed");
       desc.innerHTML = "<p class=\"panel-loading\">Loading…</p>";
       tasks.replaceChildren();
       progressions.replaceChildren();
@@ -739,6 +872,26 @@ export function createPanel(
       }
 
       void fillAsync(focusIndex, conn, token);
+    },
+
+    showJourney(direction, ancestors, descendants) {
+      chip.hidden = false;
+      reflectChip(direction);
+      traceBtn.setAttribute("aria-pressed", "true");
+      renderFoundations(ancestors);
+      renderOnward(descendants);
+    },
+
+    setJourneyDirection(direction) {
+      reflectChip(direction);
+    },
+
+    hideJourney() {
+      chip.hidden = true;
+      reflectChip("both");
+      traceBtn.removeAttribute("aria-pressed");
+      foundations.replaceChildren();
+      onward.replaceChildren();
     },
 
     setExpandToBrowse(cb) {

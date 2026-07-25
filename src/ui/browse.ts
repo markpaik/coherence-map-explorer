@@ -21,7 +21,7 @@
 import type { GraphCore, GraphNode, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
 import { STRAND_COLORS } from "../scene/palette";
-import { rollUpFamily, type Machine } from "../state/machine";
+import { resolveConnections, type Machine } from "../state/machine";
 import type { StoryPickerHandle } from "../stories/player";
 import { rankResults, type RankItem } from "./searchrank";
 import { httpsUpgrade } from "./urls";
@@ -177,6 +177,15 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   }
   const byGradeThenCode = (a: number, b: number): number =>
     rankOf(a) - rankOf(b) || (graph.nodes[a].code < graph.nodes[b].code ? -1 : 1);
+
+  // Family arrays for resolveConnections (the one shared connection resolver the
+  // 3D panel routes through too, so Browse can never drift from it).
+  const partsOf: number[][] = graph.nodes.map((n) =>
+    (n.children ?? []).map((c) => nodeById.get(c)).filter((x): x is number => x !== undefined),
+  );
+  const parentOf: (number | undefined)[] = graph.nodes.map((n) =>
+    n.parent !== undefined ? nodeById.get(n.parent) : undefined,
+  );
 
   // Nodes belonging to a group (a real grade, or an HS course membership).
   function groupNodes(ctx: GroupCtx): GraphNode[] {
@@ -751,17 +760,15 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       .map((id) => nodeById.get(id))
       .filter((i): i is number => i !== undefined);
 
-    // Family roll-up is the panel's EXACT rule (machine.rollUpFamily): every
-    // parent folds its sub-standards' connections into itself — own neighbours
-    // plus each child's, family-internal members removed — so a heading standard
-    // is never a dead end and never diverges from the 3D panel. 6.RP.A.3 is the
-    // catch: it owns outbound edges while its .a-.d carry the inbound lineage
-    // (5.G.A.2 / 6.RP.A.1 / 6.RP.A.2), so the roll-up must fire whenever there
-    // are children, not only when the parent is edgeless. The shared helper is
-    // the single source of truth; Browse only renders its output.
-    const { buildsOn, leadsTo, related: rel, rolledUp } = rollUpFamily(
+    // resolveConnections is the ONE resolver the 3D panel routes through too, so
+    // Browse can never drift. It rolls a parent's sub-standard edges up into the
+    // parent (6.RP.A.3 is the catch: it owns outbound edges while its .a-.d carry
+    // the inbound lineage), AND lets an edgeless sub-standard inherit its family's
+    // connections — so a sub-standard is never a bare "No mapped connections."
+    const { buildsOn, leadsTo, related: rel, rolledUp, inheritedFrom } = resolveConnections(
       idx,
-      kids,
+      partsOf,
+      parentOf,
       preds,
       succ,
       related,
@@ -779,7 +786,12 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       ["Related", [...relDedup].sort(byGradeThenCode)],
     ];
     if (kids.length) groups.push(["Sub-standards", [...kids].sort(byGradeThenCode)]);
-    if (n.parent) {
+    // Inherit case: a "Family" group (parent first, then siblings) stands in for
+    // the plain "Part of"; a non-inherit child keeps "Part of".
+    if (inheritedFrom !== undefined) {
+      const siblings = partsOf[inheritedFrom].filter((i) => i !== idx).sort(byGradeThenCode);
+      groups.push(["Family", [inheritedFrom, ...siblings]]);
+    } else if (n.parent) {
       const p = nodeById.get(n.parent);
       if (p !== undefined) groups.push(["Part of", [p]]);
     }
@@ -797,7 +809,13 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       for (const ci of list) group.appendChild(connRow(ci));
       host.appendChild(group);
     }
-    if (rolledUp) {
+    if (inheritedFrom !== undefined) {
+      const note = document.createElement("p");
+      note.className = "browse-conn-note";
+      const parentCode = graph.nodes[inheritedFrom].code;
+      note.textContent = `These connections are mapped on ${parentCode}. This sub-standard is part of that family.`;
+      host.insertBefore(note, host.firstChild);
+    } else if (rolledUp) {
       const note = document.createElement("p");
       note.className = "browse-conn-note";
       note.textContent =

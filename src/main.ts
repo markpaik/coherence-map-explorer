@@ -9,9 +9,11 @@
 //   3. Filters rail — the "Filters" pill (≤720px) then the grade / strand /
 //      toggle chips (aria-pressed buttons), left→right.
 //   4. Detail panel (when open) — focus is MOVED to the code heading on open;
-//      from there Tab runs Close → connection buttons → Trace → task links →
-//      the collapsible details. Esc closes it and returns focus to the trigger
-//      (or the search input). The panel is a labeled region, not a modal.
+//      from there Tab runs Close → connection buttons → "Trace the full journey"
+//      → the direction chip (a radiogroup; arrows move + re-aim it) → the
+//      Foundations / Onward closures → task links → the collapsible details. Esc
+//      closes it and returns focus to the trigger (or the search input). The
+//      panel is a labeled region, not a modal.
 //   5. Tour card (when running) — a focus-TRAPPED dialog: Back / Skip / Next
 //      cycle; ArrowLeft/Right navigate, Esc skips. The backdrop blocks the
 //      scene and the rest of the chrome while it runs.
@@ -222,10 +224,13 @@ function start(graph: GraphCore): void {
   let machine!: Machine;
   const panel = createPanel(document.body, graph, {
     focusCode: (code) => machine.focusByCode(code),
-    trace: () => machine.trace(),
-    // Read-only ancestor closure of the current focus — the panel's "Foundations"
-    // trace section reuses the machine's computation rather than recomputing it.
+    // The button + direction chip drive stage 2 through the machine (single
+    // writer); the machine calls back panel.showJourney / setJourneyDirection.
+    traceJourney: (direction) => machine.traceJourney(direction),
+    // Read-only closures of the current focus — the panel's "Foundations" and
+    // "Onward" sections reuse the machine's computation, not their own.
     getAncestors: () => machine.getFocusAncestors(),
+    getDescendants: () => machine.getFocusDescendants(),
     // The panel's X is one of the three focus-exit paths (with Esc + click-
     // outside); all route through exitFocus so the camera flies back home.
     close: () => exitFocus(),

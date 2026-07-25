@@ -90,8 +90,10 @@ export function createPicking(
       onEmptyClick?.(); // empty canvas: exit any active focus (main.ts guards it)
       return;
     }
-    machine.focus(id); // a hit always (re)focuses that node — existing behavior wins
-
+    // Clicking the ALREADY-focused node escalates the two-stage ladder (local →
+    // journey → local) instead of re-lighting stage 1; a different node focuses.
+    if (id === machine.focusedIndex) machine.escalateFocus();
+    else machine.focus(id);
   }
   function onPointerCancel(e: PointerEvent): void {
     downs.delete(e.pointerId);
