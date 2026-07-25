@@ -937,7 +937,11 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     } else {
       const move = decideFocusCamera(reducedMotion, opts?.instant === true, hadFocus, priorFraming);
       if (move === "cut") flyTo(oneHop, offset, "instant");
-      else if (move === "hop") flyTo(oneHop, offset, "normal"); // lateral pan, no dive
+      // A lateral pan, no dive — but at the MODERATE damping, not the base one.
+      // The base damping's ~0.25s reads smooth over Constellation's small moves
+      // yet as an abrupt cut over the Ascent massif's far larger translations;
+      // moderate keeps every pose's pans legible.
+      else if (move === "hop") flyTo(oneHop, offset, "moderate");
       else scheduleDive(oneHop, offset); // fresh focus: hold the expanse, then dive in
     }
 
@@ -1073,7 +1077,13 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     // Refit whichever frame is current — only the positions moved with the pose.
     // Reuse the stored sets, no cascade re-run: the one-hop sphere in local, the
     // active direction's closure BOX in journey (the tight crop).
-    const mode: FlyMode = reducedMotion ? "instant" : "normal";
+    //
+    // MODERATE, not the base damping. A pose morph is a big camera move (biggest
+    // in the tall Ascent massif); at the base ~0.25s it reads as an abrupt jump.
+    // This is also the path a click DURING a still-settling morph takes: the
+    // fly() below clears the fresh click's pending dive, so a moderate ease here
+    // stands in for the lost hold+dive rather than warping to the standard.
+    const mode: FlyMode = reducedMotion ? "instant" : "moderate";
     if (stage === "journey") {
       flyToBox(boxOf(journeyFitSet(focusModel, journeyDirection)), focusPanelOffsetPx(), mode);
     } else {

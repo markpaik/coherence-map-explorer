@@ -830,6 +830,7 @@ function start(graph: GraphCore): void {
       },
       machine,
       tour,
+      rig,
       // Dual-pose morph driver, for automation (drive setPose, read pose/target).
       pose: { driver: poseDriver },
       // Art styles, for automation (0 Galaxy | 1 Ringers | 2 Fidenza).
