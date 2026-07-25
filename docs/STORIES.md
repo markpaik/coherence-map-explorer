@@ -45,8 +45,8 @@ line), never covering the focused region; card text is the aria-live source.
 Pacing: scenes AUTO-ADVANCE after their holdMs (scripts.ts) once the
 transition settles, with the active dot filling to show the countdown; Next
 skips ahead instantly, Back returns, pause stops the clock. The tour uses the
-same mechanism (8s per stop). Reduced motion: no auto-advance, manual
-stepping only, each scene a cut.
+same mechanism (8s per stop). Reduced motion: each scene is a cut and the
+countdown still runs; the motion is cut, never the timing.
 
 Atmosphere: during a scene hold the idle ethereal drift breathes (the same
 ±18° oscillation as the untouched landing); it pauses during transitions and

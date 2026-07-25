@@ -326,8 +326,8 @@ export const STORIES: Story[] = [
         reveal: { dir: "ltr", ms: 3000 },
         camera: { fit: "all", pose: 1 },
         card: {
-          title: "Three dark points in a field of 480",
-          body: "Unit rates joins the list in sixth grade. Pull all the way back and the map still looks whole, three holes among 480 standards. Every yearly average sees a B student, because a yearly average is exactly the wrong resolution for finding holes.",
+          title: "Three holes in a field of 480",
+          body: "Unit rates joins the list in sixth grade. Pull all the way back and the map still looks whole: three holes among 480 standards, one dragging its three sub-standards down with it. Every yearly average sees a B student, because a yearly average is exactly the wrong resolution for finding holes.",
         },
         holdMs: 11000,
         transition: "lapse",
@@ -344,7 +344,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["ancestry:7.RP.A.2"], pose: 1 },
         card: {
           title: "Then proportional reasoning arrives",
-          body: "One seventh-grade standard stands on 75 earlier ones, and the three ringed holes sit among them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one standing on the missing. Three pieces out of 75 are enough to make the floor tilt while every adult in the room wonders why this student suddenly cannot keep up.",
+          body: "One seventh-grade standard stands on 75 earlier ones. The brightest rings are the holes themselves; the fainter rings show the damage spreading through everything built on them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one standing on the missing. Four pieces out of 75 are enough to make the floor tilt while every adult in the room wonders why this student suddenly cannot keep up.",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -402,7 +402,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:4"], pose: 1 },
         card: {
           title: "A fifth grader, two holes behind",
-          body: "A hard fourth-grade year left two real gaps, multi-digit multiplication and fraction multiplication. Everything else back here lights up intact. Hold that thought.",
+          body: "A hard fourth-grade year left two real gaps, multi-digit multiplication and fraction multiplication, the second taking its three sub-standards down with it. Everything else back here lights up intact. Hold that thought.",
         },
         holdMs: 10500,
         transition: "lapse",
@@ -430,7 +430,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:5"], pose: 1 },
         card: {
           title: "What passes by meanwhile",
-          body: "Fifth grade happens anyway. Volume, the coordinate plane, line plots: 40 standards go past while this student reviews, and 32 of the 40 stand on foundations that were never broken. The student could have met them.",
+          body: "Fifth grade happens anyway. Volume, the coordinate plane, line plots: 40 standards go past while this student reviews, and 30 of the 40 stand on foundations that were never broken. The student could have met them.",
         },
         holdMs: 11500,
         transition: "lapse",
