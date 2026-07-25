@@ -173,8 +173,10 @@ describe("family roll-up: no local reimplementation survives", () => {
   const browseSrc = readFileSync(resolve(ROOT, "src/ui/browse.ts"), "utf8");
   const machineSrc = readFileSync(resolve(ROOT, "src/state/machine.ts"), "utf8");
 
-  it("browse.ts calls the shared helper and dropped its stale gate", () => {
-    expect(browseSrc).toContain("rollUpFamily(");
+  it("browse.ts routes through the shared resolver and dropped its stale gate", () => {
+    // Browse resolves through resolveConnections (which wraps rollUpFamily and
+    // adds the edgeless-child inherit case), not a local copy.
+    expect(browseSrc).toContain("resolveConnections(");
     // The stale hand-copied edgeless-only gate must be gone.
     expect(browseSrc).not.toContain(
       "!buildsOn.length && !leadsTo.length && !rel.length",
@@ -183,10 +185,11 @@ describe("family roll-up: no local reimplementation survives", () => {
     expect(browseSrc).not.toMatch(/const roll = \(adj: number\[\]\[\]\)/);
   });
 
-  it("machine.ts exports the helper and computeFocus routes through it", () => {
+  it("machine.ts exports both helpers and computeModel routes through resolveConnections", () => {
     expect(machineSrc).toContain("export function rollUpFamily(");
+    expect(machineSrc).toContain("export function resolveConnections(");
     expect(machineSrc).toContain(
-      "rollUpFamily(focus, parts, preds, succ, relatedAdj)",
+      "resolveConnections(focus, partsOf, parentOf, preds, succ, relatedAdj)",
     );
   });
 });

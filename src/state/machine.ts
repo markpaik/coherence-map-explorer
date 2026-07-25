@@ -7,15 +7,27 @@
 // States: idle | hover(n) | focus(n) | searching.
 //   - hover is a transient overlay; during a focus it rides on top of the
 //     focus emphasis and is restored on hover-out.
-//   - focus computes ancestors (reverse-prereq BFS), descendants (forward BFS)
-//     and direct related, then lights the closure and flies the camera.
+//   - focus runs a TWO-STAGE ladder. Stage 1 (local, the default first click)
+//     lights only the one-hop neighbourhood: the standard, its family, its
+//     direct builds-on / leads-to / related, and the edges between them. Stage 2
+//     (journey) lights the full ancestor + descendant closure with the
+//     grade-stepped cascade and a direction chip (foundations / both / onward).
+//     A re-click of the focused node (or the panel button) escalates local →
+//     journey; a further re-click toggles back to local. Journey stage is NOT
+//     encoded in the hash.
+//   - every standard resolves to a meaningful stage 1: family parents roll up
+//     their sub-standards' edges, and an edgeless sub-standard inherits its
+//     family's edges (resolveConnections). Only two genuinely isolated
+//     standards keep "No mapped connections."
 //
 // Emphasis is eased on the CPU (~150ms) so hover ramps smoothly. But easing
 // from REST to a distant state (CHAIN/RELATED/FOCUS) would sweep *through* the
 // brighter intermediate states (a flash) — the Phase 2 caveat. So the focus
 // cascade SNAPS each revealed layer to its target (current = target) and drives
 // the choreography with per-layer TIMING instead of per-node easing. Only the
-// gentle REST→DIMMED fade of the background is left to ease.
+// gentle REST→DIMMED fade of the background is left to ease. A direction change
+// or a toggle back to local re-lights with an instant snap (a downward ease
+// would sweep back through the brighter FOCUS/HOVER band).
 
 import * as THREE from "three";
 import type { GraphCore, GraphNode } from "../data";
@@ -29,9 +41,13 @@ import type { PanelHandle, Connections } from "../ui/panel";
 
 const EASE_TIME_CONSTANT = 0.05; // s; ~95% settled in 150ms
 const SETTLE_EPSILON = 0.002;
-const GRADE_STEP_MS = 80; // per grade layer of the cascade
+const GRADE_STEP_MS = 80; // per grade layer of the stage-2 journey cascade
 const DESCENDANT_DELAY_MS = 200; // descendants ignite this much after focus
+const STAGE1_NEIGHBOR_MS = 100; // stage-1 one-hop neighbours land one short wave after focus
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
+
+/** Stage-2 journey direction: the ancestor side, both, or the descendant side. */
+export type JourneyDirection = "foundations" | "both" | "onward";
 
 export type MachineState =
   | "idle"
@@ -69,6 +85,13 @@ export interface FocusOpts {
    * except re-focusing the already-focused node (which replaces — no dup entry).
    */
   history?: "push" | "replace";
+  /**
+   * Which stage the focus lands on. "local" (default) lights only the one-hop
+   * neighbourhood. "journey" immediately lights the full ancestor + descendant
+   * closure (direction Both) — the story player opts in so a silent focus keeps
+   * the pre-ladder full-closure lighting without opening the panel or the chip.
+   */
+  stage?: "local" | "journey";
 }
 
 export interface EmphasisPatch {
@@ -113,21 +136,41 @@ export interface Machine {
   focus(nodeIndex: number, opts?: FocusOpts): void;
   /** Focus by standard code; returns false (and warns) on an unknown code. */
   focusByCode(code: string, opts?: FocusOpts): boolean;
-  /** Trace-to-foundations: pull the camera back to frame the ancestor closure. */
-  trace(): void;
+  /**
+   * Enter (or, while already in the journey, re-aim) stage 2: light the full
+   * ancestor + descendant closure with the grade-stepped cascade. `direction`
+   * defaults to "both" on a fresh journey; a change re-lights instantly with no
+   * cascade replay. No-op when nothing is focused.
+   */
+  traceJourney(direction?: JourneyDirection): void;
+  /**
+   * Re-click of the ALREADY-FOCUSED node: escalate local → journey (Both), or
+   * toggle journey → local. No-op when nothing is focused.
+   */
+  escalateFocus(): void;
+  /** Current focus stage (local one-hop vs full journey). */
+  readonly stage: "local" | "journey";
+  /** Active journey direction (only meaningful while `stage === "journey"`). */
+  readonly journeyDirection: JourneyDirection;
   /**
    * Re-run the focus camera fit for the CURRENT focus (no cascade re-run). The
    * pose driver calls this after a morph so an active focus reframes to the
-   * standard's new position; no-op when nothing is focused.
+   * standard's new position; no-op when nothing is focused. Respects the stage:
+   * the one-hop sphere in local, the journey sphere of the active direction in
+   * journey.
    */
   reframe(): void;
   /** Leave focus: back to idle, close panel, clear the hash. `silent` (stories)
    *  resets emphasis without touching the hash. */
   clearFocus(opts?: { silent?: boolean }): void;
   /** Read-only snapshot of the current focus's full ancestor closure (node
-   * indices), or [] when nothing is focused. The panel's "Foundations" trace
+   * indices), or [] when nothing is focused. The panel's "Foundations" journey
    * section reads this instead of recomputing the closure. */
   getFocusAncestors(): number[];
+  /** Read-only snapshot of the current focus's full descendant closure (node
+   * indices), or [] when nothing is focused. The panel's "Onward" journey
+   * section reads this. */
+  getFocusDescendants(): number[];
   /** Mark the search UI open/closed (suspends drift, reflects in `state`). */
   setSearching(on: boolean): void;
   /** Enter/leave the guided tour (suspends drift, reports state "touring"). */
@@ -181,9 +224,10 @@ export interface RolledConnections {
  * family-internal member (the parent and its parts) removed. A standalone
  * standard (no parts) returns its own direct sets unchanged with rolledUp=false.
  *
- * Pure function of the adjacency arrays — the SINGLE source of truth for both
- * the 3D panel (machine.computeFocus) and mobile Browse (renderConnections), so
- * the two can never drift. Edgeless parents (e.g. 4.NF.B.3) are the degenerate
+ * Pure function of the adjacency arrays — wrapped by resolveConnections, which
+ * both the 3D panel (machine.computeModel) and mobile Browse (renderConnections)
+ * resolve through, so the two can never drift. Edgeless parents (e.g. 4.NF.B.3)
+ * are the degenerate
  * case of the same rule; partial parents (e.g. 6.RP.A.3, which owns outbound
  * edges while its .a-.d hold the inbound lineage from 5.G.A.2 / 6.RP.A.1 /
  * 6.RP.A.2) are exactly why the gate is parts.length, not "parent has no edges".
@@ -215,6 +259,63 @@ export function rollUpFamily(
     related: roll(relatedAdj[focus], relatedAdj),
     rolledUp: true,
   };
+}
+
+/** rollUpFamily's output, plus the inherit case for an edgeless sub-standard. */
+export interface ResolvedConnections {
+  buildsOn: number[];
+  leadsTo: number[];
+  related: number[];
+  /** True when the focus is a family parent whose sub-standards' edges rolled up. */
+  rolledUp: boolean;
+  /** Parent node index when an edgeless sub-standard INHERITS its family's
+   *  rolled-up connections; undefined otherwise (parent, standalone, or solo). */
+  inheritedFrom?: number;
+}
+
+/**
+ * The one function both the machine and mobile Browse resolve a standard's
+ * connections through, so their stage-1 semantics can never drift. It wraps
+ * rollUpFamily and adds the ONE case rollUpFamily cannot see on its own: an
+ * edgeless sub-standard (zero own builds-on + leads-to + related) whose family
+ * carries the map's edges INHERITS the family's rolled-up sets, family-internal
+ * members excluded. So every one of the 480 standards resolves to a meaningful
+ * neighbourhood except the two genuinely isolated solos.
+ *
+ * Inheritance triggers ONLY when the focus's own three sets are all empty; a
+ * sub-standard that owns any edge (e.g. 6.RP.A.3.a) keeps exactly its own sets.
+ * A family parent still rolls up unconditionally (rollUpFamily's rule); a
+ * standalone standard returns its own direct sets. Pure function of the
+ * adjacency arrays.
+ */
+export function resolveConnections(
+  focus: number,
+  partsOf: number[][],
+  parentOf: (number | undefined)[],
+  preds: number[][],
+  succ: number[][],
+  relatedAdj: number[][],
+): ResolvedConnections {
+  const own = rollUpFamily(focus, partsOf[focus], preds, succ, relatedAdj);
+  if (own.buildsOn.length || own.leadsTo.length || own.related.length) return { ...own };
+  // Own three sets are all empty: an edgeless sub-standard inherits its family's
+  // rolled-up connections. rollUpFamily(parent, …) already drops the parent and
+  // every sub-standard (this focus and its siblings), so the inherited sets are
+  // exactly the family's external neighbours.
+  const parent = parentOf[focus];
+  if (parent !== undefined) {
+    const inh = rollUpFamily(parent, partsOf[parent], preds, succ, relatedAdj);
+    if (inh.buildsOn.length || inh.leadsTo.length || inh.related.length) {
+      return {
+        buildsOn: inh.buildsOn,
+        leadsTo: inh.leadsTo,
+        related: inh.related,
+        rolledUp: false,
+        inheritedFrom: parent,
+      };
+    }
+  }
+  return { ...own }; // genuinely isolated (a solo standard, now truthfully empty)
 }
 
 export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
@@ -272,6 +373,11 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       if (ci !== undefined) partsOf[i].push(ci);
     }
   });
+  // Child node index -> its parent node index (edgeless children inherit the
+  // family's connections at focus time via resolveConnections).
+  const parentOf: (number | undefined)[] = graph.nodes.map((n) =>
+    n.parent !== undefined ? indexById.get(n.parent) : undefined,
+  );
 
   // --- emphasis buffers ----------------------------------------------------
   const nodeTarget = new Float32Array(nodeCount).fill(EMPHASIS.REST);
@@ -285,13 +391,20 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   let storying = false;
   let hovered: number | null = null;
   let focusIndex: number | null = null;
+  // The current focus's resolved model (family, one-hop sets, full closures),
+  // computed once per focus() and read by both stages, reframe(), and the panel.
+  let focusModel: FocusModel | null = null;
+  let stage: "local" | "journey" = "local";
+  let journeyDirection: JourneyDirection = "both";
+  // A silent focus (the story player) suppresses panel + hash + chip in both
+  // stages, exactly as it does for a stage-1 open.
+  let silentFocus = false;
 
   // Accumulated focus overrides (grow as cascade waves fire); hover reads these
   // so it never re-lights not-yet-revealed layers.
   let curNodeOv = new Map<number, Emphasis>();
   let curEdgeOv = new Map<number, Emphasis>();
-  let lastAncestors: number[] = []; // for trace-to-foundations framing
-  let lastNeighborhood: number[] = []; // for pose-morph reframing (no cascade re-run)
+  let lastNeighborhood: number[] = []; // one-hop directed set, for pose-morph reframing
   let lastRelated: number[] = []; // related pairs: widen the fit only up to the cap
   let revealTimers: number[] = [];
 
@@ -329,28 +442,34 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     requestRender();
   }
 
-  // --- focus closure computation ------------------------------------------
-  interface FocusData {
-    ancestors: number[];
-    descendants: number[];
-    related: number[];
-    buildsOn: number[]; // direct incoming prereqs
-    leadsTo: number[]; // direct outgoing prereqs
-    parts: number[]; // sub-standards of a parent standard (may be empty)
-    rolledUp: boolean; // true when buildsOn/leadsTo came from the children
+  // --- focus model + per-stage lighting ------------------------------------
+  // The resolved model, computed once per focus() and shared by both stages,
+  // reframe(), and the panel. `anchors` are the family members that physically
+  // bear the one-hop edges (a parent + its parts; an inherit child's parent +
+  // all its parts, which includes the focus; else just the focus). `familyLit`
+  // is anchors without the focus — the CHAIN-lit family context.
+  interface FocusModel {
+    focus: number;
+    anchors: number[];
+    familyLit: number[];
+    buildsOn: number[]; // resolved direct prereqs, grade-sorted (panel order)
+    leadsTo: number[]; // resolved direct successors, grade-sorted
+    related: number[]; // resolved direct related, grade-sorted
+    rolledUp: boolean; // focus is a family parent
+    inheritedFrom?: number; // parent index when an edgeless child inherits
+    ancestors: number[]; // full reverse-prereq closure (stage 2)
+    descendants: number[]; // full forward closure (stage 2)
+  }
+
+  interface Lighting {
     nodeFinal: Map<number, Emphasis>;
     edgeFinal: Map<number, Emphasis>;
     nodeReveal: Map<number, number>; // ms
     edgeReveal: Map<number, number>; // ms
   }
 
-  function bfs(start: number, adj: number[][]): number[] {
-    return bfsFrom(adj[start], adj, new Set([start]));
-  }
-
   // BFS over `adj` seeded from `frontier`, never revisiting anything already in
-  // `seen` (used for rolled-up parents: seed = children's neighbours, seen =
-  // the family so the closure excludes the parent and its own sub-standards).
+  // `seen` (the family so the closure excludes the anchors and their siblings).
   function bfsFrom(frontier: number[], adj: number[][], seen: Set<number>): number[] {
     const out: number[] = [];
     const queue: number[] = [];
@@ -377,49 +496,105 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   const byGradeThenCode = (a: number, b: number): number =>
     gradeIndex[a] - gradeIndex[b] || (graph.nodes[a].code < graph.nodes[b].code ? -1 : 1);
 
-  function computeFocus(focus: number): FocusData {
-    const parts = partsOf[focus];
-    // EVERY parent standard rolls its children's connections into its own at
-    // focus time, family-internal edges excluded. The original coherence map
-    // presents a family as ONE card, so an arrow into any sub-standard reads
-    // as an arrow into the parent; a parent that kept only its own edges could
-    // show "builds on nothing" while its children carry the real inbound
-    // lineage (Mark's 6.RP.A.3 catch: its .a-.d hold the prereqs from
-    // 5.G.A.2 / 6.RP.A.1 / 6.RP.A.2 while the parent owns only outbound).
-    // Edgeless parents (e.g. 4.NF.B.3) are the degenerate case of the same
-    // rule.
-    const {
-      buildsOn: seedPreds,
-      leadsTo: seedSucc,
-      related: seedRelated,
-      rolledUp,
-    } = rollUpFamily(focus, parts, preds, succ, relatedAdj);
-    // BFS ancestry/descendants seed from the (possibly rolled-up) direct sets.
-    const ancestors = rolledUp
-      ? bfsFrom(seedPreds, preds, new Set([focus, ...parts]))
-      : bfs(focus, preds);
-    const descendants = rolledUp
-      ? bfsFrom(seedSucc, succ, new Set([focus, ...parts]))
-      : bfs(focus, succ);
-    const related = [...seedRelated];
-    const ancSet = new Set(ancestors);
-    const descSet = new Set(descendants);
-    // When rolled up, the children stand in for the focus in the lineage: they
-    // anchor both ends of the chain and light like it.
-    const anchors = new Set<number>([focus, ...(rolledUp ? parts : [])]);
+  function computeModel(focus: number): FocusModel {
+    const res = resolveConnections(focus, partsOf, parentOf, preds, succ, relatedAdj);
+    // Family members that bear the one-hop edges to the neighbours:
+    //   parent case  → the parent (focus) plus its sub-standards
+    //   inherit case → the parent plus ALL its sub-standards (incl. the focus)
+    //   standalone   → just the focus
+    let anchors: number[];
+    if (res.rolledUp) anchors = [focus, ...partsOf[focus]];
+    else if (res.inheritedFrom !== undefined)
+      anchors = [res.inheritedFrom, ...partsOf[res.inheritedFrom]];
+    else anchors = [focus];
+    const familyLit = anchors.filter((i) => i !== focus);
+    // Full closures seed from the resolved direct sets, the family excluded
+    // (identical to the pre-ladder computeFocus for parents and standalones).
+    const ancestors = bfsFrom(res.buildsOn, preds, new Set(anchors));
+    const descendants = bfsFrom(res.leadsTo, succ, new Set(anchors));
+    return {
+      focus,
+      anchors,
+      familyLit,
+      buildsOn: [...res.buildsOn].sort(byGradeThenCode),
+      leadsTo: [...res.leadsTo].sort(byGradeThenCode),
+      related: [...res.related].sort(byGradeThenCode),
+      rolledUp: res.rolledUp,
+      inheritedFrom: res.inheritedFrom,
+      ancestors,
+      descendants,
+    };
+  }
 
-    // Node emphasis: related (weakest) < chain < focus (strongest) wins.
+  // Stage 1: the one-hop neighbourhood only. Focus (FOCUS), family (CHAIN),
+  // direct builds-on / leads-to (CHAIN), direct related (RELATED), and ONLY the
+  // edges between the family anchors and those neighbours. No grade cascade —
+  // focus + related at 0, the neighbours one short wave later.
+  function localLighting(m: FocusModel): Lighting {
+    const anchors = new Set(m.anchors);
+    const buildsOnSet = new Set(m.buildsOn);
+    const leadsToSet = new Set(m.leadsTo);
+    const relatedSet = new Set(m.related);
+
+    const nodeFinal = new Map<number, Emphasis>();
+    for (const r of m.related) nodeFinal.set(r, EMPHASIS.RELATED);
+    for (const b of m.buildsOn) nodeFinal.set(b, EMPHASIS.CHAIN);
+    for (const l of m.leadsTo) nodeFinal.set(l, EMPHASIS.CHAIN);
+    for (const f of m.familyLit) nodeFinal.set(f, EMPHASIS.CHAIN);
+    nodeFinal.set(m.focus, EMPHASIS.FOCUS);
+
+    const edgeFinal = new Map<number, Emphasis>();
+    for (let i = 0; i < edgeCount; i++) {
+      const s = edgeS[i];
+      const t = edgeT[i];
+      if (s < 0 || t < 0) continue;
+      if (edgeK[i] === 0) {
+        // A one-hop prereq edge: an anchor to a direct builds-on or leads-to.
+        if ((anchors.has(t) && buildsOnSet.has(s)) || (anchors.has(s) && leadsToSet.has(t)))
+          edgeFinal.set(i, EMPHASIS.CHAIN);
+      } else if ((anchors.has(s) && relatedSet.has(t)) || (anchors.has(t) && relatedSet.has(s))) {
+        edgeFinal.set(i, EMPHASIS.RELATED);
+      }
+    }
+
+    const nodeReveal = new Map<number, number>();
+    nodeReveal.set(m.focus, 0);
+    for (const r of m.related) nodeReveal.set(r, 0);
+    for (const f of m.familyLit) nodeReveal.set(f, STAGE1_NEIGHBOR_MS);
+    for (const b of m.buildsOn) nodeReveal.set(b, STAGE1_NEIGHBOR_MS);
+    for (const l of m.leadsTo) nodeReveal.set(l, STAGE1_NEIGHBOR_MS);
+    const edgeReveal = new Map<number, number>();
+    edgeFinal.forEach((_v, i) => {
+      const rs = nodeReveal.get(edgeS[i]) ?? 0;
+      const rt = nodeReveal.get(edgeT[i]) ?? 0;
+      edgeReveal.set(i, Math.max(rs, rt));
+    });
+    return { nodeFinal, edgeFinal, nodeReveal, edgeReveal };
+  }
+
+  // Stage 2: the full journey. Direction "both" reproduces the pre-ladder
+  // full-closure lighting exactly (so a silent story focus is byte-identical);
+  // "foundations" drops the descendants + related, "onward" drops the ancestors
+  // + related. The grade-stepped cascade is the stage-2 payoff (ancestors step
+  // backward per grade, descendants ignite after DESCENDANT_DELAY_MS).
+  function journeyLighting(m: FocusModel, dir: JourneyDirection): Lighting {
+    const includeAnc = dir !== "onward";
+    const includeDesc = dir !== "foundations";
+    const includeRelated = dir === "both";
+
+    const anchors = new Set(m.anchors);
+    const ancSet = includeAnc ? new Set(m.ancestors) : new Set<number>();
+    const descSet = includeDesc ? new Set(m.descendants) : new Set<number>();
+    const related = includeRelated ? m.related : [];
+    const relatedSet = new Set(related);
+
     const nodeFinal = new Map<number, Emphasis>();
     for (const r of related) nodeFinal.set(r, EMPHASIS.RELATED);
-    for (const a of ancestors) nodeFinal.set(a, EMPHASIS.CHAIN);
-    for (const d of descendants) nodeFinal.set(d, EMPHASIS.CHAIN);
-    if (rolledUp) for (const p of parts) nodeFinal.set(p, EMPHASIS.CHAIN);
-    nodeFinal.set(focus, EMPHASIS.FOCUS);
+    if (includeAnc) for (const a of m.ancestors) nodeFinal.set(a, EMPHASIS.CHAIN);
+    if (includeDesc) for (const d of m.descendants) nodeFinal.set(d, EMPHASIS.CHAIN);
+    for (const f of m.familyLit) nodeFinal.set(f, EMPHASIS.CHAIN);
+    nodeFinal.set(m.focus, EMPHASIS.FOCUS);
 
-    // Edge emphasis: prereq edge inside the ancestor OR descendant lineage is a
-    // hot flowing CHAIN edge; a related edge touching the focus (or its parts)
-    // is a dashed RELATED shimmer. Everything else stays dimmed (the base).
-    const relatedAnchorAdj = new Set(related);
     const edgeFinal = new Map<number, Emphasis>();
     for (let i = 0; i < edgeCount; i++) {
       const s = edgeS[i];
@@ -429,47 +604,42 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
         const inAnc = (anchors.has(s) || ancSet.has(s)) && (anchors.has(t) || ancSet.has(t));
         const inDesc = (anchors.has(s) || descSet.has(s)) && (anchors.has(t) || descSet.has(t));
         if (inAnc || inDesc) edgeFinal.set(i, EMPHASIS.CHAIN);
-      } else if (anchors.has(s) || anchors.has(t)) {
+      } else if (includeRelated && (anchors.has(s) || anchors.has(t))) {
         const other = anchors.has(s) ? t : s;
-        if (relatedAnchorAdj.has(other)) edgeFinal.set(i, EMPHASIS.RELATED);
+        if (relatedSet.has(other)) edgeFinal.set(i, EMPHASIS.RELATED);
       }
     }
 
-    // Reveal schedule (ms). Focus + related at 0; ancestors step backward per
-    // grade layer; descendants step forward, delayed 200ms and behind ancestors.
     const nodeReveal = new Map<number, number>();
-    nodeReveal.set(focus, 0);
+    nodeReveal.set(m.focus, 0);
     for (const r of related) nodeReveal.set(r, 0);
-    if (rolledUp) for (const p of parts) nodeReveal.set(p, 0);
-    const fg = gradeIndex[focus];
-    for (const a of ancestors) {
-      const layer = Math.max(fg - gradeIndex[a], 1);
-      nodeReveal.set(a, layer * GRADE_STEP_MS);
-    }
-    for (const d of descendants) {
-      const layer = Math.max(gradeIndex[d] - fg, 1);
-      nodeReveal.set(d, DESCENDANT_DELAY_MS + layer * GRADE_STEP_MS);
-    }
+    for (const f of m.familyLit) nodeReveal.set(f, 0);
+    const fg = gradeIndex[m.focus];
+    if (includeAnc)
+      for (const a of m.ancestors) {
+        const layer = Math.max(fg - gradeIndex[a], 1);
+        nodeReveal.set(a, layer * GRADE_STEP_MS);
+      }
+    if (includeDesc)
+      for (const d of m.descendants) {
+        const layer = Math.max(gradeIndex[d] - fg, 1);
+        nodeReveal.set(d, DESCENDANT_DELAY_MS + layer * GRADE_STEP_MS);
+      }
     const edgeReveal = new Map<number, number>();
     edgeFinal.forEach((_v, i) => {
       const rs = nodeReveal.get(edgeS[i]) ?? 0;
       const rt = nodeReveal.get(edgeT[i]) ?? 0;
       edgeReveal.set(i, Math.max(rs, rt));
     });
+    return { nodeFinal, edgeFinal, nodeReveal, edgeReveal };
+  }
 
-    return {
-      ancestors,
-      descendants,
-      related,
-      buildsOn: [...seedPreds].sort(byGradeThenCode),
-      leadsTo: [...seedSucc].sort(byGradeThenCode),
-      parts: [...parts].sort(byGradeThenCode),
-      rolledUp,
-      nodeFinal,
-      edgeFinal,
-      nodeReveal,
-      edgeReveal,
-    };
+  // The node set each journey direction frames.
+  function journeyFitSet(m: FocusModel, dir: JourneyDirection): number[] {
+    const base = [m.focus, ...m.familyLit];
+    if (dir === "foundations") return [...base, ...m.ancestors];
+    if (dir === "onward") return [...base, ...m.descendants];
+    return [...base, ...m.ancestors, ...m.descendants];
   }
 
   // Sphere CENTERED on one node, radius reaching the farthest of its neighbors:
@@ -568,7 +738,61 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     else history.replaceState(null, "", next);
   }
 
-  // --- focus ---------------------------------------------------------------
+  // Paint a lighting layer. `cut` snaps everything to target instantly (a
+  // downward ease would sweep back through the brighter FOCUS/HOVER band);
+  // otherwise each reveal wave snaps its freshly-lit layer on a timer and the
+  // background's REST→DIMMED fade is left to ease. Composes the live hover
+  // overlay so a resting pointer keeps its highlight across waves.
+  function revealLighting(l: Lighting, cut: boolean): void {
+    clearRevealTimers();
+    curNodeOv = new Map();
+    curEdgeOv = new Map();
+    if (cut) {
+      curNodeOv = new Map(l.nodeFinal);
+      curEdgeOv = new Map(l.edgeFinal);
+      const { nodeOv, edgeOv } = focusOverrides();
+      applyEmphasis({
+        baseNode: EMPHASIS.DIMMED,
+        baseEdge: EMPHASIS.DIMMED,
+        nodeOverrides: nodeOv,
+        edgeOverrides: edgeOv,
+      });
+      snapAll();
+      return;
+    }
+    // Bucket every node/edge reveal by its scheduled time, then fire one timer
+    // per distinct time. Time 0 runs synchronously.
+    const times = new Set<number>([0]);
+    l.nodeReveal.forEach((t) => times.add(t));
+    l.edgeReveal.forEach((t) => times.add(t));
+    const sorted = [...times].sort((a, b) => a - b);
+    const runWave = (t: number): void => {
+      l.nodeReveal.forEach((rt, i) => {
+        if (rt === t) curNodeOv.set(i, l.nodeFinal.get(i)!);
+      });
+      l.edgeReveal.forEach((rt, i) => {
+        if (rt === t) curEdgeOv.set(i, l.edgeFinal.get(i)!);
+      });
+      const { nodeOv, edgeOv } = focusOverrides();
+      applyEmphasis({
+        baseNode: EMPHASIS.DIMMED,
+        baseEdge: EMPHASIS.DIMMED,
+        nodeOverrides: nodeOv,
+        edgeOverrides: edgeOv,
+      });
+      const litNodes = [...l.nodeReveal].filter(([, rt]) => rt === t).map(([i]) => i);
+      const litEdges = [...l.edgeReveal].filter(([, rt]) => rt === t).map(([i]) => i);
+      snapNodes(litNodes);
+      snapEdges(litEdges);
+      requestRender();
+    };
+    for (const t of sorted) {
+      if (t === 0) runWave(0);
+      else revealTimers.push(window.setTimeout(() => runWave(t), t));
+    }
+  }
+
+  // --- focus (stage 1: local) ---------------------------------------------
   function focus(nodeIndex: number, opts?: FocusOpts): void {
     if (nodeIndex < 0 || nodeIndex >= nodeCount) return;
     clearRevealTimers();
@@ -577,91 +801,40 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     hovered = null;
     tooltip.hide();
     canvas.style.cursor = "";
+    stage = "local";
+    journeyDirection = "both";
+    silentFocus = opts?.silent === true;
 
-    const data = computeFocus(nodeIndex);
-    lastAncestors = data.ancestors;
-    curNodeOv = new Map();
-    curEdgeOv = new Map();
+    const model = computeModel(nodeIndex);
+    focusModel = model;
 
     const node = graph.nodes[nodeIndex];
     // Reduced motion always cuts; deep links request an instant cut too.
     const cut = reducedMotion || opts?.instant === true;
 
-    if (cut) {
-      curNodeOv = data.nodeFinal;
-      curEdgeOv = data.edgeFinal;
-      applyEmphasis({
-        baseNode: EMPHASIS.DIMMED,
-        baseEdge: EMPHASIS.DIMMED,
-        nodeOverrides: curNodeOv,
-        edgeOverrides: curEdgeOv,
-      });
-      snapAll();
-    } else {
-      // Bucket every node/edge reveal by its scheduled time, then fire one
-      // timer per distinct time. Time 0 runs synchronously.
-      const times = new Set<number>([0]);
-      data.nodeReveal.forEach((t) => times.add(t));
-      data.edgeReveal.forEach((t) => times.add(t));
-      const sorted = [...times].sort((a, b) => a - b);
+    revealLighting(localLighting(model), cut);
 
-      const runWave = (t: number): void => {
-        data.nodeReveal.forEach((rt, i) => {
-          if (rt === t) curNodeOv.set(i, data.nodeFinal.get(i)!);
-        });
-        data.edgeReveal.forEach((rt, i) => {
-          if (rt === t) curEdgeOv.set(i, data.edgeFinal.get(i)!);
-        });
-        // Compose in the live hover overlay so a pointer resting on a node keeps
-        // its highlight across waves instead of dying on the next step.
-        const { nodeOv, edgeOv } = focusOverrides();
-        applyEmphasis({
-          baseNode: EMPHASIS.DIMMED,
-          baseEdge: EMPHASIS.DIMMED,
-          nodeOverrides: nodeOv,
-          edgeOverrides: edgeOv,
-        });
-        // Snap only the freshly-lit layer (bright targets) — the background's
-        // REST→DIMMED fade is left to ease for a gentle settle.
-        const litNodes = [...data.nodeReveal].filter(([, rt]) => rt === t).map(([i]) => i);
-        const litEdges = [...data.edgeReveal].filter(([, rt]) => rt === t).map(([i]) => i);
-        snapNodes(litNodes);
-        snapEdges(litEdges);
-        requestRender();
-      };
-
-      for (const t of sorted) {
-        if (t === 0) runWave(0);
-        else revealTimers.push(window.setTimeout(() => runWave(t), t));
-      }
-    }
-
-    // Camera: frame focus + its DIRECT neighbors (+ parts). During a story the
-    // panel is closed, so the framing is unshifted (silent ⇒ 0 offset).
-    const silent = opts?.silent === true;
-    const directed = [nodeIndex, ...data.parts, ...data.buildsOn, ...data.leadsTo];
+    // Camera: frame focus + its DIRECT one-hop neighbours (+ family). During a
+    // story the panel is closed, so the framing is unshifted (silent ⇒ 0 offset).
+    const directed = [nodeIndex, ...model.familyLit, ...model.buildsOn, ...model.leadsTo];
     lastNeighborhood = directed; // reframe() replays this fit after a morph
-    lastRelated = [...data.related];
+    lastRelated = [...model.related];
     void rig.focusOn(
       sphereAround(nodeIndex, directed, lastRelated),
       !cut,
-      silent ? 0 : focusPanelOffsetPx(),
+      silentFocus ? 0 : focusPanelOffsetPx(),
     );
 
     // Panel + narration + deep link — all owned by the story card while silent.
-    if (!silent) {
-      const connections: Connections = {
-        buildsOn: data.buildsOn,
-        leadsTo: data.leadsTo,
-        related: [...data.related].sort(byGradeThenCode),
-        parts: data.parts,
-        rolledUp: data.rolledUp,
-      };
-      panel.show(nodeIndex, connections);
-      const partsNote = data.parts.length ? `, ${data.parts.length} sub-standards` : "";
+    if (!silentFocus) {
+      panel.show(nodeIndex, connectionsFor(model));
+      const partsNote =
+        model.rolledUp && partsOf[nodeIndex].length
+          ? `, ${partsOf[nodeIndex].length} sub-standards`
+          : "";
       announce(
-        `Focused ${node.code}, builds on ${data.buildsOn.length} ` +
-          `${data.buildsOn.length === 1 ? "standard" : "standards"}, leads to ${data.leadsTo.length}${partsNote}`,
+        `Focused ${node.code}, builds on ${model.buildsOn.length} ` +
+          `${model.buildsOn.length === 1 ? "standard" : "standards"}, leads to ${model.leadsTo.length}${partsNote}`,
       );
       // A caller may force the mode (routers/tour/restore pass "replace"); absent
       // that, a fresh open pushes a history entry (Back unwinds the hop) but a
@@ -669,6 +842,30 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       updateHash(node.code, focusHistoryMode(opts?.history, prevFocus === nodeIndex));
     }
     requestRender();
+
+    // Story player opts into the full closure immediately (silent journey):
+    // light stage 2 (Both) without opening the panel, the chip, or the hash.
+    if (opts?.stage === "journey") applyJourney("both", !cut);
+  }
+
+  // The panel's Connections payload for a resolved model.
+  function connectionsFor(m: FocusModel): Connections {
+    return {
+      buildsOn: m.buildsOn,
+      leadsTo: m.leadsTo,
+      related: m.related,
+      parts: m.rolledUp ? [...partsOf[m.focus]].sort(byGradeThenCode) : undefined,
+      rolledUp: m.rolledUp,
+      inheritedFrom: m.inheritedFrom,
+      // Inherit case: the Family group lists the parent first, then the siblings.
+      family:
+        m.inheritedFrom !== undefined
+          ? [m.inheritedFrom, ...partsOf[m.inheritedFrom].filter((i) => i !== m.focus)]
+          : undefined,
+      // The journey button is meaningful only when the closure runs past the
+      // one-hop set (this replaces the old buildsOn-only gate).
+      journeyable: m.ancestors.length + m.descendants.length > 0,
+    };
   }
 
   function focusByCode(code: string, opts?: FocusOpts): boolean {
@@ -681,24 +878,87 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     return true;
   }
 
-  function trace(): void {
-    if (focusIndex === null) return;
-    // Ancestors are already lit (CHAIN) from focus; pull the camera back to
-    // frame the whole ancestor closure so the lineage to K is on screen.
-    const sphere = sphereOf([focusIndex, ...lastAncestors]);
-    void rig.focusOn(sphere, !reducedMotion, focusPanelOffsetPx());
+  // --- focus (stage 2: journey) -------------------------------------------
+  function directionAnnounce(dir: JourneyDirection): string {
+    if (dir === "foundations") return "Showing the foundations this builds on.";
+    if (dir === "onward") return "Showing where this leads onward.";
+    return "Showing the full journey.";
+  }
+
+  // Enter (from local) or re-aim (within journey) stage 2. `allowCascade` is
+  // honoured only when entering from local — a direction change re-lights
+  // instantly, no cascade replay.
+  function applyJourney(dir: JourneyDirection, allowCascade: boolean): void {
+    if (focusIndex === null || focusModel === null) return;
+    const wasLocal = stage === "local";
+    stage = "journey";
+    journeyDirection = dir;
+    const cut = reducedMotion || !allowCascade || !wasLocal;
+    revealLighting(journeyLighting(focusModel, dir), cut);
+    void rig.focusOn(
+      sphereOf(journeyFitSet(focusModel, dir)),
+      !reducedMotion,
+      silentFocus ? 0 : focusPanelOffsetPx(),
+    );
+    if (!silentFocus) {
+      if (wasLocal) {
+        panel.showJourney(dir, focusModel.ancestors, focusModel.descendants);
+        const a = focusModel.ancestors.length;
+        const d = focusModel.descendants.length;
+        announce(
+          `Traced ${a} foundation ${a === 1 ? "standard" : "standards"} and ` +
+            `${d} onward ${d === 1 ? "standard" : "standards"}`,
+        );
+      } else {
+        panel.setJourneyDirection(dir);
+        announce(directionAnnounce(dir));
+      }
+    }
     requestRender();
   }
 
-  function reframe(): void {
-    if (focusIndex === null) return;
-    // Same fit as focus() — the neighborhood indices are unchanged; only their
-    // positions moved with the pose. Reuse the stored sets, no cascade re-run.
+  function traceJourney(direction?: JourneyDirection): void {
+    if (focusIndex === null || focusModel === null) return;
+    applyJourney(direction ?? "both", true);
+  }
+
+  // Toggle stage 2 back down to stage 1: re-light the one-hop set instantly (no
+  // cascade replay), camera back to the one-hop fit, chip + journey sections gone.
+  function toggleLocal(): void {
+    if (focusIndex === null || focusModel === null) return;
+    stage = "local";
+    journeyDirection = "both";
+    revealLighting(localLighting(focusModel), true);
     void rig.focusOn(
       sphereAround(focusIndex, lastNeighborhood, lastRelated),
       !reducedMotion,
-      focusPanelOffsetPx(),
+      silentFocus ? 0 : focusPanelOffsetPx(),
     );
+    if (!silentFocus) {
+      panel.hideJourney();
+      announce(`Collapsed to ${graph.nodes[focusIndex].code} and its direct connections.`);
+    }
+    requestRender();
+  }
+
+  // Re-click of the already-focused node: escalate local → journey, else toggle
+  // journey → local.
+  function escalateFocus(): void {
+    if (focusIndex === null) return;
+    if (stage === "local") traceJourney("both");
+    else toggleLocal();
+  }
+
+  function reframe(): void {
+    if (focusIndex === null || focusModel === null) return;
+    // Same indices as the active stage — only their positions moved with the
+    // pose. Reuse the stored sets, no cascade re-run: the one-hop sphere in
+    // local, the active direction's journey sphere in journey.
+    const sphere =
+      stage === "journey"
+        ? sphereOf(journeyFitSet(focusModel, journeyDirection))
+        : sphereAround(focusIndex, lastNeighborhood, lastRelated);
+    void rig.focusOn(sphere, !reducedMotion, focusPanelOffsetPx());
     requestRender();
   }
 
@@ -709,7 +969,10 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     hovered = null;
     curNodeOv = new Map();
     curEdgeOv = new Map();
-    lastAncestors = [];
+    focusModel = null;
+    stage = "local";
+    journeyDirection = "both";
+    silentFocus = false;
     lastNeighborhood = [];
     lastRelated = [];
     tooltip.hide();
@@ -757,8 +1020,19 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       const nIn = preds[nodeIndex].length;
       const nOut = succ[nodeIndex].length;
       const parts: string[] = [];
-      if (nIn + nOut === 0 && !partsOf[nodeIndex].length) parts.push("No mapped connections");
-      else if (partsOf[nodeIndex].length && nIn + nOut === 0)
+      if (nIn + nOut === 0 && !partsOf[nodeIndex].length) {
+        // No own prereqs and no sub-standards: an edgeless child inherits its
+        // family's connections; a genuine solo says so.
+        const r = resolveConnections(nodeIndex, partsOf, parentOf, preds, succ, relatedAdj);
+        if (r.inheritedFrom !== undefined) {
+          parts.push(
+            `Mapped on ${graph.nodes[r.inheritedFrom].code}`,
+            `Builds on ${r.buildsOn.length} · Leads to ${r.leadsTo.length}`,
+          );
+        } else {
+          parts.push("No mapped connections");
+        }
+      } else if (partsOf[nodeIndex].length && nIn + nOut === 0)
         parts.push(`${partsOf[nodeIndex].length} sub-standards`);
       else parts.push(`Builds on ${nIn} · Leads to ${nOut}`);
       if (deps.hasExample?.(n.id)) parts.push("worked example");
@@ -779,13 +1053,24 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       if (hovered !== null) tooltip.move(x, y);
     },
 
+    get stage() {
+      return stage;
+    },
+    get journeyDirection() {
+      return journeyDirection;
+    },
+
     focus,
     focusByCode,
-    trace,
+    traceJourney,
+    escalateFocus,
     reframe,
     clearFocus,
     getFocusAncestors() {
-      return [...lastAncestors];
+      return focusModel ? [...focusModel.ancestors] : [];
+    },
+    getFocusDescendants() {
+      return focusModel ? [...focusModel.descendants] : [];
     },
 
     setSearching(on) {

@@ -1192,6 +1192,93 @@ body.art-fidenza .ghost-btn:hover {
   transition: none;
 }
 
+/* Direction chip (stage 2 only): a segmented radiogroup — Foundations / Both /
+   Onward — that re-aims which side of the journey lights. */
+.panel-direction {
+  display: flex;
+  gap: 4px;
+  margin: -12px 0 16px;
+  padding: 3px;
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.panel-direction[hidden] {
+  display: none;
+}
+.panel-direction-opt {
+  flex: 1;
+  min-height: 36px;
+  padding: 7px 6px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.panel-direction-opt:hover {
+  background: rgb(255 255 255 / 0.06);
+  color: var(--ink);
+}
+.panel-direction-opt.is-selected {
+  background: linear-gradient(180deg, #b6a6ec, #8b5cf6);
+  color: #0b0b18;
+}
+
+/* Onward: the descendant closure, mirror of Foundations (K → HS order). */
+.panel-onward {
+  margin: -4px 0 20px;
+}
+.panel-onward:empty {
+  margin: 0;
+}
+.onward-grade {
+  border-top: 1px solid var(--line);
+}
+.onward-grade-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 0;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+}
+.onward-grade-h::-webkit-details-marker {
+  display: none;
+}
+.onward-grade-h::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--ink-3);
+  transition: transform 0.15s ease;
+}
+.onward-grade[open] > .onward-grade-h::before {
+  transform: rotate(90deg);
+}
+:root.rm .onward-grade-h::before {
+  transition: none;
+}
+
+/* Inherit case: an edgeless sub-standard shows its family's connections under
+   this note, with a "Family" group linking the parent + siblings. */
+.conn-inherit-note {
+  margin: 0 0 10px;
+  font-size: 11.5px; /* metadata tier */
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+.conn-family .conn-h {
+  color: var(--ink-2);
+}
+
 .panel-section-h {
   margin: 0 0 8px;
   font-family: var(--display);

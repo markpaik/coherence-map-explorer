@@ -245,7 +245,11 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   // --- per-scene appliers -------------------------------------------------
   function applyFocus(scene: StoryScene, cut: boolean): void {
     const code = scene.state?.focus;
-    if (code) machine.focusByCode(code, { silent: true, instant: cut });
+    // Stories expect the FULL closure lit (the two-stage ladder's stage 1 would
+    // only light one hop). A silent journey lights the whole closure without
+    // opening the panel, the chip, or touching the hash — visually identical to
+    // the pre-ladder silent focus.
+    if (code) machine.focusByCode(code, { silent: true, instant: cut, stage: "journey" });
     else machine.clearFocus({ silent: true });
   }
 
