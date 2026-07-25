@@ -261,6 +261,38 @@ full both-direction closure; the two "framings" are a CAMERA concern.
 | idle drift | slow orbit, one revolution ≈ 240s; pauses on any interaction, resumes after 20s idle |
 | reduced motion | camera cuts (≤150ms), no cascade stagger (all at once), no particles, no twinkle, no drift |
 
+## The opener (first-visit reverse-explosion)
+
+On a plain first visit the Constellation ASSEMBLES itself, then hands off cleanly
+to the ordinary settled pose 0 — after it, drift / focus / pose switches / stories
+/ tour behave exactly as always, and the end state is pixel-identical to a skipped
+load. All math + timing live in `src/scene/opener.ts` (the ONE tunable block);
+`src/scene/pose.ts` plays it on the driver's own buffers; `src/main.ts` gates it.
+
+Choreography (total ≈ 10.7s, a hard 10–11s cap):
+
+| Phase | Spec |
+|---|---|
+| radial scatter | every node hung far out along its OWN ray from the formation centroid, at `SCATTER_MULT` (6.5–10×) its home radius — the constellation blown up ~8× — so all motion is purely inward-radial (no crossing paths). Deterministic from the clock seed (mulberry32); no `Math.random` |
+| float (`FLOAT_MS` 1.6s) | everything hangs out there with a slow per-node wander (twinkle as usual); camera dead still at the home framing (drift suspended while `poseDriver.opening`) |
+| accretion (per-node) | each star drifts home over its OWN duration drawn from `CONVERGE_MIN/MAX_MS` (3.5–6.5s) on a gentle ease-in (`easeImplode`, a t·(1−D·t) velocity: imperceptible start, peak ~70%, soft trackable landing). Scattered rates → the field ACCRETES: early neighborhoods settle while stragglers drift in. The wander fades ×(1−progress) as each lands |
+| edge crystallization | each ribbon ghosts in on its OWN schedule — `EDGE_DELAY_MS` (0.3s) after its LATER endpoint settles (never before both land), fading over `EDGE_FADE_MS` (1.8s) with a soft two-stage ghost ramp. Per-edge `appearTime` packed in `aColorA.w` (no extra vertex attribute — the program is at the WebGL2 16 floor), evaluated in-shader against the opener clock. The web crystallizes outward from wherever it completes first |
+| interrupt | any interaction (pointerdown / keydown / search focus) SNAPS to the settled end state; never locks input. A mid-opener click still lands on the node it hit |
+
+First-visit gating (`shouldPlayOpener`, pure + unit-tested): it is a FIRST-TIME-ONLY
+experience. Plays on a plain first visit; SKIPPED (without consuming the flag) for a
+deep-link arrival (`#/s/…` / `#/story/…`), `?og`, reduced motion, and the phone
+Browse landing (so it never runs unseen beneath the overlay — and a later desktop
+visit still gets it); and skipped once the `cme-opener-seen` localStorage flag is
+set. Storage unavailable ⇒ fails OPEN (plays). The flag is written only when the
+opener actually runs (on completion OR interruption), so no skip path consumes it.
+
+**Replay the opening** — a ghost-pill button beside Stories re-runs the full opener
+on demand (independent of the seen-flag). It exits any active focus, resets the
+Constellation home framing, and replays from scatter. Hidden in `?og` and while a
+story plays (the rail's own rules), covered by the tour backdrop while touring;
+keyboard/AT-reachable like its neighbors.
+
 ## Stories in any formation
 
 Every scene authors its pose (`camera.pose`), and the story HUD's FORMATION

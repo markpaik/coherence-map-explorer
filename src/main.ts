@@ -5,7 +5,8 @@
 // TAB ORDER (document flow; the canvas is aria-hidden and never a tab stop):
 //   1. Search input (#search-input) — combobox; ArrowUp/Down move the listbox
 //      via aria-activedescendant, Enter focuses the standard.
-//   2. "Show me around" (#tour-btn) — starts the guided tour.
+//   2. "Show me around" (#tour-btn) — starts the guided tour, then "Stories"
+//      (#story-btn) and "Replay the opening" (#replay-btn), left→right.
 //   3. Filters rail — the "Filters" pill (≤720px) then the grade / strand /
 //      toggle chips (aria-pressed buttons), left→right.
 //   4. Detail panel (when open) — focus is MOVED to the code heading on open;
@@ -58,6 +59,7 @@ import { FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
 import { decideRoute, storyIdFromHash, codeFromHash } from "./state/routing";
+import { shouldPlayOpener } from "./scene/opener";
 import { createPicking } from "./interaction/picking";
 import { createDamageEngine } from "./stories/damage";
 import { createSelectorResolver } from "./stories/selectors";
@@ -554,9 +556,12 @@ function start(graph: GraphCore): void {
     if (storyHolding && !wasStoryHolding) rig.resumeDriftNow();
     wasStoryHolding = storyHolding;
     // Drift breathes while idle, during story holds, and through the tour —
-    // a stagnant model between tour stops read as broken, not calm.
+    // a stagnant model between tour stops read as broken, not calm. The opener
+    // holds the camera dead still at the home framing while the field floats +
+    // implodes (the reverse-explosion reads off the nodes, not a moving camera).
     const driftAllowed =
-      machine.state === "idle" || machine.state === "touring" || storyHolding;
+      !poseDriver.opening &&
+      (machine.state === "idle" || machine.state === "touring" || storyHolding);
     if (rig.update(delta, !driftAllowed)) render = true;
 
     if (render) {
@@ -877,18 +882,37 @@ function start(graph: GraphCore): void {
   }
 
   // -- first-visit opener ---------------------------------------------------
-  // The scattered field pours into the Constellation and the ribbons draw
-  // themselves in (scene/opener.ts, driven by the pose driver). It plays on a
-  // normal load only — SKIPPED for a deep link that arrives already focused on a
-  // standard or a story, the ?og screenshot mode, and reduced motion (each of
-  // which wants the settled map at once). The pose driver already wrote the
-  // settled pose 0 at construction, so a skip needs no work. Any user interaction
-  // snaps it to that same settled end state (never locks input); the family
-  // filaments are held hidden through the assembly (they'd otherwise draw long
-  // tethers across the scattered field) and revealed the instant it settles.
-  const deepFocus = codeFromHash(location.hash);
-  const playOpener = !reducedMotion && !og && !deepStory && !deepFocus;
-  if (playOpener) {
+  // The scattered field accretes into the Constellation and the ribbons crystallize
+  // in per-edge (scene/opener.ts, driven by the pose driver). It is a FIRST-TIME-
+  // ONLY experience: it plays on a plain first visit and is SKIPPED for a return
+  // visit (a localStorage flag), a deep link that arrives already focused on a
+  // standard/story, the ?og screenshot mode, and reduced motion. The pose driver
+  // already wrote the settled pose 0 at construction, so a skip needs no work. Any
+  // user interaction snaps it to that same settled end state (never locks input);
+  // the family filaments are held hidden through the assembly (they'd otherwise
+  // draw long tethers across the scattered field) and revealed the instant it
+  // settles. The seen-flag is written only when the opener actually runs (on
+  // completion OR interruption), so no skip path consumes it.
+  const OPENER_SEEN_KEY = "cme-opener-seen";
+  const openerSeen = (): boolean => {
+    try {
+      return localStorage.getItem(OPENER_SEEN_KEY) !== null;
+    } catch {
+      return false; // storage unavailable (private mode) → treat as a first visit
+    }
+  };
+  const markOpenerSeen = (): void => {
+    try {
+      localStorage.setItem(OPENER_SEEN_KEY, "1");
+    } catch {
+      /* storage unavailable — the opener simply plays again next load (fail open) */
+    }
+  };
+  // Play the opener (from the boot gate or the Replay button): hide the filaments,
+  // arm the interrupt snaps, run it, then reveal the filaments + set the seen flag
+  // on completion OR interruption. The snap listeners attach on the NEXT frame so
+  // the click/focus churn that launches a REPLAY can never self-snap it.
+  const runOpener = (): void => {
     filaments.object.visible = false;
     const snap = (): void => poseDriver.snapOpener();
     const endOpenerInteractions = (): void => {
@@ -896,17 +920,52 @@ function start(graph: GraphCore): void {
       window.removeEventListener("keydown", snap, true);
       document.removeEventListener("focusin", snap, true);
     };
-    // Capture-phase so the snap runs BEFORE picking/search/buttons handle the
-    // same event — by the time the click resolves, positions + pick bounds are
-    // settled, so a mid-opener click still lands on the node it hit. snapOpener
-    // is idempotent, and the events proceed normally afterward (no preventDefault).
-    window.addEventListener("pointerdown", snap, true);
-    window.addEventListener("keydown", snap, true);
-    document.addEventListener("focusin", snap, true);
+    // Capture-phase so the snap runs BEFORE picking/search/buttons handle the same
+    // event — by the time the click resolves, positions + pick bounds are settled,
+    // so a mid-opener click still lands on the node it hit. snapOpener is idempotent,
+    // and the events proceed normally afterward (no preventDefault).
+    requestAnimationFrame(() => {
+      if (!poseDriver.opening) return; // snapped/finished before we armed — nothing to do
+      window.addEventListener("pointerdown", snap, true);
+      window.addEventListener("keydown", snap, true);
+      document.addEventListener("focusin", snap, true);
+    });
     void poseDriver.startOpener(clockSeed).then(() => {
       filaments.object.visible = true;
       endOpenerInteractions();
+      markOpenerSeen();
       requestRender();
+    });
+  };
+
+  const deepFocus = codeFromHash(location.hash);
+  if (
+    shouldPlayOpener({
+      seen: openerSeen(),
+      deepLink: !!deepStory || !!deepFocus,
+      og,
+      reducedMotion,
+      browseActive,
+    })
+  ) {
+    runOpener();
+  }
+
+  // "Replay the opening" — the header button beside Stories. It re-runs the full
+  // opener on demand (independent of the seen-flag: it neither reads nor clears it).
+  // Hidden by the rail's own rules in ?og and while a story plays, and covered by
+  // the tour backdrop while touring; the guard is belt-and-suspenders. It exits any
+  // active focus (closing the panel; the button click already blurred the search
+  // input, closing its dropdown), and startOpener resets the Constellation home
+  // framing itself before replaying from scatter.
+  const replayBtn = document.getElementById("replay-btn");
+  if (replayBtn instanceof HTMLElement) {
+    replayBtn.removeAttribute("tabindex"); // join the tab order like Stories / the tour
+    replayBtn.setAttribute("aria-label", "Replay the opening animation");
+    replayBtn.addEventListener("click", () => {
+      if (storyPlayer.running || tour.running) return;
+      if (machine.focusedIndex !== null) machine.clearFocus();
+      runOpener();
     });
   }
 

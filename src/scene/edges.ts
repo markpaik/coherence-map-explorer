@@ -59,7 +59,7 @@ const VERT = /* glsl */ `
   in vec3 aStart;
   in vec3 aCtrl;
   in vec3 aEnd;
-  in vec3 aColorA;
+  in vec4 aColorA;  // .rgb source strand color · .w opener appear-time (ms)
   in vec3 aColorB;
   in vec2 aStrand;   // (source strand index, target strand index) 0..3 → VIVID palette
   in float aKind;
@@ -82,6 +82,7 @@ const VERT = /* glsl */ `
 
   out float vT;
   out vec3 vColor;
+  out float vAppear;        // per-edge opener appear-time (ms), for the ghost-in reveal
   out vec3 vVivid;          // interpolated VIVID strand colour (enamel repaint in light envs)
   out vec3 vArtColor;
   out vec3 vArtColor2;
@@ -163,6 +164,7 @@ const VERT = /* glsl */ `
   }
 
   void main() {
+    vAppear = aColorA.w; // per-edge opener appear-time (ms); read in the fragment
     float m3 = clamp(uPose - 2.0, 0.0, 1.0); // pose-3 morph amount (0 off, 1 Transit)
     // Reach-normalized trunk metric (0..1), the same basis as the metro trunk WIDTH
     // (clamp((radA-1.6)*2,0,4)); wide ⇔ trunk. Written for every style so the varying
@@ -241,7 +243,7 @@ const VERT = /* glsl */ `
       gl_Position = clip;
 
       vT = t;
-      vColor = mix(aColorA, aColorB, t);
+      vColor = mix(aColorA.rgb, aColorB, t);
       // VIVID enamel strand colour, interpolated endpoint→endpoint like vColor. The
       // fragment cross-fades to this in the light-environment windows (dawn/daylight).
       vVivid = mix(uVivid[int(aStrand.x + 0.5)], uVivid[int(aStrand.y + 0.5)], t);
@@ -290,7 +292,7 @@ const VERT = /* glsl */ `
       gl_Position = clip;
 
       vT = t;
-      vColor = mix(aColorA, aColorB, t);
+      vColor = mix(aColorA.rgb, aColorB, t);
       vArtColor = aArtRing;
       vArtColor2 = aArtFid2;
       vKind = aKind;
@@ -328,7 +330,7 @@ const VERT = /* glsl */ `
 
       vT = t;
       vSide = side;
-      vColor = mix(aColorA, aColorB, t);
+      vColor = mix(aColorA.rgb, aColorB, t);
       vArtColor = aArtFid;
       vArtColor2 = aArtFid2;
       vKind = aKind;
@@ -349,8 +351,14 @@ const FRAG = /* glsl */ `
   uniform float uPose; // eased pose value 0..3; 3 = Transit (opaque metro lines)
   uniform vec3 uField; // active art-style field color (damage fades toward it)
   uniform float uEnvLight; // 0..1 light-environment amount (Ascent dawn OR Transit daylight)
+  // Opener per-edge crystallization: uOpenerClock is ms since the opener started
+  // (< 0 ⇒ opener inactive ⇒ every ribbon fully present, byte-identical). Each edge
+  // begins its soft ghost-in at its own vAppear (ms) and firms up over uEdgeFadeMs.
+  uniform float uOpenerClock;
+  uniform float uEdgeFadeMs;
 
   in float vT;
+  in float vAppear; // per-edge opener appear-time (ms)
   in vec3 vColor;
   in vec3 vVivid; // interpolated VIVID strand colour (enamel repaint in light envs)
   in vec3 vArtColor;
@@ -364,6 +372,19 @@ const FRAG = /* glsl */ `
   in float vTrunk; // Transit trunk metric 0..1 (reach) — unfocused-overview ghost
 
   out vec4 fragColor;
+
+  // Per-edge opener reveal 0..1. Before this edge's appear-time it is 0 (the
+  // ribbon is absent — its nodes are still drifting in); then a SOFT two-stage
+  // ghost ramp (quick to a faint level, then a slow saturation) over uEdgeFadeMs.
+  // uOpenerClock < 0 (the normal case) short-circuits to 1.0 — byte-identical.
+  float openerReveal() {
+    if (uOpenerClock < 0.0) return 1.0;
+    float x = clamp((uOpenerClock - vAppear) / max(uEdgeFadeMs, 1.0), 0.0, 1.0);
+    float G = 0.35, S1 = 0.25;
+    return x < S1
+      ? G * smoothstep(0.0, 1.0, x / S1)
+      : G + (1.0 - G) * smoothstep(0.0, 1.0, (x - S1) / (1.0 - S1));
+  }
 
   void main() {
     float m3 = clamp(uPose - 2.0, 0.0, 1.0); // pose-3 morph amount (0 off, 1 Transit)
@@ -518,7 +539,9 @@ const FRAG = /* glsl */ `
       float aaEdge = clamp(1.0 - 0.9 / vHalfPx, 0.0, 0.92);
       float edgeAA = 1.0 - smoothstep(aaEdge, 1.0, abs(vSide));
       alpha *= mix(1.0, edgeAA, aaWin);
-      fragColor = vec4(col, alpha * vVisible);
+      // Opener per-edge crystallization: each ribbon ghosts in after both its
+      // nodes land. openerReveal() is exactly 1.0 off-opener, so byte-identical.
+      fragColor = vec4(col, alpha * vVisible * openerReveal());
     } else {
       // ===================== ART STYLES (paper: opacity, never HDR) =========
       // Dimness is OPACITY toward the field: no comets, no shimmer, no bloom.
@@ -556,7 +579,7 @@ const FRAG = /* glsl */ `
       col = mix(col, uField, clamp(vDamage * 0.85, 0.0, 1.0));
       alpha *= (1.0 - 0.5 * vDamage);
 
-      fragColor = vec4(col, alpha);
+      fragColor = vec4(col, alpha * openerReveal()); // opener crystallization (1 = shipped)
     }
   }
 `;
@@ -595,6 +618,19 @@ export interface EdgesHandle {
    * poses 0–2 stay pixel-identical. The pose driver calls this every morph frame.
    */
   setPose(p: number): void;
+  /**
+   * Opener per-edge crystallization clock (ms since the opener started; −1 =
+   * inactive ⇒ every ribbon fully present, byte-identical). Each ribbon ghosts in
+   * after its own appear-time (setOpenerAppearTimes). The pose driver advances this
+   * each opener frame and sets it to −1 on settle; nothing else touches it.
+   */
+  setOpenerClock(ms: number): void;
+  /**
+   * Set the per-edge opener appear-times (ms since opener start), one per edge —
+   * packed into aColorA.w, written once when the opener starts. `fadeMs` is each
+   * ribbon's ghost-in length. Pass null to clear (appear-times → 0).
+   */
+  setOpenerAppearTimes(times: Float32Array | null, fadeMs?: number): void;
   /**
    * Feed the LIGHT-environment amount (0..1) — max(dawn, daylight). Consumers:
    * (1) the VIVID enamel — past the window midpoint the Galaxy material flips to
@@ -658,7 +694,13 @@ export function createEdges(
   const start = new Float32Array(count * 3);
   const ctrl = new Float32Array(count * 3);
   const end = new Float32Array(count * 3);
-  const colorA = new Float32Array(count * 3);
+  // aColorA is packed vec4: .rgb = source strand color, .w = the opener APPEAR
+  // TIME (ms since opener start) at which this ribbon may begin its ghost-in.
+  // Packing into the spare .w costs no extra vertex attribute slot (the program
+  // is already at the WebGL2 floor of 16). Default .w = 0; the pose driver writes
+  // real appear-times only while the opener plays (setOpenerAppearTimes), and the
+  // in-shader reveal is a strict no-op unless uOpenerClock ≥ 0.
+  const colorA = new Float32Array(count * 4);
   const colorB = new Float32Array(count * 3);
   const kind = new Float32Array(count);
   const emphasis = new Float32Array(count).fill(1); // rest
@@ -698,7 +740,10 @@ export function createEdges(
     ctrl.set(e.c, i * 3);
     end.set(t.pos, i * 3);
     c.setHex(STRAND_COLORS[s.strand]);
-    colorA.set([c.r, c.g, c.b], i * 3);
+    colorA[i * 4] = c.r;
+    colorA[i * 4 + 1] = c.g;
+    colorA[i * 4 + 2] = c.b;
+    colorA[i * 4 + 3] = 0; // opener appear-time (ms); 0 until the opener sets it
     c.setHex(STRAND_COLORS[t.strand]);
     colorB.set([c.r, c.g, c.b], i * 3);
     kind[i] = e.k;
@@ -741,7 +786,8 @@ export function createEdges(
   geometry.setAttribute("aStart", startAttr);
   geometry.setAttribute("aCtrl", ctrlAttr);
   geometry.setAttribute("aEnd", endAttr);
-  geometry.setAttribute("aColorA", new THREE.InstancedBufferAttribute(colorA, 3));
+  const colorAAttr = new THREE.InstancedBufferAttribute(colorA, 4);
+  geometry.setAttribute("aColorA", colorAAttr);
   geometry.setAttribute("aColorB", new THREE.InstancedBufferAttribute(colorB, 3));
   geometry.setAttribute("aStrand", new THREE.InstancedBufferAttribute(strand, 2));
   geometry.setAttribute("aKind", new THREE.InstancedBufferAttribute(kind, 1));
@@ -772,6 +818,11 @@ export function createEdges(
     uEnvLight: { value: 0 },
     // VIVID enamel palette (LINEAR), index-aligned number/algebra/geometry/data.
     uVivid: { value: vividVecs },
+    // Opener per-edge crystallization. uOpenerClock = ms since the opener started
+    // (−1 = inactive ⇒ every ribbon fully present, byte-identical); uEdgeFadeMs =
+    // each ribbon's ghost-in length. Appear-times ride in aColorA.w.
+    uOpenerClock: { value: -1 },
+    uEdgeFadeMs: { value: 1 },
   };
 
   // RawShaderMaterial (not ShaderMaterial): it injects no built-in attributes,
@@ -834,6 +885,18 @@ export function createEdges(
     },
     setPose(p) {
       uniforms.uPose.value = p;
+    },
+    setOpenerClock(ms) {
+      uniforms.uOpenerClock.value = ms;
+    },
+    setOpenerAppearTimes(times, fadeMs) {
+      if (times === null) {
+        for (let i = 0; i < count; i++) colorA[i * 4 + 3] = 0;
+      } else {
+        for (let i = 0; i < count; i++) colorA[i * 4 + 3] = times[i];
+        if (fadeMs !== undefined) uniforms.uEdgeFadeMs.value = fadeMs;
+      }
+      colorAAttr.needsUpdate = true;
     },
     setEnvLight(amount) {
       uniforms.uEnvLight.value = amount;

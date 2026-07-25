@@ -1,185 +1,222 @@
-// Pure math for the first-visit opener (scene/opener.ts): the deterministic
-// scatter generator, the per-node convergence schedule, and the per-edge
-// draw-in schedule. No THREE / DOM — just the arithmetic the pose driver runs.
+// Pure math for the first-visit reverse-explosion opener (scene/opener.ts): the
+// deterministic RADIAL scatter generator, the implosion easing, the float-wander
+// envelope, and the centroid-outward edge bloom. No THREE / DOM — just the
+// arithmetic the pose driver runs.
 
 import { describe, it, expect } from "vitest";
 import {
   OPENER,
   openerDurationMs,
-  smoothstep01,
-  nodeDelayMs,
-  nodeProgress,
-  edgeGrow,
-  scatterHalfExtents,
-  scatterPositions,
+  easeImplode,
+  convergeDurations,
+  nodeSettleMs,
+  edgeAppearMs,
+  shouldPlayOpener,
+  radialScatterPositions,
 } from "../src/scene/opener";
 
-const CENTER: [number, number, number] = [10, -5, 3];
-const HALF: [number, number, number] = [100, 40, 40];
+const CENTROID: [number, number, number] = [10, -5, 3];
 
-// Per-axis-descaled radius: for a point built as center + unit·f scaled per axis
-// by half, this recovers f (the ellipsoidal shell fraction).
-function shellFraction(
-  out: Float32Array,
-  i: number,
-  center: readonly [number, number, number],
-  half: readonly [number, number, number],
-): number {
-  const dx = (out[i * 3] - center[0]) / half[0];
-  const dy = (out[i * 3 + 1] - center[1]) / half[1];
-  const dz = (out[i * 3 + 2] - center[2]) / half[2];
-  return Math.hypot(dx, dy, dz);
+// A small flattened home cloud: distinct rays + radii from the centroid.
+function makeHome(): Float32Array {
+  const pts: number[][] = [
+    [110, -5, 3], // +x, r=100
+    [10, 195, 3], // +y, r=200
+    [10, -5, -47], // -z, r=50
+    [-290, -5, 3], // -x, r=300
+    [10, -5, 3], // ON the centroid (degenerate ray)
+    [130, 115, 63], // oblique
+  ];
+  const out = new Float32Array(pts.length * 3);
+  pts.forEach((p, i) => out.set(p, i * 3));
+  return out;
 }
 
 describe("opener timing budget", () => {
-  it("total duration is one stagger span + one node ease, within the ~3s budget", () => {
-    expect(openerDurationMs()).toBe(OPENER.NODE_STAGGER_MS + OPENER.NODE_MS);
-    expect(openerDurationMs()).toBeLessThanOrEqual(3000);
+  it("total = float + last straggler + its ribbon's delay & fade, hard 10–11s cap", () => {
+    expect(openerDurationMs()).toBe(
+      OPENER.FLOAT_MS + OPENER.CONVERGE_MAX_MS + OPENER.EDGE_DELAY_MS + OPENER.EDGE_FADE_MS,
+    );
+    expect(openerDurationMs()).toBeGreaterThanOrEqual(10000);
+    expect(openerDurationMs()).toBeLessThanOrEqual(11000);
   });
 
-  it("nodes converge in ~1.6–2.0s and the stagger stays ≤ ~400ms", () => {
-    expect(openerDurationMs()).toBeGreaterThanOrEqual(1600);
-    expect(openerDurationMs()).toBeLessThanOrEqual(2000);
-    expect(OPENER.NODE_STAGGER_MS).toBeLessThanOrEqual(400);
-  });
-});
-
-describe("node convergence schedule", () => {
-  it("delay pours left→right (K → HS) and clamps the column fraction", () => {
-    expect(nodeDelayMs(0)).toBe(0);
-    expect(nodeDelayMs(1)).toBe(OPENER.NODE_STAGGER_MS);
-    expect(nodeDelayMs(0.5)).toBeCloseTo(OPENER.NODE_STAGGER_MS / 2, 6);
-    expect(nodeDelayMs(-1)).toBe(0);
-    expect(nodeDelayMs(2)).toBe(OPENER.NODE_STAGGER_MS);
-  });
-
-  it("progress is 0 before a node's delay, eased through, and exactly 1 when landed", () => {
-    // First column (K, frac 0): starts immediately.
-    expect(nodeProgress(0, 0)).toBe(0);
-    expect(nodeProgress(OPENER.NODE_MS / 2, 0)).toBeCloseTo(0.5, 6); // smoothstep midpoint
-    expect(nodeProgress(OPENER.NODE_MS, 0)).toBe(1);
-    expect(nodeProgress(OPENER.NODE_MS + 500, 0)).toBe(1); // clamped, never overshoots
-    // Last column (HS, frac 1): held until its stagger delay, then eases.
-    expect(nodeProgress(OPENER.NODE_STAGGER_MS - 1, 1)).toBe(0);
-    expect(nodeProgress(openerDurationMs(), 1)).toBe(1);
-  });
-
-  it("every node has landed by the total duration", () => {
-    for (const frac of [0, 0.25, 0.5, 0.75, 1]) {
-      expect(nodeProgress(openerDurationMs(), frac)).toBe(1);
-    }
+  it("each phase sits in Mark's ranges, with a real spread of per-node rates", () => {
+    expect(OPENER.FLOAT_MS).toBeGreaterThanOrEqual(1500);
+    expect(OPENER.FLOAT_MS).toBeLessThanOrEqual(2000);
+    // Per-node convergence durations span a meaningful range so accretion reads.
+    expect(OPENER.CONVERGE_MIN_MS).toBeGreaterThanOrEqual(3000);
+    expect(OPENER.CONVERGE_MAX_MS).toBeLessThanOrEqual(7000);
+    expect(OPENER.CONVERGE_MAX_MS / OPENER.CONVERGE_MIN_MS).toBeGreaterThan(1.5);
+    // Per-edge ghost-in ~1.5–2s, seated after a short delay.
+    expect(OPENER.EDGE_FADE_MS).toBeGreaterThanOrEqual(1500);
+    expect(OPENER.EDGE_FADE_MS).toBeLessThanOrEqual(2000);
+    expect(OPENER.EDGE_DELAY_MS).toBeGreaterThanOrEqual(200);
+    expect(OPENER.EDGE_DELAY_MS).toBeLessThanOrEqual(400);
   });
 });
 
-describe("edge draw-in schedule", () => {
-  it("is invisible below the appear floor, grows monotonically, full at HI", () => {
-    expect(edgeGrow(0)).toBe(0);
-    expect(edgeGrow(OPENER.EDGE_APPEAR_LO)).toBe(0);
-    expect(edgeGrow(OPENER.EDGE_APPEAR_HI)).toBe(1);
-    const mid = (OPENER.EDGE_APPEAR_LO + OPENER.EDGE_APPEAR_HI) / 2;
-    expect(edgeGrow(mid)).toBeCloseTo(0.5, 6);
+describe("first-visit gating (pure)", () => {
+  const base = { seen: false, deepLink: false, og: false, reducedMotion: false, browseActive: false };
+  it("a plain first visit plays", () => {
+    expect(shouldPlayOpener(base)).toBe(true);
+  });
+  it("a return visit (seen) skips", () => {
+    expect(shouldPlayOpener({ ...base, seen: true })).toBe(false);
+  });
+  it("a deep-link arrival skips (and, being a skip, never consumes the flag)", () => {
+    expect(shouldPlayOpener({ ...base, deepLink: true })).toBe(false);
+  });
+  it("?og, reduced motion, and the phone Browse landing all skip", () => {
+    expect(shouldPlayOpener({ ...base, og: true })).toBe(false);
+    expect(shouldPlayOpener({ ...base, reducedMotion: true })).toBe(false);
+    expect(shouldPlayOpener({ ...base, browseActive: true })).toBe(false);
+  });
+  it("storage-unavailable (seen reads false) plays — fails open to the experience", () => {
+    // The caller passes seen=false when localStorage throws; the gate then plays.
+    expect(shouldPlayOpener({ ...base, seen: false })).toBe(true);
+  });
+});
+
+describe("per-edge crystallization schedule", () => {
+  it("an edge appears after its LATER endpoint settles, plus the seat delay", () => {
+    const sEarly = nodeSettleMs(OPENER.CONVERGE_MIN_MS); // a fast-arriving node
+    const sLate = nodeSettleMs(OPENER.CONVERGE_MAX_MS); // a straggler
+    // The edge keys off the LATER endpoint (never the earlier one).
+    expect(edgeAppearMs(sEarly, sLate)).toBe(sLate + OPENER.EDGE_DELAY_MS);
+    expect(edgeAppearMs(sLate, sEarly)).toBe(sLate + OPENER.EDGE_DELAY_MS); // order-independent
+    // ...and strictly after BOTH endpoints have landed.
+    expect(edgeAppearMs(sEarly, sLate)).toBeGreaterThan(sEarly);
+    expect(edgeAppearMs(sEarly, sLate)).toBeGreaterThan(sLate);
+  });
+
+  it("node settle time = float + its accretion duration", () => {
+    expect(nodeSettleMs(0)).toBe(OPENER.FLOAT_MS);
+    expect(nodeSettleMs(OPENER.CONVERGE_MAX_MS)).toBe(OPENER.FLOAT_MS + OPENER.CONVERGE_MAX_MS);
+  });
+
+  it("the last possible ribbon finishes fading within the total budget", () => {
+    // Worst case: both endpoints are the slowest straggler.
+    const latest = nodeSettleMs(OPENER.CONVERGE_MAX_MS);
+    const lastEdgeDone = edgeAppearMs(latest, latest) + OPENER.EDGE_FADE_MS;
+    expect(lastEdgeDone).toBeLessThanOrEqual(openerDurationMs());
+  });
+});
+
+describe("implosion easing (gentle accel, trackable landing)", () => {
+  it("is anchored at the endpoints and monotonic", () => {
+    expect(easeImplode(0)).toBe(0);
+    expect(easeImplode(1)).toBe(1);
+    expect(easeImplode(-1)).toBe(0); // clamped
+    expect(easeImplode(2)).toBe(1);
     let prev = -1;
-    for (let p = 0; p <= 1.0001; p += 0.05) {
-      const g = edgeGrow(p);
-      expect(g).toBeGreaterThanOrEqual(prev - 1e-9);
-      prev = g;
+    for (let x = 0; x <= 1.0001; x += 0.02) {
+      const p = easeImplode(x);
+      expect(p).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = p;
     }
   });
 
-  it("edges keyed to the less-advanced endpoint only form once it has essentially landed", () => {
-    // An edge whose trailing endpoint is still early (progress ≤ LO) is hidden.
-    expect(edgeGrow(OPENER.EDGE_APPEAR_LO - 0.1)).toBe(0);
-    // The formation overlaps the convergence tail: it starts partway through a
-    // node's ease and completes when the node lands.
-    expect(OPENER.EDGE_APPEAR_LO).toBeGreaterThan(0);
-    expect(OPENER.EDGE_APPEAR_LO).toBeLessThan(1);
+  it("is back-loaded (accelerating) but gentler than a cubic ease-in", () => {
+    // Less than half the distance is covered by half the time (ease-in).
+    expect(easeImplode(0.5)).toBeLessThan(0.4);
+    expect(easeImplode(0.66)).toBeLessThan(0.6);
+    // ...but a cubic (t³) would be harsher early: the near-quadratic curve has
+    // covered MORE ground by the same point (its acceleration/peak speed is lower).
+    expect(easeImplode(0.5)).toBeGreaterThan(0.5 * 0.5 * 0.5);
   });
 
-  it("edge formation overlaps the convergence tail for ~0.8–1.2s", () => {
-    // Elapsed (for a given column frac) at which the trailing endpoint reaches
-    // the EDGE_APPEAR_LO eased progress — the earliest this column's edges show.
-    const inv = (p: number): number => {
-      // invert smoothstep numerically for p ∈ (0,1)
-      let lo = 0;
-      let hi = 1;
-      for (let k = 0; k < 60; k++) {
-        const midX = (lo + hi) / 2;
-        if (smoothstep01(midX) < p) lo = midX;
-        else hi = midX;
-      }
-      return (lo + hi) / 2;
-    };
-    const rawLo = inv(OPENER.EDGE_APPEAR_LO);
-    // First column edges begin at rawLo·NODE_MS; last column edges complete at
-    // the total duration. That union window is the on-screen "edges forming" band.
-    const firstStart = rawLo * OPENER.NODE_MS; // frac 0
-    const lastEnd = openerDurationMs();
-    const windowMs = lastEnd - firstStart;
-    expect(windowMs).toBeGreaterThanOrEqual(800);
-    expect(windowMs).toBeLessThanOrEqual(1200);
+  it("lands still moving: real (trackable) terminal velocity, below the peak", () => {
+    const vel = (x: number): number => (easeImplode(x + 1e-4) - easeImplode(x - 1e-4)) / 2e-4;
+    let peak = 0;
+    for (let x = 0.1; x < 0.95; x += 0.01) peak = Math.max(peak, vel(x));
+    const terminal = vel(0.995);
+    expect(terminal).toBeLessThan(peak); // damped relative to the peak
+    // A meaningful residual velocity at arrival — NOT eased to a dead stop, so the
+    // final half-second still reads as coherent inward motion, not a blink.
+    expect(terminal).toBeGreaterThan(0.4 * peak);
   });
 });
 
-describe("scatter half-extents floor", () => {
-  it("floors the short axes so a flat/wide cloud still spreads in y/z", () => {
-    const h = scatterHalfExtents([100, 10, 5]);
-    const floor = 100 * OPENER.SPAN_FLOOR_FRAC;
-    expect(h[0]).toBe(100);
-    expect(h[1]).toBe(floor);
-    expect(h[2]).toBe(floor);
-  });
-  it("leaves already-large short axes alone", () => {
-    const h = scatterHalfExtents([100, 90, 80]);
-    expect(h).toEqual([100, 90, 80]);
-  });
-});
-
-describe("scatter generator (deterministic)", () => {
-  it("is a pure function of its seed — identical output for identical inputs", () => {
-    const a = scatterPositions(480, CENTER, HALF, 1337);
-    const b = scatterPositions(480, CENTER, HALF, 1337);
-    expect(Array.from(a)).toEqual(Array.from(b));
-  });
-
-  it("a different seed gives a different field (variation from time)", () => {
-    const a = scatterPositions(480, CENTER, HALF, 1337);
-    const b = scatterPositions(480, CENTER, HALF, 1338);
+describe("per-node accretion durations", () => {
+  it("is deterministic, in-range, and decorrelated from the scatter draw", () => {
+    const a = convergeDurations(480, 1337);
+    const b = convergeDurations(480, 1337);
+    expect(Array.from(a)).toEqual(Array.from(b)); // reproducible
+    for (let i = 0; i < a.length; i++) {
+      expect(a[i]).toBeGreaterThanOrEqual(OPENER.CONVERGE_MIN_MS);
+      expect(a[i]).toBeLessThanOrEqual(OPENER.CONVERGE_MAX_MS);
+    }
+    const c = convergeDurations(480, 1338);
     let differ = 0;
-    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 1e-6) differ++;
-    expect(differ).toBeGreaterThan(a.length * 0.9);
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - c[i]) > 1e-6) differ++;
+    expect(differ).toBeGreaterThan(a.length * 0.9); // a different seed → a different field
   });
 
-  it("every node lands inside the anisotropic shell [INNER, OUTER]", () => {
-    const out = scatterPositions(480, CENTER, HALF, 1337);
-    for (let i = 0; i < 480; i++) {
-      const f = shellFraction(out, i, CENTER, HALF);
-      expect(f).toBeGreaterThanOrEqual(OPENER.SCATTER_INNER - 1e-6);
-      expect(f).toBeLessThanOrEqual(OPENER.SCATTER_OUTER + 1e-6);
+  it("actually spreads the arrival times (nodes accrete, not arrive together)", () => {
+    const d = convergeDurations(480, 1337);
+    let min = Infinity;
+    let max = -Infinity;
+    for (const v of d) {
+      if (v < min) min = v;
+      if (v > max) max = v;
     }
+    // The realized spread nearly fills the configured band — early stars land
+    // seconds before the stragglers.
+    expect(max - min).toBeGreaterThan((OPENER.CONVERGE_MAX_MS - OPENER.CONVERGE_MIN_MS) * 0.9);
+  });
+});
+
+describe("radial scatter generator", () => {
+  it("is a pure function of its seed", () => {
+    const home = makeHome();
+    const a = radialScatterPositions(home, CENTROID, 1337);
+    const b = radialScatterPositions(home, CENTROID, 1337);
+    expect(Array.from(a)).toEqual(Array.from(b));
+    const c = radialScatterPositions(home, CENTROID, 1338);
+    let differ = 0;
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - c[i]) > 1e-6) differ++;
+    expect(differ).toBeGreaterThan(0);
   });
 
-  it("reads as a dispersed field, not a dense ball — wide spread on every axis", () => {
-    const out = scatterPositions(480, CENTER, HALF, 1337);
-    for (let axis = 0; axis < 3; axis++) {
-      let min = Infinity;
-      let max = -Infinity;
-      for (let i = 0; i < 480; i++) {
-        const v = out[i * 3 + axis];
-        if (v < min) min = v;
-        if (v > max) max = v;
+  it("pushes each node OUT along its own ray (direction preserved, no crossing)", () => {
+    const home = makeHome();
+    const out = radialScatterPositions(home, CENTROID, 1337);
+    const n = home.length / 3;
+    for (let i = 0; i < n; i++) {
+      const hx = home[i * 3] - CENTROID[0];
+      const hy = home[i * 3 + 1] - CENTROID[1];
+      const hz = home[i * 3 + 2] - CENTROID[2];
+      const r = Math.hypot(hx, hy, hz);
+      const sx = out[i * 3] - CENTROID[0];
+      const sy = out[i * 3 + 1] - CENTROID[1];
+      const sz = out[i * 3 + 2] - CENTROID[2];
+      const sr = Math.hypot(sx, sy, sz);
+      if (r < 1e-6) {
+        // Degenerate node (on the centroid): still placed at a finite radius.
+        expect(sr).toBeGreaterThan(0);
+        continue;
       }
-      // The spread on each axis is a large fraction of that axis's own extent —
-      // the field fills a wide volume rather than clumping at the center.
-      expect(max - min).toBeGreaterThan(HALF[axis] * OPENER.SCATTER_INNER);
+      // Same direction: the unit ray is preserved (cross product ≈ 0, dot > 0).
+      const cross = Math.hypot(hy * sz - hz * sy, hz * sx - hx * sz, hx * sy - hy * sx);
+      expect(cross / (r * sr)).toBeLessThan(1e-5);
+      expect(hx * sx + hy * sy + hz * sz).toBeGreaterThan(0);
+      // Distance multiple sits inside the configured bracket.
+      const mult = sr / r;
+      expect(mult).toBeGreaterThanOrEqual(OPENER.SCATTER_MULT_MIN - 1e-6);
+      expect(mult).toBeLessThanOrEqual(OPENER.SCATTER_MULT_MAX + 1e-6);
     }
   });
 
-  it("has no coincident nodes (the golden-angle-free RNG separates every node)", () => {
-    const out = scatterPositions(480, CENTER, HALF, 1337);
-    const seen = new Set<string>();
-    for (let i = 0; i < 480; i++) {
-      seen.add(`${out[i * 3].toFixed(3)},${out[i * 3 + 1].toFixed(3)},${out[i * 3 + 2].toFixed(3)}`);
+  it("scatters far — every non-degenerate node is at least MIN× its home radius out", () => {
+    const home = makeHome();
+    const out = radialScatterPositions(home, CENTROID, 42);
+    const n = home.length / 3;
+    for (let i = 0; i < n; i++) {
+      const r = Math.hypot(home[i * 3] - CENTROID[0], home[i * 3 + 1] - CENTROID[1], home[i * 3 + 2] - CENTROID[2]);
+      if (r < 1e-6) continue;
+      const sr = Math.hypot(out[i * 3] - CENTROID[0], out[i * 3 + 1] - CENTROID[1], out[i * 3 + 2] - CENTROID[2]);
+      expect(sr).toBeGreaterThanOrEqual(r * OPENER.SCATTER_MULT_MIN - 1e-6);
     }
-    expect(seen.size).toBe(480);
   });
 });
