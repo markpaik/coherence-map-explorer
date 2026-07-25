@@ -57,7 +57,7 @@ import { createViewToggle } from "./ui/viewtoggle";
 import { FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
-import { decideRoute, storyIdFromHash } from "./state/routing";
+import { decideRoute, storyIdFromHash, codeFromHash } from "./state/routing";
 import { createPicking } from "./interaction/picking";
 import { createDamageEngine } from "./stories/damage";
 import { createSelectorResolver } from "./stories/selectors";
@@ -874,6 +874,40 @@ function start(graph: GraphCore): void {
     storyPlayer.start(deepStory, { deepLink: true });
   } else {
     routeFromHash(true);
+  }
+
+  // -- first-visit opener ---------------------------------------------------
+  // The scattered field pours into the Constellation and the ribbons draw
+  // themselves in (scene/opener.ts, driven by the pose driver). It plays on a
+  // normal load only — SKIPPED for a deep link that arrives already focused on a
+  // standard or a story, the ?og screenshot mode, and reduced motion (each of
+  // which wants the settled map at once). The pose driver already wrote the
+  // settled pose 0 at construction, so a skip needs no work. Any user interaction
+  // snaps it to that same settled end state (never locks input); the family
+  // filaments are held hidden through the assembly (they'd otherwise draw long
+  // tethers across the scattered field) and revealed the instant it settles.
+  const deepFocus = codeFromHash(location.hash);
+  const playOpener = !reducedMotion && !og && !deepStory && !deepFocus;
+  if (playOpener) {
+    filaments.object.visible = false;
+    const snap = (): void => poseDriver.snapOpener();
+    const endOpenerInteractions = (): void => {
+      window.removeEventListener("pointerdown", snap, true);
+      window.removeEventListener("keydown", snap, true);
+      document.removeEventListener("focusin", snap, true);
+    };
+    // Capture-phase so the snap runs BEFORE picking/search/buttons handle the
+    // same event — by the time the click resolves, positions + pick bounds are
+    // settled, so a mid-opener click still lands on the node it hit. snapOpener
+    // is idempotent, and the events proceed normally afterward (no preventDefault).
+    window.addEventListener("pointerdown", snap, true);
+    window.addEventListener("keydown", snap, true);
+    document.addEventListener("focusin", snap, true);
+    void poseDriver.startOpener(clockSeed).then(() => {
+      filaments.object.visible = true;
+      endOpenerInteractions();
+      requestRender();
+    });
   }
 
   requestAnimationFrame(frame);

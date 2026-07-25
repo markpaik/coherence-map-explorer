@@ -33,6 +33,13 @@ import type { EtchesHandle } from "./etches";
 import type { CameraRig } from "./camera";
 import type { Machine } from "../state/machine";
 import { createEvolveField } from "./evolve";
+import {
+  scatterPositions,
+  scatterHalfExtents,
+  nodeProgress,
+  edgeGrow,
+  openerDurationMs,
+} from "./opener";
 
 const STAGGER_MS = 35; // per unit of dependency depth (poses 0/1)
 const COLUMN_MS = 35; // per grade-column index, left→right (entering pose 2)
@@ -96,6 +103,23 @@ export interface PoseDriver {
   readonly origin: Pose;
   /** Morph to a pose. Resolves when the transition settles (instant ⇒ at once). */
   setPose(target: Pose, opts?: { instant?: boolean }): Promise<void>;
+  /**
+   * Play the first-visit opener: seed a deterministic SCATTER field (from the
+   * clock `seed`, mulberry32), then converge the nodes into pose 0 with a K→HS
+   * stagger while the ribbons draw themselves in. Resolves when it settles onto
+   * the ordinary settled-pose-0 state (naturally OR via snapOpener). Under
+   * reduced motion it is a no-op (the driver is already settled at pose 0).
+   * main.ts only calls this on a normal load (skipped for deep links / ?og /
+   * reduced motion), so nothing else needs to guard the poses.
+   */
+  startOpener(seed: number): Promise<void>;
+  /**
+   * Snap a playing opener straight to its settled end state (exact pose-0
+   * geometry + fully-formed edges + fresh pick bounds), resolving the startOpener
+   * promise. Idempotent — a no-op if the opener isn't running. Wired to the first
+   * user interaction so the opener never locks input.
+   */
+  snapOpener(): void;
   /** Advance the morph; returns true while morphing (drives render-on-demand). */
   tick(dt: number): boolean;
   /**
@@ -229,6 +253,18 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
   let pendingResolve: (() => void) | null = null;
   let morphPickFrames = 0; // throttles the mid-morph pick-bounds refresh
 
+  // -- opener state --------------------------------------------------------
+  // The first-visit assembly runs BEFORE any pose morph and shares the morph's
+  // live geometry buffers (curPos / nodeProg / the edge attribute arrays). It
+  // eases each node from its captured `scatter` position to the live pose-0
+  // target, and draws each ribbon in from its source. On settle it lands exactly
+  // on nodePoses[0], leaving a clean settled-pose-0 state identical to jumpTo(0).
+  const scatter = new Float32Array(n * 3);
+  let opening = false;
+  let openerElapsed = 0;
+  let openerTotal = openerDurationMs();
+  let openerResolve: (() => void) | null = null;
+
   function delayFor(dest: Pose, i: number): number {
     if (dest >= 2) return colIndex[i] * COLUMN_MS; // Blueprint + Transit stagger by grade column
     if (dest === 1) return depth[i] * STAGGER_MS;
@@ -270,6 +306,65 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     writeNodes();
     writeEdges();
     etches.setPose(poseValue);
+  }
+
+  // Opener edge writer: each ribbon DRAWS ITSELF from its source node toward its
+  // target as the target lands. grow (from the less-advanced endpoint's progress)
+  // extends the endpoint + control from a collapsed point at the source (grow 0 ⇒
+  // zero-length ⇒ invisible) out to the real bezier (grow 1 ⇒ end = target home,
+  // ctrl = pose-0 control — byte-identical to the settled ribbon). Reads curPos so
+  // the growing tip tracks the still-arriving node.
+  function writeOpenerEdges(): void {
+    const ctrl0 = edgeCtrls[0];
+    for (let j = 0; j < m; j++) {
+      const s = eS[j];
+      const t = eT[j];
+      if (s < 0 || t < 0) continue;
+      const g = edgeGrow(Math.min(nodeProg[s], nodeProg[t]));
+      const sx = curPos[s * 3];
+      const sy = curPos[s * 3 + 1];
+      const sz = curPos[s * 3 + 2];
+      const tx = curPos[t * 3];
+      const ty = curPos[t * 3 + 1];
+      const tz = curPos[t * 3 + 2];
+      es[j * 3] = sx;
+      es[j * 3 + 1] = sy;
+      es[j * 3 + 2] = sz;
+      ee[j * 3] = sx + (tx - sx) * g;
+      ee[j * 3 + 1] = sy + (ty - sy) * g;
+      ee[j * 3 + 2] = sz + (tz - sz) * g;
+      ec[j * 3] = sx + (ctrl0[j * 3] - sx) * g;
+      ec[j * 3 + 1] = sy + (ctrl0[j * 3 + 1] - sy) * g;
+      ec[j * 3 + 2] = sz + (ctrl0[j * 3 + 2] - sz) * g;
+    }
+    edges.startAttr.needsUpdate = true;
+    edges.ctrlAttr.needsUpdate = true;
+    edges.endAttr.needsUpdate = true;
+  }
+
+  // Land the opener on the exact settled pose-0 state (same end state jumpTo(0)
+  // produces) and resolve the startOpener promise. Called on natural completion
+  // and by snapOpener. The camera already holds the home framing, so it is left
+  // untouched (no reframe flight).
+  function finishOpener(): void {
+    if (!opening) return;
+    opening = false;
+    curPos.set(nodePoses[0]);
+    startPos.set(curPos);
+    curCtrl.set(edgeCtrls[0]);
+    startCtrl.set(curCtrl);
+    nodeProg.fill(1);
+    poseValue = 0;
+    fromPose = 0;
+    targetPose = 0;
+    originPose = 0;
+    morphing = false;
+    writeAll();
+    nodes.refreshPickBounds();
+    requestRender();
+    const res = openerResolve;
+    openerResolve = null;
+    res?.();
   }
 
   // Refit the camera to the settled pose. Store the pose's home bounds first so
@@ -336,6 +431,10 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
       if (t - lastEvolveT < 0.5) return; // the field moves at day-scale; 2Hz is plenty
       lastEvolveT = t;
       applyEvolve(t);
+      // The opener owns curPos while it plays; let it keep converging to the
+      // freshly-evolved pose-0 target (applyEvolve above updated it) but never
+      // let the evolve writer overwrite the mid-assembly geometry.
+      if (opening) return;
       if (morphing) return; // tick() reads the refreshed targets live
       if (targetPose >= 2) return; // the Blueprint + Transit hold still (only 0/1 evolve; targets stay fresh)
       curPos.set(nodePoses[targetPose]);
@@ -377,7 +476,83 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
       });
     },
 
+    startOpener(seed) {
+      // Reduced motion: no assembly animation — leave the settled pose-0 the
+      // driver already wrote at construction. (main.ts also gates on this.)
+      if (reducedMotion()) return Promise.resolve();
+      // Supersede anything in flight (defensive — the opener runs first at boot).
+      resolvePending();
+      // Scatter about the constellation's own (floored) box, so the cloud reads
+      // as an expanded, dispersed map rather than a sphere. homes[0].box is the
+      // baked pose-0 bounds (the evolve offset is negligible against them).
+      const box = homes[0].box;
+      const center: [number, number, number] = [
+        (box.min.x + box.max.x) / 2,
+        (box.min.y + box.max.y) / 2,
+        (box.min.z + box.max.z) / 2,
+      ];
+      const half = scatterHalfExtents([
+        (box.max.x - box.min.x) / 2,
+        (box.max.y - box.min.y) / 2,
+        (box.max.z - box.min.z) / 2,
+      ]);
+      scatter.set(scatterPositions(n, center, half, seed));
+      curPos.set(scatter);
+      startPos.set(scatter);
+      curCtrl.set(edgeCtrls[0]);
+      startCtrl.set(curCtrl);
+      nodeProg.fill(0);
+      poseValue = 0;
+      fromPose = 0;
+      targetPose = 0;
+      originPose = 0;
+      morphing = false;
+      opening = true;
+      openerElapsed = 0;
+      openerTotal = openerDurationMs();
+      morphPickFrames = 0;
+      // Paint the scattered field + fully-hidden edges before the first frame so
+      // the opener never flashes the settled map. writeOpenerEdges reads nodeProg
+      // (all 0 ⇒ every ribbon collapsed to a point).
+      writeNodes();
+      writeOpenerEdges();
+      etches.setPose(0);
+      nodes.refreshPickBounds();
+      requestRender();
+      return new Promise<void>((res) => {
+        openerResolve = res;
+      });
+    },
+
+    snapOpener() {
+      finishOpener();
+    },
+
     tick(dt) {
+      if (opening) {
+        openerElapsed += dt * 1000;
+        const landed = openerElapsed >= openerTotal;
+        for (let i = 0; i < n; i++) {
+          const frac = maxCol > 0 ? colIndex[i] / maxCol : 0;
+          const p = nodeProgress(openerElapsed, frac);
+          nodeProg[i] = p;
+          curPos[i * 3] = scatter[i * 3] + (nodePoses[0][i * 3] - scatter[i * 3]) * p;
+          curPos[i * 3 + 1] =
+            scatter[i * 3 + 1] + (nodePoses[0][i * 3 + 1] - scatter[i * 3 + 1]) * p;
+          curPos[i * 3 + 2] =
+            scatter[i * 3 + 2] + (nodePoses[0][i * 3 + 2] - scatter[i * 3 + 2]) * p;
+        }
+        writeNodes();
+        writeOpenerEdges();
+        etches.setPose(0);
+        if (++morphPickFrames >= PICK_REFRESH_EVERY) {
+          morphPickFrames = 0;
+          nodes.refreshPickBounds();
+        }
+        if (landed) finishOpener(); // writes the exact settled frame + resolves
+        requestRender();
+        return true;
+      }
       if (!morphing) return false;
       elapsed += dt * 1000;
       const dest = targetPose;
