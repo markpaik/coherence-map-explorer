@@ -7,18 +7,19 @@
 // States: idle | hover(n) | focus(n) | searching.
 //   - hover is a transient overlay; during a focus it rides on top of the
 //     focus emphasis and is restored on hover-out.
-//   - focus runs a TWO-STAGE ladder. Stage 1 (local, the default first click)
-//     lights only the one-hop neighbourhood: the standard, its family, its
-//     direct builds-on / leads-to / related, and the edges between them. Stage 2
-//     (journey) lights the full ancestor + descendant closure with the
-//     grade-stepped cascade and a direction chip (foundations / both / onward).
-//     A re-click of the focused node (or the panel button) escalates local →
-//     journey; a further re-click toggles back to local. Journey stage is NOT
-//     encoded in the hash.
-//   - every standard resolves to a meaningful stage 1: family parents roll up
-//     their sub-standards' edges, and an edgeless sub-standard inherits its
-//     family's edges (resolveConnections). Only two genuinely isolated
-//     standards keep "No mapped connections."
+//   - a focus ALWAYS lights the full both-direction closure with the
+//     grade-stepped cascade. The two "stages" are now purely CAMERA framings:
+//     "local" frames the clicked standard's one-hop neighbourhood; "journey"
+//     frames the full closure (or the foundations / onward subset the direction
+//     chip picks). A fresh click holds the current (typically wide) view for a
+//     beat so the expanse registers, then dives IN to the one-hop frame at a
+//     moderate speed. A re-click of the focused node toggles the camera between
+//     the two frames; the panel button / chip zoom out to the closure. The
+//     camera framing is session-only and NOT encoded in the hash.
+//   - every standard resolves to a meaningful neighbourhood: family parents roll
+//     up their sub-standards' edges, and an edgeless sub-standard inherits its
+//     family's edges (resolveConnections). Only two genuinely isolated standards
+//     keep "No mapped connections."
 //
 // Emphasis is eased on the CPU (~150ms) so hover ramps smoothly. But easing
 // from REST to a distant state (CHAIN/RELATED/FOCUS) would sweep *through* the
@@ -26,8 +27,8 @@
 // cascade SNAPS each revealed layer to its target (current = target) and drives
 // the choreography with per-layer TIMING instead of per-node easing. Only the
 // gentle REST→DIMMED fade of the background is left to ease. A direction change
-// or a toggle back to local re-lights with an instant snap (a downward ease
-// would sweep back through the brighter FOCUS/HOVER band).
+// or a toggle re-lights with an instant snap (a downward ease would sweep back
+// through the brighter FOCUS/HOVER band).
 
 import * as THREE from "three";
 import type { GraphCore, GraphNode } from "../data";
@@ -41,10 +42,46 @@ import type { PanelHandle, Connections } from "../ui/panel";
 
 const EASE_TIME_CONSTANT = 0.05; // s; ~95% settled in 150ms
 const SETTLE_EPSILON = 0.002;
-const GRADE_STEP_MS = 80; // per grade layer of the stage-2 journey cascade
+const GRADE_STEP_MS = 80; // per grade layer of the full-closure cascade
 const DESCENDANT_DELAY_MS = 200; // descendants ignite this much after focus
-const STAGE1_NEIGHBOR_MS = 100; // stage-1 one-hop neighbours land one short wave after focus
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
+
+// Fresh-focus camera choreography (visual tuning): hold the wide view this long
+// after the cascade begins (roughly once the ancestor waves have fired), then
+// dive in. DIVE_SMOOTH_TIME is camera-controls' damping seconds for the dive; a
+// moderate value keeps the wide→close traverse legible (perceived arrival ≈ 2×).
+const DIVE_DELAY_MS = 750;
+const DIVE_SMOOTH_TIME = 0.85;
+
+/** The camera framing after a focus: the one-hop neighbourhood or the closure. */
+export type FocusFraming = "local" | "journey";
+
+/** The camera move a focus() call makes (lighting always runs regardless). */
+export type FocusCameraMove =
+  | "cut" // reduced motion / deep link: snap straight to the one-hop frame
+  | "hop" // already zoomed on another standard: pan directly to the new one-hop
+  | "dive"; // fresh focus (from idle or the wide frame): hold the expanse, then dive in
+
+/**
+ * Decide a focus() call's camera path. Pure so the choreography rule is
+ * unit-testable away from THREE / timers.
+ *   - reduced motion or an instant (deep-link) open always cuts.
+ *   - a HOP: a focus is already active AND the camera sits in the close one-hop
+ *     frame, so a new standard flies straight to its one-hop fit — a lateral
+ *     pan, no wide excursion, no dive delay.
+ *   - otherwise a fresh focus (from idle, or from the wide/journey frame): show
+ *     the expanse for a beat, then dive in.
+ */
+export function decideFocusCamera(
+  reducedMotion: boolean,
+  instant: boolean,
+  hadFocus: boolean,
+  priorFraming: FocusFraming,
+): FocusCameraMove {
+  if (reducedMotion || instant) return "cut";
+  if (hadFocus && priorFraming === "local") return "hop";
+  return "dive";
+}
 
 /** Stage-2 journey direction: the ancestor side, both, or the descendant side. */
 export type JourneyDirection = "foundations" | "both" | "onward";
@@ -86,10 +123,10 @@ export interface FocusOpts {
    */
   history?: "push" | "replace";
   /**
-   * Which stage the focus lands on. "local" (default) lights only the one-hop
-   * neighbourhood. "journey" immediately lights the full ancestor + descendant
-   * closure (direction Both) — the story player opts in so a silent focus keeps
-   * the pre-ladder full-closure lighting without opening the panel or the chip.
+   * Accepted for the story player, which passes "journey". Now a no-op hint: a
+   * focus ALWAYS lights the full both-direction closure (the framings are a
+   * camera concern), so the story gets the full closure either way. Kept so the
+   * player's call site stays valid.
    */
   stage?: "local" | "journey";
 }
@@ -392,12 +429,14 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   let hovered: number | null = null;
   let focusIndex: number | null = null;
   // The current focus's resolved model (family, one-hop sets, full closures),
-  // computed once per focus() and read by both stages, reframe(), and the panel.
+  // computed once per focus() and read by the framings, reframe(), and the panel.
   let focusModel: FocusModel | null = null;
-  let stage: "local" | "journey" = "local";
+  // The active CAMERA framing: "local" = the one-hop frame, "journey" = the full
+  // closure (or the chip's direction subset). Lighting is always the full closure.
+  let stage: FocusFraming = "local";
   let journeyDirection: JourneyDirection = "both";
-  // A silent focus (the story player) suppresses panel + hash + chip in both
-  // stages, exactly as it does for a stage-1 open.
+  // A silent focus (the story player) suppresses panel + hash + chip and the
+  // camera staging; the player owns the camera.
   let silentFocus = false;
 
   // Accumulated focus overrides (grow as cascade waves fire); hover reads these
@@ -411,6 +450,47 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   function clearRevealTimers(): void {
     for (const id of revealTimers) window.clearTimeout(id);
     revealTimers = [];
+  }
+
+  // --- camera flights ------------------------------------------------------
+  // camera-controls' base damping (0.25s, snappy); the moderate dive raises it
+  // temporarily so the wide→close traverse reads. cameraToken guards the restore
+  // so a superseding flight never has its damping stomped mid-flight.
+  const baseSmoothTime = rig.controls.smoothTime;
+  let cameraToken = 0;
+  let diveTimer: number | null = null;
+  function clearDiveTimer(): void {
+    if (diveTimer !== null) {
+      window.clearTimeout(diveTimer);
+      diveTimer = null;
+    }
+  }
+  // Every deliberate focus camera move routes here so the damping is set
+  // deterministically per move (never inherited from an in-flight one):
+  //   moderate → the legible wide↔close zoom, restores base when it settles
+  //   normal   → base damping (the lateral hop between one-hop frames)
+  //   instant  → a hard cut
+  function flyTo(sphere: THREE.Sphere, offset: number, mode: "moderate" | "normal" | "instant"): void {
+    clearDiveTimer();
+    const token = ++cameraToken;
+    if (mode === "instant") {
+      rig.controls.smoothTime = baseSmoothTime;
+      void rig.focusOn(sphere, false, offset);
+      return;
+    }
+    rig.controls.smoothTime = mode === "moderate" ? DIVE_SMOOTH_TIME : baseSmoothTime;
+    void rig.focusOn(sphere, true, offset).finally(() => {
+      if (token === cameraToken) rig.controls.smoothTime = baseSmoothTime;
+    });
+  }
+  // Hold the current (wide) view, then dive in to the one-hop frame — the
+  // fresh-focus signature move.
+  function scheduleDive(sphere: THREE.Sphere, offset: number): void {
+    clearDiveTimer();
+    diveTimer = window.setTimeout(() => {
+      diveTimer = null;
+      flyTo(sphere, offset, "moderate");
+    }, DIVE_DELAY_MS);
   }
 
   function applyEmphasis(patch: EmphasisPatch): void {
@@ -526,57 +606,13 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     };
   }
 
-  // Stage 1: the one-hop neighbourhood only. Focus (FOCUS), family (CHAIN),
-  // direct builds-on / leads-to (CHAIN), direct related (RELATED), and ONLY the
-  // edges between the family anchors and those neighbours. No grade cascade —
-  // focus + related at 0, the neighbours one short wave later.
-  function localLighting(m: FocusModel): Lighting {
-    const anchors = new Set(m.anchors);
-    const buildsOnSet = new Set(m.buildsOn);
-    const leadsToSet = new Set(m.leadsTo);
-    const relatedSet = new Set(m.related);
-
-    const nodeFinal = new Map<number, Emphasis>();
-    for (const r of m.related) nodeFinal.set(r, EMPHASIS.RELATED);
-    for (const b of m.buildsOn) nodeFinal.set(b, EMPHASIS.CHAIN);
-    for (const l of m.leadsTo) nodeFinal.set(l, EMPHASIS.CHAIN);
-    for (const f of m.familyLit) nodeFinal.set(f, EMPHASIS.CHAIN);
-    nodeFinal.set(m.focus, EMPHASIS.FOCUS);
-
-    const edgeFinal = new Map<number, Emphasis>();
-    for (let i = 0; i < edgeCount; i++) {
-      const s = edgeS[i];
-      const t = edgeT[i];
-      if (s < 0 || t < 0) continue;
-      if (edgeK[i] === 0) {
-        // A one-hop prereq edge: an anchor to a direct builds-on or leads-to.
-        if ((anchors.has(t) && buildsOnSet.has(s)) || (anchors.has(s) && leadsToSet.has(t)))
-          edgeFinal.set(i, EMPHASIS.CHAIN);
-      } else if ((anchors.has(s) && relatedSet.has(t)) || (anchors.has(t) && relatedSet.has(s))) {
-        edgeFinal.set(i, EMPHASIS.RELATED);
-      }
-    }
-
-    const nodeReveal = new Map<number, number>();
-    nodeReveal.set(m.focus, 0);
-    for (const r of m.related) nodeReveal.set(r, 0);
-    for (const f of m.familyLit) nodeReveal.set(f, STAGE1_NEIGHBOR_MS);
-    for (const b of m.buildsOn) nodeReveal.set(b, STAGE1_NEIGHBOR_MS);
-    for (const l of m.leadsTo) nodeReveal.set(l, STAGE1_NEIGHBOR_MS);
-    const edgeReveal = new Map<number, number>();
-    edgeFinal.forEach((_v, i) => {
-      const rs = nodeReveal.get(edgeS[i]) ?? 0;
-      const rt = nodeReveal.get(edgeT[i]) ?? 0;
-      edgeReveal.set(i, Math.max(rs, rt));
-    });
-    return { nodeFinal, edgeFinal, nodeReveal, edgeReveal };
-  }
-
-  // Stage 2: the full journey. Direction "both" reproduces the pre-ladder
-  // full-closure lighting exactly (so a silent story focus is byte-identical);
-  // "foundations" drops the descendants + related, "onward" drops the ancestors
-  // + related. The grade-stepped cascade is the stage-2 payoff (ancestors step
-  // backward per grade, descendants ignite after DESCENDANT_DELAY_MS).
+  // The full-closure lighting. Direction "both" (the default a click lights)
+  // reproduces the pre-ladder full-closure lighting exactly, so a silent story
+  // focus is byte-identical; "foundations" drops the descendants + related,
+  // "onward" drops the ancestors + related (the direction chip's lighting
+  // filter). The grade-stepped cascade is the reveal: focus + family + related
+  // at 0, ancestors step backward per grade, descendants ignite after
+  // DESCENDANT_DELAY_MS.
   function journeyLighting(m: FocusModel, dir: JourneyDirection): Lighting {
     const includeAnc = dir !== "onward";
     const includeDesc = dir !== "foundations";
@@ -792,15 +828,19 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     }
   }
 
-  // --- focus (stage 1: local) ---------------------------------------------
+  // --- focus ---------------------------------------------------------------
   function focus(nodeIndex: number, opts?: FocusOpts): void {
     if (nodeIndex < 0 || nodeIndex >= nodeCount) return;
     clearRevealTimers();
+    clearDiveTimer();
     const prevFocus = focusIndex; // for the history push/replace decision below
+    const priorFraming = stage; // for the fresh-vs-hop camera decision
+    const hadFocus = prevFocus !== null;
     focusIndex = nodeIndex;
     hovered = null;
     tooltip.hide();
     canvas.style.cursor = "";
+    // A focus always resettles at the one-hop framing with the full closure lit.
     stage = "local";
     journeyDirection = "both";
     silentFocus = opts?.silent === true;
@@ -812,18 +852,27 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     // Reduced motion always cuts; deep links request an instant cut too.
     const cut = reducedMotion || opts?.instant === true;
 
-    revealLighting(localLighting(model), cut);
+    // Lighting is ALWAYS the full both-direction closure with the grade cascade;
+    // the camera choreography below is what changes with the interaction.
+    revealLighting(journeyLighting(model, "both"), cut);
 
-    // Camera: frame focus + its DIRECT one-hop neighbours (+ family). During a
-    // story the panel is closed, so the framing is unshifted (silent ⇒ 0 offset).
+    // The one-hop frame: focus + its DIRECT neighbours (+ family), related capped.
     const directed = [nodeIndex, ...model.familyLit, ...model.buildsOn, ...model.leadsTo];
     lastNeighborhood = directed; // reframe() replays this fit after a morph
     lastRelated = [...model.related];
-    void rig.focusOn(
-      sphereAround(nodeIndex, directed, lastRelated),
-      !cut,
-      silentFocus ? 0 : focusPanelOffsetPx(),
-    );
+    const oneHop = sphereAround(nodeIndex, directed, lastRelated);
+    const offset = silentFocus ? 0 : focusPanelOffsetPx();
+
+    if (silentFocus) {
+      // The story owns the camera (applyCamera overrides right after). Fit the
+      // one-hop frame immediately, no expanse-beat dive.
+      flyTo(oneHop, offset, cut ? "instant" : "normal");
+    } else {
+      const move = decideFocusCamera(reducedMotion, opts?.instant === true, hadFocus, priorFraming);
+      if (move === "cut") flyTo(oneHop, offset, "instant");
+      else if (move === "hop") flyTo(oneHop, offset, "normal"); // lateral pan, no dive
+      else scheduleDive(oneHop, offset); // fresh focus: hold the expanse, then dive in
+    }
 
     // Panel + narration + deep link — all owned by the story card while silent.
     if (!silentFocus) {
@@ -842,10 +891,6 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       updateHash(node.code, focusHistoryMode(opts?.history, prevFocus === nodeIndex));
     }
     requestRender();
-
-    // Story player opts into the full closure immediately (silent journey):
-    // light stage 2 (Both) without opening the panel, the chip, or the hash.
-    if (opts?.stage === "journey") applyJourney("both", !cut);
   }
 
   // The panel's Connections payload for a resolved model.
@@ -878,28 +923,30 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     return true;
   }
 
-  // --- focus (stage 2: journey) -------------------------------------------
+  // --- the wide (journey) framing -----------------------------------------
   function directionAnnounce(dir: JourneyDirection): string {
     if (dir === "foundations") return "Showing the foundations this builds on.";
     if (dir === "onward") return "Showing where this leads onward.";
     return "Showing the full journey.";
   }
 
-  // Enter (from local) or re-aim (within journey) stage 2. `allowCascade` is
-  // honoured only when entering from local — a direction change re-lights
-  // instantly, no cascade replay.
-  function applyJourney(dir: JourneyDirection, allowCascade: boolean): void {
+  // Zoom OUT to frame the closure. The full closure is already lit; this is a
+  // camera move plus, for a direction subset, a lighting FILTER (Both = the
+  // whole closure, foundations/onward = that half). Never replays the cascade.
+  function applyJourney(dir: JourneyDirection): void {
     if (focusIndex === null || focusModel === null) return;
     const wasLocal = stage === "local";
     stage = "journey";
     journeyDirection = dir;
-    const cut = reducedMotion || !allowCascade || !wasLocal;
-    revealLighting(journeyLighting(focusModel, dir), cut);
-    void rig.focusOn(
-      sphereOf(journeyFitSet(focusModel, dir)),
-      !reducedMotion,
-      silentFocus ? 0 : focusPanelOffsetPx(),
-    );
+    // Instant re-light: the closure is already on screen, so a subset just
+    // filters it (a downward ease would flash back through the FOCUS band).
+    revealLighting(journeyLighting(focusModel, dir), true);
+    if (!silentFocus)
+      flyTo(
+        sphereOf(journeyFitSet(focusModel, dir)),
+        focusPanelOffsetPx(),
+        reducedMotion ? "instant" : "moderate",
+      );
     if (!silentFocus) {
       if (wasLocal) {
         panel.showJourney(dir, focusModel.ancestors, focusModel.descendants);
@@ -919,30 +966,31 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
   function traceJourney(direction?: JourneyDirection): void {
     if (focusIndex === null || focusModel === null) return;
-    applyJourney(direction ?? "both", true);
+    applyJourney(direction ?? "both");
   }
 
-  // Toggle stage 2 back down to stage 1: re-light the one-hop set instantly (no
-  // cascade replay), camera back to the one-hop fit, chip + journey sections gone.
+  // Toggle the wide framing back to the one-hop frame: restore the full closure
+  // (drop any direction filter), zoom IN, retire the chip + journey sections.
   function toggleLocal(): void {
     if (focusIndex === null || focusModel === null) return;
     stage = "local";
     journeyDirection = "both";
-    revealLighting(localLighting(focusModel), true);
-    void rig.focusOn(
-      sphereAround(focusIndex, lastNeighborhood, lastRelated),
-      !reducedMotion,
-      silentFocus ? 0 : focusPanelOffsetPx(),
-    );
+    revealLighting(journeyLighting(focusModel, "both"), true);
+    if (!silentFocus)
+      flyTo(
+        sphereAround(focusIndex, lastNeighborhood, lastRelated),
+        focusPanelOffsetPx(),
+        reducedMotion ? "instant" : "moderate",
+      );
     if (!silentFocus) {
       panel.hideJourney();
-      announce(`Collapsed to ${graph.nodes[focusIndex].code} and its direct connections.`);
+      announce(`Zoomed in to ${graph.nodes[focusIndex].code} and its direct connections.`);
     }
     requestRender();
   }
 
-  // Re-click of the already-focused node: escalate local → journey, else toggle
-  // journey → local.
+  // Re-click of the already-focused node: toggle the camera between the one-hop
+  // frame and the wide closure (no cascade replay, no hash change).
   function escalateFocus(): void {
     if (focusIndex === null) return;
     if (stage === "local") traceJourney("both");
@@ -951,20 +999,23 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
 
   function reframe(): void {
     if (focusIndex === null || focusModel === null) return;
-    // Same indices as the active stage — only their positions moved with the
-    // pose. Reuse the stored sets, no cascade re-run: the one-hop sphere in
-    // local, the active direction's journey sphere in journey.
+    // Refit whichever frame is current — only the positions moved with the pose.
+    // Reuse the stored sets, no cascade re-run: the one-hop sphere in local, the
+    // active direction's closure sphere in journey.
     const sphere =
       stage === "journey"
         ? sphereOf(journeyFitSet(focusModel, journeyDirection))
         : sphereAround(focusIndex, lastNeighborhood, lastRelated);
-    void rig.focusOn(sphere, !reducedMotion, focusPanelOffsetPx());
+    flyTo(sphere, focusPanelOffsetPx(), reducedMotion ? "instant" : "normal");
     requestRender();
   }
 
   function clearFocus(opts?: { silent?: boolean }): void {
     if (focusIndex === null) return;
     clearRevealTimers();
+    clearDiveTimer();
+    rig.controls.smoothTime = baseSmoothTime; // drop any in-flight dive damping
+    cameraToken++; // supersede a pending dive-flight restore
     focusIndex = null;
     hovered = null;
     curNodeOv = new Map();

@@ -81,11 +81,10 @@ export function createTour(deps: TourDeps): TourHandle {
         "Grade 3's first fraction standard. Only two quiet lines flow in, from partitioning shapes and measuring lengths. A cascade of gold flows out to everything fractions unlock.",
       enter() {
         // Scripted focus REPLACES the hash (never pushes) — the tour must not
-        // grow browser-history entries the Back gesture would then unwind. The
-        // caption promises "a cascade of gold flows out", so escalate to the
-        // full journey (Both) rather than the one-hop stage 1.
+        // grow browser-history entries the Back gesture would then unwind. A
+        // click now lights the whole closure with the cascade on its own, so the
+        // caption's "cascade of gold flows out" plays before the camera dives in.
         machine.focusByCode("3.NF.A.1", { history: "replace" });
-        machine.traceJourney("both");
       },
     },
     {
@@ -93,9 +92,9 @@ export function createTour(deps: TourDeps): TourHandle {
       caption:
         "Proportional relationships. One of the most connected standards in school mathematics, and a Widely Applicable Prerequisite for college and careers.",
       enter() {
-        // "One of the most connected standards" — show the whole web, not one hop.
+        // "One of the most connected standards" — the click's cascade fans out
+        // across its whole web before the camera settles on the crossroads.
         machine.focusByCode("7.RP.A.2", { history: "replace" });
-        machine.traceJourney("both");
       },
     },
     {
@@ -103,8 +102,9 @@ export function createTour(deps: TourDeps): TourHandle {
       caption:
         "The high-school concept of a function, traced back through every prerequisite to counting in Kindergarten. This is what coherence means.",
       enter() {
-        // The caption traces this back to Kindergarten, so light the ancestor
-        // side of the journey (Foundations) with the grade-stepped cascade.
+        // The caption shows the lineage traced back to Kindergarten, so this
+        // step ends WIDE: focus lights the full closure, then traceJourney zooms
+        // out to frame the ancestor side (Foundations) instead of diving in.
         machine.focusByCode("F-IF.A.1", { history: "replace" });
         machine.traceJourney("foundations");
       },

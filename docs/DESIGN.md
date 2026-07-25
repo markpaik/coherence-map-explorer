@@ -171,8 +171,9 @@ noise, disabled with reduced-motion.
   grade·domain breadcrumb → badges row → standard text → Connections
   (three groups: "Builds on" / "Leads to" / "Related", each entry a real
   <button> with code + 6-word title clamp) → "Trace the full journey" primary
-  action → direction chip (journey only) → Foundations + Onward closures
-  (journey only) → Tasks (external links, attribution) → Progression note
+  action (zooms out to the closure) → direction chip (wide frame only) →
+  Foundations + Onward closures (wide frame only) → Tasks (external links,
+  attribution) → Progression note
   (collapsed <details>) → v2 slot (hidden div#ai-slot). Close = Esc / ×.
   Inherit case (an edgeless sub-standard): the Connections open with a note
   naming the family standard plus a "Family" group (parent first, then
@@ -182,45 +183,56 @@ noise, disabled with reduced-motion.
   "Mapped on <parent code>" with the family's builds-on / leads-to counts, not
   "No mapped connections".
 
-## Interaction grammar (the two-stage focus ladder)
+## Interaction grammar (light everything, then dive in)
 
-A click does NOT dump the whole lineage at once. It runs a two-stage ladder so a
-reader meets one hop first, then chooses to walk the whole journey.
+A click shows how expansive a standard's reach is, then zooms into it — the whole
+expanse and its local neighbourhood in one interaction. Lighting is ALWAYS the
+full both-direction closure; the two "framings" are a CAMERA concern.
 
-- **Stage 1 (local, the default first click).** Lights only the one-hop
-  neighbourhood: the standard (FOCUS), its family (CHAIN), its direct builds-on
-  / leads-to (CHAIN) and related (RELATED), and only the edges between the
-  family and those neighbours. Everything else dims. Camera frames the one-hop
-  set (the directed neighbourhood always fits; related widens only up to 1.6x).
-- **Stage 2 (journey).** Triggered by re-clicking the focused node, or the
-  panel's "Trace the full journey" button. Lights the full ancestor and
-  descendant closures with the grade-stepped cascade (the payoff moment) and
-  pulls the camera back to frame them. A third click on the focused node toggles
-  back to stage 1. Escape, the panel's ×, or a background click clear the focus
-  entirely.
-- **Direction chip (stage 2 only).** A three-way segmented radiogroup in the
-  panel: Foundations (ancestors), Both (default on every fresh journey), Onward
-  (descendants). It re-aims which side lights and reframes the camera; a change
-  re-lights instantly, no cascade replay. Keyboard-operable with a visible focus
-  ring; direction changes announce on the aria-live channel.
+- **A fresh click** (from idle, or from the wide frame) lights the full ancestor
+  and descendant closures with the grade-stepped cascade immediately. The camera
+  does not fly at once: it HOLDS the current (typically wide) view for a beat so
+  the expanse registers (~750ms, once the ancestor waves have fired), then dives
+  IN to the one-hop frame (the standard + family + builds-on / leads-to, related
+  capped at 1.6x) at a moderate, legible speed. Constants `DIVE_DELAY_MS` /
+  `DIVE_SMOOTH_TIME` in `machine.ts`.
+- **A hop** — focusing a different standard while already zoomed on one (map
+  click, panel connection, search pick) — flies straight to the new standard's
+  one-hop frame: a lateral pan at comparable zoom, no wide excursion, no dive
+  delay. The full-closure cascade still runs for the new standard; only the
+  camera path changes. The fresh-vs-hop choice is the pure `decideFocusCamera`
+  predicate (prior focus presence + current framing).
+- **The wide frame** is a pure camera zoom-out over the already-lit closure,
+  reached by re-clicking the focused node or the panel's "Trace the full journey"
+  button. Re-clicking the focused node toggles the camera between the one-hop and
+  wide frames (no cascade replay, no hash change). Escape, the panel's ×, or a
+  background click clear the focus entirely.
+- **Direction chip (wide frame).** A three-way segmented radiogroup in the panel:
+  Foundations (ancestors), Both (default), Onward (descendants). Both frames the
+  whole closure; Foundations / Onward frame that half AND filter the lighting to
+  it (an instant re-light, no cascade replay). Keyboard-operable with a visible
+  focus ring; direction changes announce on the aria-live channel.
+- **Reduced motion / deep link.** An instant cut straight to the one-hop frame,
+  everything lit, no expanse-beat and no dive.
 - **Consistency (the inheritance rule).** Every one of the 480 standards gets a
-  meaningful stage 1. A family parent rolls its sub-standards' connections up;
-  an edgeless sub-standard inherits its family's connections
+  meaningful neighbourhood. A family parent rolls its sub-standards' connections
+  up; an edgeless sub-standard inherits its family's connections
   (`resolveConnections`, the one resolver the panel and Browse share). Only the
   two genuinely isolated solo standards say "No mapped connections." See
   `docs/audits/edge-provenance.md`.
 - **Not hash-encoded.** The URL carries only the focused standard (`#/s/<CODE>`).
-  The journey stage and direction are session state, never written to the hash,
-  so a shared link always opens at stage 1.
+  The camera framing and chip direction are session state, never written to the
+  hash, so a shared link always opens at the fresh-click behaviour.
 
 ## Motion
 
 | Move | Spec |
 |---|---|
-| camera focus flight | camera-controls `setLookAt` smooth-damped, ~1.1s perceived; `fitToSphere` on focus neighborhood with 1.35 padding |
-| stage-1 local reveal | one-hop only: focus + related at 0ms, the family + builds-on/leads-to neighbours one short wave at ~100ms; no grade cascade |
-| stage-2 journey cascade | the payoff: ancestors ignite in grade order stepping backward, 80ms stagger per grade layer; descendants forward after 200ms; camera pulls back to frame the active direction's closure (fitToSphere on its bounding sphere) |
-| direction change / toggle-down | instant snap, no cascade replay (a downward ease would flash back through the brighter FOCUS band) |
+| camera focus flight | camera-controls `fitToSphere` smooth-damped; base damping ~0.25s, the dive raises it to `DIVE_SMOOTH_TIME` so the wide→close traverse reads |
+| fresh-click choreography | full closure cascades immediately; camera holds the wide view ~`DIVE_DELAY_MS` (750ms), then dives to the one-hop frame at moderate speed |
+| full-closure cascade | ancestors ignite in grade order stepping backward, 80ms stagger per grade layer; descendants forward after 200ms |
+| hop (new standard while zoomed) | lateral pan straight to the new one-hop frame, no wide excursion, no dive delay; the cascade still runs |
+| wide-frame zoom / direction change / toggle | pure camera move over the already-lit closure; a direction subset re-lights instantly, no cascade replay |
 | panel | 280ms translateX cubic-bezier(.2,.8,.2,1) |
 | idle drift | slow orbit, one revolution ≈ 240s; pauses on any interaction, resumes after 20s idle |
 | reduced motion | camera cuts (≤150ms), no cascade stagger (all at once), no particles, no twinkle, no drift |

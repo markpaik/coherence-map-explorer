@@ -1,5 +1,5 @@
 // resolveConnections is the ONE resolver the 3D panel (machine.computeModel) and
-// mobile Browse route through, so their stage-1 semantics can never drift. It
+// mobile Browse route through, so their connection semantics can never drift. It
 // wraps rollUpFamily (parent roll-up) and adds the edgeless-child inherit case.
 // This suite pins each branch against the real built graph as the fixture:
 //   - inherit: an edgeless sub-standard whose family carries the edges
