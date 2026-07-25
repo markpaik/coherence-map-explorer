@@ -2,19 +2,39 @@
 //
 // One hundred completions in three registers (single words, phrases, ending
 // statements), Mark's direction: the line should be poetic, and the whole
-// visit should be GENERATIVE — one of an infinite number of variations. So
-// the pick is drawn from the per-visit seed, and the RENDERING itself
-// varies: each visit's aside leans at its own angle, sits at its own size,
-// carries its own ink pressure and its own turbulence seed. No two visits
-// print the same title. Clicking the aside deals a new line (a small
-// pleasure for whoever discovers it). "art" keeps its hand-authored street
-// tag; every other completion renders as marker text in the tag styling.
+// visit should be GENERATIVE — one of an infinite number of variations. The
+// PRINT (lean, drop, ink pressure, turbulence) stays a function of the clock
+// seed, but the PICK deals fresh on every page load (Mark, 2026-07-24): a
+// visit counter in localStorage scatters the choice, deterministic in
+// (hour, visit count), never repeating the line just shown. Where storage is
+// unavailable the pick falls back to plain randomness — still a new line per
+// refresh. Clicking the aside deals the next line (a small pleasure for
+// whoever discovers it). "art" keeps its hand-authored street tag; every
+// other completion renders as marker text in the tag styling.
 //
 // Copy is design: edit this list only with the designer.
 // GLYPH CONSTRAINT: entries may use only lowercase a-z, spaces, and hyphens
 // (the tag hand's glyph set; see ui/tagtype.ts).
 
+import { mulberry32 } from "../scene/evolve";
 import { renderTag } from "./tagtype";
+
+// Refresh-deal state. The counter makes each page load a distinct visit even
+// inside one clock hour; the last-index guard makes the change visible.
+const COUNT_KEY = "cme-aside-visit";
+const LAST_KEY = "cme-aside-last";
+
+/**
+ * Pick this load's aside index: scatter (clock base, visit count) through a
+ * fresh mulberry32 so consecutive refreshes jump around the list instead of
+ * walking it in order. Exported for tests; pure given its inputs.
+ */
+export function dealIndex(base: number, count: number, last: number, length: number): number {
+  const scatter = mulberry32((base ^ Math.imul(count + 1, 0x9e3779b9)) >>> 0);
+  let i = Math.floor(scatter() * length);
+  if (i === last) i = (i + 1) % length;
+  return i;
+}
 
 export const ASIDES: readonly string[] = [
   "art",
@@ -147,7 +167,20 @@ export function createAside(rand: () => number): AsideHandle {
     .querySelectorAll("#aside-marker feTurbulence")
     .forEach((t) => t.setAttribute("seed", String(1 + Math.floor(rand() * 997))));
 
-  let index = Math.floor(rand() * ASIDES.length);
+  // The pick deals fresh each load: bump the visit counter and scatter the
+  // clock base with it. localStorage can throw (privacy modes); fall back to
+  // chance so a refresh still shows a new line.
+  const base = Math.floor(rand() * 0x7fffffff);
+  let index: number;
+  try {
+    const count = Number(localStorage.getItem(COUNT_KEY)) || 0;
+    const last = Number(localStorage.getItem(LAST_KEY) ?? -1);
+    index = dealIndex(base, count, last, ASIDES.length);
+    localStorage.setItem(COUNT_KEY, String(count + 1));
+    localStorage.setItem(LAST_KEY, String(index));
+  } catch {
+    index = Math.floor(Math.random() * ASIDES.length);
+  }
   let current: SVGSVGElement | null = null;
 
   function show(i: number): void {
