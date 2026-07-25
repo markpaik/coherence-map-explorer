@@ -13,6 +13,15 @@ const DRIFT_AMPLITUDE_RAD = (18 * Math.PI) / 180; // ±18° sway
 const DRIFT_PERIOD_S = 90; // seconds per full oscillation
 const IDLE_RESUME_MS = 20_000;
 
+// Home framing composes the fitted formation's vertical CENTER into the middle
+// of the USABLE band = viewport height − the bottom chrome inset (setBottomInsetPx)
+// − this top strip reserved for the headline. The wordmark block is ~260px tall
+// but only spans the left half, so a modest strip (not the full headline height)
+// keeps the top-center/right free for the formation to rise into. The plain
+// bottom-inset lift (applyPanelOffset) only clears the chrome, which still left
+// the mass hugging the bottom; centering in this band raises it properly.
+const HOME_TOP_MARGIN_PX = 100;
+
 export interface CameraRig {
   camera: THREE.PerspectiveCamera;
   controls: CameraControls;
@@ -129,8 +138,8 @@ export function createCameraRig(
       paddingLeft: 40,
       paddingRight: 40,
     });
-    // AFTER the fit so the bottom-inset lift is computed at the new distance.
-    applyPanelOffset(0, transition);
+    // AFTER the fit so the centering is computed at the new fitted distance.
+    applyHomeComposition(transition);
   }
   // Head-on framing for the flat Blueprint pose: reset azimuth/polar to look
   // straight down the +z axis at the plane, then fit its box from that angle.
@@ -142,7 +151,7 @@ export function createCameraRig(
       paddingLeft: 40,
       paddingRight: 40,
     });
-    applyPanelOffset(0, transition);
+    applyHomeComposition(transition);
   }
 
   // Convert a screen-space nudge (CSS px) at the current fitted distance into
@@ -150,6 +159,12 @@ export function createCameraRig(
   const _pos = new THREE.Vector3();
   const _tgt = new THREE.Vector3();
   const _boxSize = new THREE.Vector3();
+  // Scratch for the home-centering composition (applyHomeComposition).
+  const _homeCenter = new THREE.Vector3();
+  const _fwd = new THREE.Vector3();
+  const _right = new THREE.Vector3();
+  const _camUp = new THREE.Vector3();
+  const _worldUp = new THREE.Vector3(0, 1, 0);
   // A persistent vertical bias (CSS px): during stories on phones the card
   // covers the lower ~40% of the screen, so the framed content rides UP by
   // this much. 0 everywhere else. Applied by every fit (focusOn + frameHome).
@@ -173,6 +188,41 @@ export function createCameraRig(
     // -y pans the camera down → the target rides UP (clear of the story card
     // and the bottom chrome band).
     void controls.setFocalOffset(panelOffsetPx * worldPerPx, -lift * worldPerPx, 0, transition);
+  }
+
+  // Home framing composition (both frameHome paths): place the fitted formation's
+  // vertical CENTER at the center of the usable band [HOME_TOP_MARGIN_PX, H −
+  // bottomInsetPx] instead of merely lifting by the chrome height. fitToBox lands
+  // this wide, front-lit cloud low in frame (its target sits below screen center
+  // from the 3/4 look), so a plain inset lift still read bottom-heavy; centering
+  // in the band raises it and clears the bottom chrome + grade etches by even more.
+  // Screen-space, via the same focalOffset lever as applyPanelOffset, off the fit's
+  // END values so it composes with an in-flight transition rather than cutting it.
+  function applyHomeComposition(transition: boolean): void {
+    controls.getPosition(_pos, true);
+    controls.getTarget(_tgt, true);
+    const distance = _pos.distanceTo(_tgt);
+    const H = Math.max(window.innerHeight, 1);
+    if (distance === 0) {
+      void controls.setFocalOffset(0, 0, 0, transition);
+      return;
+    }
+    const worldPerPx = (2 * distance * Math.tan((camera.fov * Math.PI) / 360)) / H;
+    // Camera up at the goal pose (world-up lookAt; camera-controls holds zero roll).
+    _fwd.copy(_tgt).sub(_pos).normalize();
+    _right.copy(_fwd).cross(_worldUp).normalize();
+    _camUp.copy(_right).cross(_fwd); // unit: right ⟂ fwd, both unit
+    // World-space vertical offset of the box center ABOVE the controls target
+    // (the target projects to screen center when focalOffset is 0).
+    homeBox.getCenter(_homeCenter);
+    const vOffWorld = _homeCenter.sub(_tgt).dot(_camUp);
+    // Center of the usable band, in CSS px from the top.
+    const bandCenter = (HOME_TOP_MARGIN_PX + (H - bottomInsetPx)) / 2;
+    // Solve for the y focalOffset that lands the box center at bandCenter:
+    //   boxScreenY = H/2 − vOffWorld/worldPerPx − focalY/worldPerPx  ⇒  set = bandCenter.
+    // (More-positive focalOffset.y rides the content UP by 1/worldPerPx px per unit.)
+    const focalY = (H / 2 - bandCenter) * worldPerPx - vOffWorld;
+    void controls.setFocalOffset(0, focalY, 0, transition);
   }
 
   frameHome(false);
