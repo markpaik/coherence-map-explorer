@@ -84,11 +84,27 @@ function supportsWebGL2(): boolean {
   }
 }
 
+// The boot veil is opaque black until the scene paints, so a data load that
+// never lands leaves the reader on a dead screen with nothing to read and
+// nothing to press. Replace the veil's content with a plain error state instead:
+// what happened, and a Reload button.
 function bootError(message: string): void {
   const el = document.createElement("div");
   el.className = "boot-error";
-  el.textContent = message;
+  const text = document.createElement("p");
+  text.className = "boot-error-text";
+  text.textContent = message;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "boot-error-retry";
+  retry.textContent = "Reload";
+  retry.addEventListener("click", () => location.reload());
+  el.append(text, retry);
   document.body.appendChild(el);
+  retry.focus();
+  // The veil sits under this panel and never fades now; drop it so the error
+  // state is the whole screen rather than a card floating on black.
+  document.getElementById("veil")?.remove();
 }
 
 function start(graph: GraphCore): void {
@@ -364,6 +380,7 @@ function start(graph: GraphCore): void {
     clearAll: () => filters.clearFilters(),
   });
   const tour = createTour({
+    graph,
     machine,
     rig,
     filters,
@@ -987,7 +1004,8 @@ async function main(): Promise<void> {
     const graph = await loadGraph();
     start(graph);
   } catch (err) {
-    bootError(`Failed to load the coherence map: ${(err as Error).message}`);
+    console.warn("[cme] boot failed", err);
+    bootError("The coherence map could not load. Check your connection and try again.");
   }
 }
 

@@ -89,10 +89,30 @@ export interface GraphCore {
   edges: GraphEdge[];
 }
 
-export async function loadGraph(url = "/data/graph-core.json"): Promise<GraphCore> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to load graph data: HTTP ${res.status}`);
-  return (await res.json()) as GraphCore;
+// --- fetch policy ---------------------------------------------------------
+// Every data fetch gets a deadline and one retry. Without the deadline a
+// stalled connection never rejects, so the caller's catch never runs: the boot
+// veil stays black forever, a detail shard never fills in, and the search index
+// hangs "building" with no way for the reader to know. 20s is long enough for
+// the 184kB HS shard on a slow phone and short enough to still be a page load.
+const FETCH_TIMEOUT_MS = 20_000;
+
+async function fetchJson<T>(url: string, what: string): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      if (!res.ok) throw new Error(`${what}: HTTP ${res.status}`);
+      return (await res.json()) as T;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`${what}: request failed`);
+}
+
+export function loadGraph(url = "/data/graph-core.json"): Promise<GraphCore> {
+  return fetchJson<GraphCore>(url, "Failed to load graph data");
 }
 
 // --- Detail shards (lazy, per grade) --------------------------------------
@@ -123,10 +143,10 @@ const shardCache = new Map<string, Promise<DetailShard>>();
 export function loadDetails(grade: string): Promise<DetailShard> {
   let p = shardCache.get(grade);
   if (!p) {
-    p = fetch(`/data/details/${encodeURIComponent(grade)}.json`).then((res) => {
-      if (!res.ok) throw new Error(`Failed to load details for ${grade}: HTTP ${res.status}`);
-      return res.json() as Promise<DetailShard>;
-    });
+    p = fetchJson<DetailShard>(
+      `/data/details/${encodeURIComponent(grade)}.json`,
+      `Failed to load details for ${grade}`,
+    );
     // Cache successes only — a transient network failure must not poison the
     // shard for the rest of the session (retry re-fetches).
     p.catch(() => shardCache.delete(grade));
@@ -154,10 +174,7 @@ let searchDocsPromise: Promise<SearchDoc[]> | null = null;
 /** Fetch (and cache) the flat search index (public/data/search.json). */
 export function loadSearchDocs(): Promise<SearchDoc[]> {
   if (!searchDocsPromise) {
-    searchDocsPromise = fetch("/data/search.json").then((res) => {
-      if (!res.ok) throw new Error(`Failed to load search index: HTTP ${res.status}`);
-      return res.json() as Promise<SearchDoc[]>;
-    });
+    searchDocsPromise = fetchJson<SearchDoc[]>("/data/search.json", "Failed to load search index");
     searchDocsPromise.catch(() => {
       searchDocsPromise = null; // same: don't cache failures
     });

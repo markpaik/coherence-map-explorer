@@ -90,9 +90,13 @@ interface Indexed {
 }
 
 // --- KaTeX (dynamic, once) — mirrors panel.ts exactly ---------------------
+// No `$` / `$$` delimiter here either: the pipeline re-delimits every real math
+// span to `\(…\)` / `\[…\]`, so prose dollar amounts can never pair. See the
+// long note in panel.ts.
 let katexPromise: Promise<(el: HTMLElement) => void> | null = null;
 const DISPLAY_ENV =
   /\\begin\{(align\*?|alignat\*?|gather\*?|equation\*?|multline\*?|split|cases)\}[\s\S]*?\\end\{\1\}/g;
+const DELIMITED_SPAN = /\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/g;
 function wrapBareEnvironments(root: HTMLElement): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const texts: Text[] = [];
@@ -101,9 +105,14 @@ function wrapBareEnvironments(root: HTMLElement): void {
     if (t.data.includes("\\begin{")) texts.push(t);
   }
   for (const t of texts) {
-    const wrapped = t.data.replace(DISPLAY_ENV, (m, _env, offset: number, s: string) => {
-      if (s[offset - 1] === "$") return m;
-      return `$$${m}$$`;
+    const spans: [number, number][] = [];
+    DELIMITED_SPAN.lastIndex = 0;
+    for (let m = DELIMITED_SPAN.exec(t.data); m; m = DELIMITED_SPAN.exec(t.data)) {
+      spans.push([m.index, m.index + m[0].length]);
+    }
+    const wrapped = t.data.replace(DISPLAY_ENV, (m, _env, offset: number) => {
+      if (spans.some(([a, b]) => offset >= a && offset < b)) return m;
+      return `\\[${m}\\]`;
     });
     if (wrapped !== t.data) t.data = wrapped;
   }
@@ -119,10 +128,8 @@ function loadKatex(): Promise<(el: HTMLElement) => void> {
         wrapBareEnvironments(el);
         renderMathInElement(el, {
           delimiters: [
-            { left: "$$", right: "$$", display: true },
             { left: "\\[", right: "\\]", display: true },
             { left: "\\(", right: "\\)", display: false },
-            { left: "$", right: "$", display: false },
           ],
           throwOnError: false,
           ignoredClasses: ["term"],
@@ -300,18 +307,34 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   overlay.append(header, viewHost);
   document.body.append(overlay, popover);
 
-  // Glossary term interactions, delegated on the view host.
+  // Glossary term interactions, delegated on the view host. Keyboard parity with
+  // the 3D panel: the chips are tabIndex=0 role=button, so focus must open the
+  // popover exactly as hover does, and Enter/Space must activate it (a
+  // span[role=button] synthesizes no click of its own).
   viewHost.addEventListener("pointerover", (e) => {
     if (isTerm(e.target)) showPopover(e.target);
   });
   viewHost.addEventListener("pointerout", (e) => {
     if (isTerm(e.target)) hidePopover();
   });
+  viewHost.addEventListener("focusin", (e) => {
+    if (isTerm(e.target)) showPopover(e.target);
+  });
+  viewHost.addEventListener("focusout", hidePopover);
   viewHost.addEventListener("click", (e) => {
     if (isTerm(e.target)) {
       e.preventDefault();
       popover.hidden ? showPopover(e.target) : hidePopover();
     }
+  });
+  viewHost.addEventListener("keydown", (e) => {
+    if (!isTerm(e.target)) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      popover.hidden ? showPopover(e.target) : hidePopover();
+    }
+    // Escape is already the overlay's: it dismisses the popover first, and only
+    // pops a Browse level once the popover is down.
   });
   overlay.addEventListener("scroll", hidePopover, { passive: true });
 
@@ -922,10 +945,21 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   let stack: View[] = [{ t: "home" }];
   // History entries this Browse session has PUSHED (finding: the system Back
   // gesture must unwind the drill-down like the header chevron). Each push adds
-  // one; popstate collapses one; the chevron/Esc spend one via history.back().
+  // one; ANY popstate spends one; the chevron/Esc spend one via history.back().
   // The boot deep-link baseline ([home, standard]) pushes nothing, so its first
   // back collapses in place (see pop()).
+  //
+  // "ANY popstate" is the fix: the counter tracks HISTORY, not visibility. When
+  // the overlay was hidden (the reader hit "See in the map" and then the system
+  // Back), the old handler returned early and left the counter one too high —
+  // and a later chevron would call history.back() with nothing of ours left to
+  // pop, walking the browser clean out of the app. Undercounting is the safe
+  // direction: the chevron just collapses in place.
   let pushedEntries = 0;
+  // Where history.length stood before Browse pushed anything. history.length
+  // never shrinks, so this is only ever a floor — but if it never rose, we
+  // pushed nothing and must never call history.back().
+  const historyBaseline = history.length;
 
   function updateHash(view: View, mode: "push" | "replace"): void {
     const base = location.pathname + location.search;
@@ -997,19 +1031,22 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   // collapses straight away.
   function pop(): void {
     if (stack.length <= 1) return;
-    if (pushedEntries > 0) history.back();
+    if (pushedEntries > 0 && history.length > historyBaseline) history.back();
     else collapse();
   }
-  // Browser Back/Forward while the overlay owns the screen. When the map is
-  // showing (overlay hidden) the map's own hashchange router handles history and
-  // Browse stands down, so this must not fire the collapse under it.
+  // Browser Back/Forward. The counter is decremented on EVERY popstate, whether
+  // or not the overlay is showing — a back gesture taken from the map spends one
+  // of our entries just the same, and leaving the counter high is what lets a
+  // later chevron push the browser out of the app. Only the COLLAPSE is gated on
+  // visibility: when the map owns the screen its own hashchange router drives
+  // the view and Browse must not pull a level out from under it.
   function onPopState(): void {
+    if (pushedEntries > 0) pushedEntries--;
     if (overlay.hidden) return;
     if (stack.length <= 1) {
-      pushedEntries = 0;
+      pushedEntries = 0; // at Home there is nothing of ours left to unwind
       return;
     }
-    if (pushedEntries > 0) pushedEntries--;
     collapse();
   }
   window.addEventListener("popstate", onPopState);

@@ -61,6 +61,13 @@ export interface SearchHandle {
   dismiss(): void;
   /** Briefly ring the search rail (the tour's "Find your standard" stop). */
   pulse(): void;
+  /**
+   * Take the rail out of (or back into) the tab order while leaving it visible.
+   * The tour POINTS at the rail (it pulses it on the last stop), so it can't be
+   * hidden the way a story hides it — but it must not be focusable either, or
+   * Tab escapes the tour card and Enter fires a focus mid-tour.
+   */
+  setInert(on: boolean): void;
   /** Provide the live filter state. When filters suppress matches, results show
    * a "N more hidden by filters · Show all" row instead of dropping them.
    * Wired after createFilters (search is constructed before the filter rail). */
@@ -83,9 +90,19 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   if (!rail || !inputEl) throw new Error("Search rail missing (#search-rail / #search-input)");
   const input: HTMLInputElement = inputEl; // non-null binding for closures below
 
+  // A story or the tour owns the frame: the rail stands down entirely (see the
+  // "/" handler and choose()). The machine is the single writer of focus, and a
+  // non-silent focusByCode mid-story would repaint emphasis under the card.
+  const isPlaying = (): boolean =>
+    document.body.classList.contains("storying") || document.body.classList.contains("touring");
+
   const docsById = new Map<string, SearchDoc>();
   let index: Indexed | null = null;
   let indexing = false;
+  // The index (or its payload) failed to load. Distinct from "no matches": the
+  // dropdown says so and offers a retry, and the flag clears the moment a retry
+  // gets through.
+  let indexFailed = false;
   let active = -1;
   let results: SearchDoc[] = [];
   // Matches suppressed by the active filters (surfaced as a "Show all" row).
@@ -127,6 +144,7 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   async function ensureIndex(): Promise<void> {
     if (index || indexing) return;
     indexing = true;
+    indexFailed = false;
     try {
       const [{ default: MiniSearch }, docs] = await Promise.all([
         import("minisearch"),
@@ -148,7 +166,12 @@ export function createSearch(deps: SearchDeps): SearchHandle {
         runSearch(input.value);
       }
     } catch (err) {
+      // A failed index used to read as "no results" — the reader retypes their
+      // query, gets the same silence, and concludes the standard isn't there.
+      // Say so instead, and offer the retry.
       console.warn("[cme] search index failed to build", err);
+      indexFailed = true;
+      if (input.value.trim() && document.activeElement === input) runSearch(input.value);
     } finally {
       indexing = false;
     }
@@ -226,8 +249,53 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     return li;
   }
 
+  // Rebuild the index and, if it lands, run the query the reader already typed.
+  function retryIndex(): void {
+    indexFailed = false;
+    renderResults(); // drop the failure row while the retry is in flight
+    void ensureIndex().then(() => {
+      if (index && input.value.trim()) runSearch(input.value);
+    });
+  }
+
+  // The "Search is unavailable right now · Retry" row. NOT a listbox option
+  // (there is nothing to select), so it is presentational to AT and carries a
+  // live region for the message; Enter in the box retries too, so the row is
+  // reachable without a pointer.
+  function unavailableRow(): HTMLLIElement {
+    const li = document.createElement("li");
+    li.className = "search-unavailable";
+    li.setAttribute("role", "presentation");
+    const label = document.createElement("span");
+    label.className = "search-unavailable-label";
+    label.setAttribute("role", "status");
+    label.textContent = "Search is unavailable right now";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "search-unavailable-retry";
+    retry.textContent = "Retry";
+    retry.setAttribute("aria-label", "Retry building the search index");
+    retry.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); // beat the input's blur, same as a result row
+      retryIndex();
+    });
+    li.append(label, retry);
+    return li;
+  }
+
   function renderResults(): void {
     dropdown.replaceChildren();
+    // A failed index outranks an empty result list: the reader is owed the
+    // difference between "nothing matched" and "we could not look".
+    if (indexFailed && lastQuery) {
+      dropdown.appendChild(unavailableRow());
+      dropdown.hidden = false;
+      active = -1;
+      input.setAttribute("aria-expanded", "true");
+      syncActiveDescendant();
+      machine.setSearching(false);
+      return;
+    }
     if (!totalOptions()) {
       dropdown.hidden = true;
       active = -1;
@@ -302,6 +370,9 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   }
 
   function choose(i: number): void {
+    // Nothing is chosen while a story or the tour is running (belt: focus can't
+    // reach the box in those modes, so this should be unreachable).
+    if (isPlaying()) return;
     // The trailing option (index === results.length) is "Show all": clear the
     // responsible filters and re-run, keeping focus in the box.
     if (hiddenCount > 0 && i === results.length) {
@@ -335,10 +406,12 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     // them. After a pick the box is cleared, so a programmatic focus-return
     // (the panel's X returns focus here) can't reopen a stale dropdown.
     const q = input.value.trim();
-    if (q && q === lastQuery && totalOptions()) renderResults();
+    if (q && q === lastQuery && (totalOptions() || indexFailed)) renderResults();
   };
   const onInput = (): void => {
-    if (index) runSearch(input.value);
+    // With a failed index there is nothing to query, but the reader still needs
+    // to be told that — runSearch renders the unavailable state.
+    if (index || indexFailed) runSearch(input.value);
   };
   const onBlur = (): void => {
     // Delay so a pointerdown on a result still registers.
@@ -357,7 +430,12 @@ export function createSearch(deps: SearchDeps): SearchHandle {
         move(-1);
         break;
       case "Enter":
-        if (active >= 0) {
+        // With the index down, Enter is the keyboard's Retry (the failure row's
+        // button sits outside the tab order — the input holds focus).
+        if (indexFailed) {
+          e.preventDefault();
+          retryIndex();
+        } else if (active >= 0) {
           e.preventDefault();
           choose(active);
         }
@@ -376,12 +454,18 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   input.addEventListener("blur", onBlur);
   input.addEventListener("keydown", onKeydown);
 
-  // "/" focuses search from anywhere (unless already typing in a field).
+  // "/" focuses search from anywhere (unless already typing in a field, and
+  // never while a story or the tour owns the frame — the rail is not the
+  // reader's to drive there, and an Enter from the box would fire a non-silent
+  // focusByCode straight through the story's lit set). The CSS keeps the rail
+  // out of the tab order while storying and the tour marks it inert, so focus
+  // cannot reach the input by any route either.
   const isTypingTarget = (t: EventTarget | null): boolean =>
     t instanceof HTMLElement &&
     (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   const onGlobalKey = (e: KeyboardEvent): void => {
     if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTypingTarget(e.target)) {
+      if (isPlaying()) return;
       e.preventDefault();
       input.focus();
       input.select();
@@ -397,6 +481,10 @@ export function createSearch(deps: SearchDeps): SearchHandle {
       resetQuery();
       machine.setSearching(false);
       if (document.activeElement === input) input.blur();
+    },
+    setInert(on) {
+      if (on) rail.setAttribute("inert", "");
+      else rail.removeAttribute("inert");
     },
     pulse() {
       rail.classList.remove("search-pulse");

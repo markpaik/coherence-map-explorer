@@ -146,3 +146,56 @@ describe("resolveConnections — standalone and solo", () => {
     expect(r.inheritedFrom).toBeUndefined();
   });
 });
+
+// Finding: the no-WebGL fallback list built its Connections straight from the
+// raw preds/succ/related, bypassing this resolver. 74 standards have no edges of
+// their own; the resolver rescues 72 of them (family parents and edgeless
+// sub-standards) and only the 2 genuine solos stay empty. Bypassing it made all
+// 74 read "No mapped connections." Every surface routes through the SAME
+// function.
+describe("every surface resolves through the one resolver", () => {
+  const N = core.nodes.length;
+  const emptyFor = (i: number): boolean =>
+    preds[i].length + succ[i].length + relatedAdj[i].length === 0;
+
+  it("the raw adjacency dead-ends 72 standards; the resolver dead-ends 2", () => {
+    let rawEmpty = 0;
+    let resolvedEmpty = 0;
+    for (let i = 0; i < N; i++) {
+      if (emptyFor(i)) rawEmpty++;
+      const r = resolve1(i);
+      if (!r.buildsOn.length && !r.leadsTo.length && !r.related.length) resolvedEmpty++;
+    }
+    expect(rawEmpty, "raw adjacency dead ends").toBe(74);
+    expect(resolvedEmpty, "only the genuine solos stay empty").toBe(2);
+    expect(rawEmpty - resolvedEmpty, "standards the resolver rescues").toBe(72);
+  });
+
+  it("4.NF.B.3 (edgeless parent) and 4.MD.C.5.b (edgeless child) resolve non-empty", () => {
+    for (const c of ["4.NF.B.3", "4.MD.C.5.b"]) {
+      const i = byCode(c);
+      expect(emptyFor(i), `${c} IS a raw dead end`).toBe(true);
+      const r = resolve1(i);
+      expect(
+        r.buildsOn.length + r.leadsTo.length + r.related.length,
+        `${c} resolves to a real neighbourhood`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("fallback.ts and browse.ts call resolveConnections, with no local copy", () => {
+    const fallbackSrc = readFileSync(resolve(ROOT, "src/ui/fallback.ts"), "utf8");
+    const browseSrc = readFileSync(resolve(ROOT, "src/ui/browse.ts"), "utf8");
+    for (const [name, src] of [
+      ["fallback.ts", fallbackSrc],
+      ["browse.ts", browseSrc],
+    ] as const) {
+      expect(src, `${name} imports the shared resolver`).toContain(
+        'from "../state/machine"',
+      );
+      expect(src, `${name} calls it`).toContain("resolveConnections(");
+    }
+    // The old fallback shape (raw adjacency straight into the panel) is gone.
+    expect(fallbackSrc).not.toMatch(/buildsOn: \[\.\.\.preds\[i\]\]/);
+  });
+});

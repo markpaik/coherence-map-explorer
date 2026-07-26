@@ -11,13 +11,14 @@
 // reduced-motion flag; the tour passes the same flag to the rig's hero moves,
 // and the card's fade collapses under prefers-reduced-motion (see style.css).
 
-import type { StrandId } from "../data";
+import type { GraphCore, StrandId } from "../data";
 import type { Machine } from "../state/machine";
 import type { CameraRig } from "../scene/camera";
 import type { FiltersHandle, FilterSelection } from "./filters";
 import type { SearchHandle } from "./search";
 
 interface TourDeps {
+  graph: GraphCore;
   machine: Machine;
   rig: CameraRig;
   filters: FiltersHandle;
@@ -43,7 +44,7 @@ export interface TourHandle {
 }
 
 export function createTour(deps: TourDeps): TourHandle {
-  const { machine, rig, filters, search, reducedMotion } = deps;
+  const { graph, machine, rig, filters, search, reducedMotion } = deps;
   const btn = document.getElementById("tour-btn") as HTMLButtonElement | null;
 
   const transition = (): boolean => !reducedMotion();
@@ -227,6 +228,24 @@ export function createTour(deps: TourDeps): TourHandle {
     filterSnapshot = null;
   }
 
+  // Pre-tour routing snapshot — the same contract the story player keeps with
+  // preStoryFocusCode: a tour must not orphan the standard the reader left in
+  // the URL. If one was focused when the tour began, its code is captured here
+  // and re-focused on EVERY exit (finish, Skip, Esc — they all funnel through
+  // stop()), so panel, hash, and emphasis come back together. "replace" so the
+  // restore overwrites the tour's own hash entry rather than stacking one.
+  let preTourFocusCode: string | null = null;
+  function restoreRouting(): void {
+    const code = preTourFocusCode;
+    preTourFocusCode = null;
+    if (code) {
+      machine.focusByCode(code, { history: "replace" });
+      return;
+    }
+    rig.frameHome(transition());
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+
   function setPaused(on: boolean): void {
     paused = on;
     pauseBtn.textContent = on ? "▶" : "⏸";
@@ -265,6 +284,9 @@ export function createTour(deps: TourDeps): TourHandle {
     index = 0;
     setPaused(false);
     filterSnapshot = snapshotFilters(); // capture the reader's filters to restore on exit
+    // Capture the reader's focused standard BEFORE the first stop clears it.
+    preTourFocusCode =
+      machine.focusedIndex !== null ? graph.nodes[machine.focusedIndex].code : null;
     machine.setHover(null); // a stale pre-tour hover must not linger under the card
     machine.setTouring(true);
     // The tour breathes: skip the 20s post-interaction grace so the ethereal
@@ -272,6 +294,9 @@ export function createTour(deps: TourDeps): TourHandle {
     // (main.ts allows drift while touring, matching story holds).
     rig.resumeDriftNow();
     document.body.classList.add("touring");
+    // The rail stays VISIBLE (the last stop pulses it) but leaves the tab order,
+    // so Tab can't escape the card and "/" / Enter can't drive a focus mid-tour.
+    search.setInert(true);
     backdrop.hidden = false;
     card.hidden = false;
     stops[0].enter();
@@ -291,11 +316,14 @@ export function createTour(deps: TourDeps): TourHandle {
     // funnels through here, so the restore covers them all).
     filters.reset();
     restoreFilters();
-    rig.frameHome(transition());
     machine.setTouring(false);
     document.body.classList.remove("touring");
+    search.setInert(false); // rejoin the tab order before focus returns to it
     backdrop.hidden = true;
     card.hidden = true;
+    // Put the reader's standard (panel + hash + emphasis) back, or frame home
+    // and clear the hash when they entered the tour from an idle map.
+    restoreRouting();
     if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
     else btn?.focus();
     returnFocus = null;

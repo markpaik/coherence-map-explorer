@@ -334,6 +334,11 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     targetPose = 0;
     originPose = 0;
     morphing = false;
+    // INVARIANT: every transition that sets morphing = false resolves whatever
+    // setPose() left pending. A setPose awaited DURING the boot opener parked a
+    // promise here that nothing ever settled — the formation toggle stays
+    // disabled forever waiting on it.
+    resolvePending();
     edges.setOpenerClock(-1);
     writeAll();
     nodes.refreshPickBounds();
@@ -377,6 +382,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
     targetPose = target;
     originPose = target; // settled ⇒ origin === target
     morphing = false;
+    resolvePending(); // same invariant: morphing=false settles any pending await
     elapsed = 0;
     writeAll();
     nodes.refreshPickBounds();
@@ -507,7 +513,7 @@ export function createPoseDriver(deps: PoseDriverDeps): PoseDriver {
       fromPose = 0;
       targetPose = 0;
       originPose = 0;
-      morphing = false;
+      morphing = false; // invariant held by the resolvePending() at the top
       opening = true;
       openerElapsed = 0;
       openerTotal = openerDurationMs();

@@ -4,12 +4,15 @@
 // pure DOM), and a text box filters the list. A quiet banner explains why.
 //
 // This path builds NO scene, machine, renderer, or picking — just the panel and
-// this list. Connections are computed straight from the graph edges (the panel
-// needs {buildsOn, leadsTo, related} as node indices, same as the machine
-// hands it in the 3D path).
+// this list. Connections come from resolveConnections, the SAME resolver the 3D
+// panel (machine.computeModel) and Browse route through, so a family parent or
+// an edgeless sub-standard reads here exactly as it does in the map. Reading the
+// raw preds/succ/related instead dead-ended 72 of the 480 standards on "No
+// mapped connections."
 
 import type { GraphCore } from "../data";
 import { createPanel, type Connections } from "./panel";
+import { resolveConnections } from "../state/machine";
 import { STRAND_COLORS } from "../scene/palette";
 
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
@@ -54,13 +57,32 @@ export function createFallback(graph: GraphCore, reason: string): void {
       related[t].push(s);
     }
   }
+  // Family arrays the shared resolver needs (parent → sub-standards, and back).
+  const partsOf: number[][] = graph.nodes.map((n) =>
+    (n.children ?? []).map((c) => indexById.get(c)).filter((x): x is number => x !== undefined),
+  );
+  const parentOf: (number | undefined)[] = graph.nodes.map((n) =>
+    n.parent !== undefined ? indexById.get(n.parent) : undefined,
+  );
+
   const byCode = (a: number, b: number): number =>
     graph.nodes[a].code < graph.nodes[b].code ? -1 : 1;
   function connectionsOf(i: number): Connections {
+    const r = resolveConnections(i, partsOf, parentOf, preds, succ, related);
     return {
-      buildsOn: [...preds[i]].sort(byCode),
-      leadsTo: [...succ[i]].sort(byCode),
-      related: [...related[i]].sort(byCode),
+      buildsOn: [...r.buildsOn].sort(byCode),
+      leadsTo: [...r.leadsTo].sort(byCode),
+      related: [...r.related].sort(byCode),
+      parts: r.rolledUp ? [...partsOf[i]].sort(byCode) : undefined,
+      rolledUp: r.rolledUp,
+      inheritedFrom: r.inheritedFrom,
+      // Inherit case: the Family group lists the parent first, then the siblings.
+      family:
+        r.inheritedFrom !== undefined
+          ? [r.inheritedFrom, ...partsOf[r.inheritedFrom].filter((x) => x !== i).sort(byCode)]
+          : undefined,
+      // The journey needs the 3D lineage flight, which this path does not have.
+      journeyable: false,
     };
   }
 

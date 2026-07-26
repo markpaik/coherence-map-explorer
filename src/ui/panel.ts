@@ -88,14 +88,23 @@ function shortTitle(text: string | undefined, words = 7): string {
 
 // --- KaTeX (dynamic, once) -------------------------------------------------
 let katexPromise: Promise<(el: HTMLElement) => void> | null = null;
-// The source text carries bare AMS environments (\begin{align}…\end{align})
-// with no $…$ delimiters, so KaTeX's auto-render skips them and the raw LaTeX
-// shows through. Wrap any un-delimited display environment in $$…$$ (KaTeX
-// supports align/align*/gather/… in display mode) so auto-render picks it up.
-// Runs on text nodes only, so it never rewrites inside tags/attributes, and it
-// skips an environment already sitting next to a $ delimiter.
+// NO DOLLAR DELIMITER, by design. The standards text writes money as prose
+// ("making $25 an hour … or $2.50", "\$28 per gallon"), and a `$` delimiter
+// pairs two amounts into a phantom equation that eats the sentence between
+// them. The pipeline is the single authority on what is math: it re-delimits
+// every real span to `\(…\)` / `\[…\]` and leaves prose dollars alone (see
+// build-graph's isMathSpan / redelimitMath), so with no `$` in this list a
+// dollar amount can never pair with anything.
+//
+// The source also carries bare AMS environments (\begin{align}…\end{align})
+// with no delimiters at all, so auto-render would skip them and the raw LaTeX
+// would show through. Wrap any un-delimited display environment in \[…\] (KaTeX
+// supports align/align*/gather/… in display mode). Runs on text nodes only, so
+// it never rewrites inside tags/attributes, and it skips an environment that
+// already sits inside a delimited span.
 const DISPLAY_ENV =
   /\\begin\{(align\*?|alignat\*?|gather\*?|equation\*?|multline\*?|split|cases)\}[\s\S]*?\\end\{\1\}/g;
+const DELIMITED_SPAN = /\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/g;
 function wrapBareEnvironments(root: HTMLElement): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const texts: Text[] = [];
@@ -104,10 +113,15 @@ function wrapBareEnvironments(root: HTMLElement): void {
     if (t.data.includes("\\begin{")) texts.push(t);
   }
   for (const t of texts) {
-    const wrapped = t.data.replace(DISPLAY_ENV, (m, _env, offset: number, s: string) => {
-      // Already delimited (…$$\begin… or preceding $): leave it for auto-render.
-      if (s[offset - 1] === "$") return m;
-      return `$$${m}$$`;
+    const spans: [number, number][] = [];
+    DELIMITED_SPAN.lastIndex = 0;
+    for (let m = DELIMITED_SPAN.exec(t.data); m; m = DELIMITED_SPAN.exec(t.data)) {
+      spans.push([m.index, m.index + m[0].length]);
+    }
+    const wrapped = t.data.replace(DISPLAY_ENV, (m, _env, offset: number) => {
+      // Already inside \(…\) / \[…\]: leave it for auto-render.
+      if (spans.some(([a, b]) => offset >= a && offset < b)) return m;
+      return `\\[${m}\\]`;
     });
     if (wrapped !== t.data) t.data = wrapped;
   }
@@ -124,10 +138,8 @@ function loadKatex(): Promise<(el: HTMLElement) => void> {
         wrapBareEnvironments(el);
         renderMathInElement(el, {
           delimiters: [
-            { left: "$$", right: "$$", display: true },
             { left: "\\[", right: "\\]", display: true },
             { left: "\\(", right: "\\)", display: false },
-            { left: "$", right: "$", display: false },
           ],
           throwOnError: false,
           ignoredClasses: ["term"], // glossary chips are prose, not math

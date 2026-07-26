@@ -561,11 +561,19 @@ describe("HTML sanitization", () => {
     // at least one glossary span somewhere in the corpus
     expect(allHtmlFields.some((f) => /class="term"/.test(f))).toBe(true);
   });
-  it("preserves MathJax delimiters through sanitization", () => {
-    const withDollar = allHtmlFields.filter((f) => /\$[^$\n]+\$/.test(f));
-    expect(withDollar.length).toBeGreaterThan(0);
-    // \(...\) delimiters also survive
-    expect(allHtmlFields.some((f) => /\\\(/.test(f))).toBe(true);
+  it("ships every math span on \\(…\\) / \\[…\\] — never a dollar delimiter", () => {
+    // Real math survives, re-delimited: thousands of inline spans and hundreds
+    // of display ones.
+    const inline = allHtmlFields.filter((f) => /\\\(/.test(f));
+    const display = allHtmlFields.filter((f) => /\\\[/.test(f));
+    expect(inline.length).toBeGreaterThan(100);
+    expect(display.length).toBeGreaterThan(10);
+    // And no field carries a `$…$` or `$$…$$` pair that a `$` delimiter could
+    // pick up — the client's KaTeX config no longer lists one, and the prose
+    // dollars that remain (money) must never be able to pair.
+    for (const f of allHtmlFields) {
+      expect(f, "no $$…$$ display pair ships").not.toMatch(/\$\$[\s\S]*?\$\$/);
+    }
   });
   it("absolutizes relative achievethecore image and task URLs", () => {
     for (const f of allHtmlFields) {
@@ -583,34 +591,51 @@ describe("HTML sanitization", () => {
 });
 
 describe("math-span sanitization (no placeholder bypass)", () => {
-  it("escapes HTML injected inside $…$ so it can't reach innerHTML live", () => {
+  it("escapes HTML injected inside a math span so it can't reach innerHTML live", () => {
+    // `\frac` marks this as real math, so the span is protected from the
+    // sanitizer — which means the pipeline itself must render the markup inert.
     const out = sanitizeField(
-      "<p>See $x<img src=x onerror=alert(1)>$ here</p>",
+      "<p>See $x = \\frac12<img src=x onerror=alert(1)>$ here</p>",
     );
-    // The injected tag is inert: escaped, never a raw element.
     expect(out).not.toContain("<img");
     expect(out).not.toContain("onerror=alert(1)>");
-    expect(out).toContain("$x&lt;img src=x onerror=alert(1)&gt;$");
+    expect(out).toContain("\\(x = \\frac12&lt;img src=x onerror=alert(1)&gt;\\)");
   });
 
-  it("escapes markup smuggled between a stray/unbalanced pair of $", () => {
+  it("sanitizes markup between a PROSE dollar pair (it is prose, not math)", () => {
+    // A `$…$` pair full of English words is money, not math (isMathSpan), so it
+    // is never protected: the sanitizer sees it like any other prose and drops
+    // the script outright — strictly safer than escaping it.
     const out = sanitizeField(
       "<p>Stray $foo <script>evil()</script> bar$ baz</p>",
     );
     expect(out).not.toMatch(/<script/i);
-    expect(out).toContain("&lt;script&gt;evil()&lt;/script&gt;");
+    expect(out).not.toContain("evil()");
+    // The dollars themselves ship as literal text; with no `$` delimiter left in
+    // the client's KaTeX config they can never pair into an equation.
+    expect(out).toContain("$foo");
+    expect(out).toContain("bar$");
   });
 
-  it("preserves real math delimiters verbatim (round-trips for KaTeX)", () => {
-    // & and < inside genuine math are HTML-escaped in the string, but the
-    // delimiters themselves survive and the browser un-escapes the text node
-    // back to the true LaTeX source before KaTeX reads it.
+  it("re-delimits real math to \\(…\\) / \\[…\\] (round-trips for KaTeX)", () => {
+    // & and < inside genuine math are HTML-escaped in the string; the browser
+    // un-escapes the text node back to the true LaTeX source before KaTeX reads
+    // it. Only the DELIMITERS change: no dollar survives in that position.
     const out = sanitizeField("<p>$a < b$ and $$c & d$$</p>");
-    expect(out).toContain("$a &lt; b$");
-    expect(out).toContain("$$c &amp; d$$");
-    // delimiters intact
-    expect(out).toMatch(/\$a /);
-    expect(out).toMatch(/\$\$c /);
+    expect(out).toContain("\\(a &lt; b\\)");
+    expect(out).toContain("\\[c &amp; d\\]");
+    expect(out).not.toContain("$");
+  });
+
+  it("keeps the source's `\\$` money escape as a plain dollar in prose", () => {
+    // The escape only ever guarded MathJax's delimiter; outside math it would
+    // otherwise show as a literal backslash now that `$` delimits nothing.
+    const out = sanitizeField("<p>The paint costs \\$28 per gallon.</p>");
+    expect(out).toContain("$28 per gallon");
+    expect(out).not.toContain("\\$");
+    // Inside math the escape is untouched — KaTeX needs it to print a dollar.
+    const math = sanitizeField("<p>Everybody gets $\\$10,000/5 = \\$2000.$</p>");
+    expect(math).toContain("\\(\\$10,000/5 = \\$2000.\\)");
   });
 
   it("neutralizes a forged placeholder token in the source", () => {
@@ -618,24 +643,24 @@ describe("math-span sanitization (no placeholder bypass)", () => {
     const out = sanitizeField("<p>⁣MATH0⁣ then $y<z$</p>");
     expect(out).not.toContain("⁣");
     expect(out).toContain("MATH0"); // inert plain text, delimiters stripped
-    expect(out).toContain("$y&lt;z$"); // the real math still gets index 0
+    expect(out).toContain("\\(y&lt;z\\)"); // the real math still gets index 0
   });
 
   it("neutralizes an ENTITY-ENCODED forged sentinel (hex/decimal, so no cross-span smuggle)", () => {
     // The forge: a math span whose source carries entity-encoded U+2063 delimiters
     // around a second span's index. decodeEntitiesForMath would turn `&#x2063;`
     // back into a LITERAL sentinel mid-restoration, and the restoration loop would
-    // then splice store[1] (here a "secret" span) into span 0's slot. Stripping the
+    // then splice store[1] (here the second span) into span 0's slot. Stripping the
     // entity forms up front keeps the forged token inert plain text.
-    const out = sanitizeField("<p>$&#x2063;MATH1&#x2063;$ then $secret<tag$</p>");
+    const out = sanitizeField("<p>$&#x2063;MATH1&#x2063;$ then $s<t$</p>");
     expect(out).not.toContain("⁣"); // no literal sentinel re-materialized
-    expect(out).toContain("$MATH1$"); // the forged token stayed inert literal text
-    expect(out).toContain("$secret&lt;tag$"); // the genuine span still restores
+    expect(out).toContain("\\(MATH1\\)"); // the forged token stayed inert literal text
+    expect(out).toContain("\\(s&lt;t\\)"); // the genuine span still restores
     // Decimal form and leading zeros are stripped the same way.
     const dec = sanitizeField("<p>$&#08291;MATH1&#8291;$ then $z<w$</p>");
     expect(dec).not.toContain("⁣");
-    expect(dec).toContain("$MATH1$");
-    expect(dec).toContain("$z&lt;w$");
+    expect(dec).toContain("\\(MATH1\\)");
+    expect(dec).toContain("\\(z&lt;w\\)");
   });
 
   it("escapes ' and \" in restored math so it can't break out of an attribute", () => {
@@ -643,10 +668,10 @@ describe("math-span sanitization (no placeholder bypass)", () => {
     // client reverts &#39;/&quot; to the true '/" before KaTeX reads the math, so
     // rendering is unchanged while an attribute context can no longer be broken.
     const out = sanitizeField("<p>$x'y$ and $p\"q$</p>");
-    expect(out).toContain("$x&#39;y$");
-    expect(out).toContain("$p&quot;q$");
-    expect(out).not.toContain("$x'y$"); // no raw single-quote span survives
-    expect(out).not.toContain('$p"q$'); // no raw double-quote span survives
+    expect(out).toContain("\\(x&#39;y\\)");
+    expect(out).toContain("\\(p&quot;q\\)");
+    expect(out).not.toContain("x'y"); // no raw single-quote span survives
+    expect(out).not.toContain('p"q'); // no raw double-quote span survives
   });
 
   it("emits no raw event-handler markup or <img inside math in any shard", () => {
@@ -655,6 +680,77 @@ describe("math-span sanitization (no placeholder bypass)", () => {
       .join("");
     expect(/onerror\s*=/i.test(corpus)).toBe(false);
     expect(/on\w+\s*=\s*["']?\w/i.test(corpus)).toBe(false);
+  });
+});
+
+// The 2026-07 delimiter finding: prose money read as math. Nine standard/field
+// pairs shipped garbled because a bare `$` amount paired with the next one and
+// KaTeX rendered the sentence between them as an equation. The fix is in the
+// pipeline (isMathSpan classifies, redelimitMath re-delimits) and the client
+// KaTeX config no longer lists a `$` delimiter at all, so the pairing is not
+// merely avoided — it is impossible.
+describe("prose dollar amounts (no bare-$ delimiters ship)", () => {
+  // Node index by code, so the shard entries can be found by standard.
+  const idByCode = new Map(core.nodes.map((n) => [n.code, n.id]));
+  const gradeByCode = new Map(core.nodes.map((n) => [n.code, n.grade]));
+  const fieldOf = (code: string, field: string): string => {
+    const id = idByCode.get(code);
+    const grade = gradeByCode.get(code);
+    expect(id, `${code} exists`).toBeDefined();
+    const entry = detailShards[grade!][id!] as Record<string, unknown>;
+    const v = entry?.[field];
+    expect(typeof v, `${code}.${field} is a string`).toBe("string");
+    return v as string;
+  };
+  // The delimiters the client actually renders. Everything else is prose.
+  const MATH = /\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/g;
+  const outsideMath = (html: string): string => html.replace(MATH, " ");
+
+  // The nine pairs the audit read by hand.
+  const REPORTED: [string, string][] = [
+    ["7.EE.B.3", "desc"],
+    ["4.OA.A.3", "example"],
+    ["5.NBT.B.7", "example"],
+    ["6.EE.C.9", "example"],
+    ["6.RP.A.3", "example"],
+    ["7.NS.A.1", "example"],
+    ["F-LE.A.4", "example"],
+    ["N-Q.A.2", "example"],
+    ["S-CP.A.3", "example"],
+  ];
+
+  it("every reported field keeps its dollars OUTSIDE any math delimiter", () => {
+    for (const [code, field] of REPORTED) {
+      const html = fieldOf(code, field);
+      const prose = outsideMath(html);
+      expect(prose, `${code}.${field} still carries its amounts`).toContain("$");
+      // No escape survives (it would render as a literal backslash) and no pair
+      // of prose dollars can be read as a delimiter — the config has none.
+      expect(prose, `${code}.${field} has no \\$ escape left`).not.toContain("\\$");
+      expect(html, `${code}.${field} ships no $$…$$ pair`).not.toMatch(/\$\$[\s\S]*?\$\$/);
+    }
+  });
+
+  it("7.EE.B.3's desc reads intact: $25 / $2.50 / $27.50, no delimiter between", () => {
+    const desc = fieldOf("7.EE.B.3", "desc");
+    // The sentence the old pairing ate ("$25 an hour … or $" rendered as math).
+    expect(desc).toContain("making $25 an hour gets a 10% raise");
+    expect(desc).toContain("or $2.50, for a new salary of $27.50");
+    // Textually intact means: not one math delimiter anywhere in this field, so
+    // there is nothing for KaTeX to pair even in principle.
+    expect(desc).not.toContain("\\(");
+    expect(desc).not.toContain("\\[");
+    expect(desc).not.toMatch(/\$\$/);
+  });
+
+  it("real math still ships, re-delimited (6.EE.A.2 and the corpus at large)", () => {
+    // 6.EE.A.2's worked example writes its variables as inline math.
+    const example = fieldOf("6.EE.A.2", "example");
+    expect(example).toContain("\\(l\\)");
+    expect(example).toContain("\\(w\\)");
+    // Corpus-wide: thousands of spans, and every one on a backslash delimiter.
+    const spans = allHtmlFields.join("").match(MATH) ?? [];
+    expect(spans.length).toBeGreaterThan(5000);
   });
 });
 

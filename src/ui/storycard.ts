@@ -154,10 +154,16 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
     scrubber.replaceChildren(...kids);
   }
 
-  // Everything focusable inside the trap, in tab order.
+  // Everything focusable inside the trap, in DOM ORDER — which is the tab order
+  // the browser actually uses. The citation link sits ABOVE the controls row in
+  // the card (kicker → title → body → cite → extra → controls, then the
+  // scrubber), so listing it after Exit made the wrap skip it: Tab from the last
+  // dot jumped to Back and Shift+Tab from Back jumped to the last dot, and a
+  // cited scene's source link was unreachable from either end.
   function focusables(): HTMLElement[] {
-    const els: HTMLElement[] = [backBtn, nextBtn, exitBtn];
+    const els: HTMLElement[] = [];
     if (!cite.hidden && !citeLink.hidden) els.push(citeLink);
+    els.push(backBtn, nextBtn, exitBtn);
     if (autoAdvance) els.push(pauseBtn);
     return els.concat(dotEls);
   }

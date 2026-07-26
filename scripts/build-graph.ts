@@ -419,12 +419,59 @@ const sanitizeOpts: sanitizeHtml.IOptions = {
 // shipped literal `MATH2` text (6.RP.A.3's Painting a Barn, G-CO.C.11,
 // N-Q.A.2). The inline body also excludes the sentinel char so a `$…$` span
 // can never swallow an already-inserted token.
-const MATH_PATTERNS: RegExp[] = [
-  /(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/g, // $$...$$
-  /\\\[[\s\S]*?\\\]/g, // \[...\]
-  /\\\([\s\S]*?\\\)/g, // \(...\)
-  /(?<!\\)\$[^$\n⁣]*?(?<!\\)\$/g, // $...$
-];
+//
+// ONE alternation, not four sequential passes: a regex alternation matches
+// LEFTMOST-first and tries the branches in order at each position, which is
+// exactly how a client-side scanner walks the string. Four separate passes
+// instead let the `$$` pattern reach across the whole field and pair dollars a
+// left-to-right scan would never see as a display delimiter — G-CO.C.11 writes
+// `$m$$\overline{MN}$`, and the old first pass swallowed `$$\overline{MN}$ = $m$$`
+// as one display span (25 spans found instead of 43).
+//
+// The inline body admits an ESCAPED dollar (`\$`) but no bare one: MathJax
+// money inside math is written `$\$0.50$` (F-IF.A.1's parking lot, N-Q.A.2's
+// raises), and a body that excluded every `$` could not span it — the pair went
+// untokenized and the amount later lost its escape. Bare `$` stays excluded so
+// a span can still never reach across an amount, and the sentinel char stays
+// excluded so a span can never swallow an already-inserted token.
+const MATH_SPAN =
+  /(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)\$(?:\\\$|[^$\n⁣])*?(?<!\\)\$/g;
+
+/**
+ * Is a `$…$` candidate real math, or prose money?
+ *
+ * The snapshot writes dollar amounts BOTH escaped (`\$28`, which the pattern's
+ * lookbehind already skips) and BARE (7.EE.B.3's "making $25 an hour … or
+ * $2.50"), and two bare amounts pair into a span that swallows the prose
+ * between them. A candidate carrying a LaTeX command is math no matter what
+ * words it holds (`$\frac{\rm miles}{\rm gallon}$`); otherwise a run of
+ * lowercase letters is an English word, which marks the pair as prose money.
+ * Uppercase-only bodies stay math (`$PQRS$`, `$ABCD$`), as do bare numerals and
+ * operators (`$657 = 457+100+100$`). 22 spans across the 480 standards classify
+ * as prose; every one was read and confirmed by hand.
+ *
+ * Prose candidates are left ALONE: their dollars stay literal text, they pass
+ * through sanitizeHtml like any other prose, and the client no longer treats a
+ * bare `$` as a delimiter, so they can never pair again.
+ */
+export function isMathSpan(span: string): boolean {
+  const inner = span.slice(1, -1);
+  if (/\\[a-zA-Z]/.test(inner)) return true; // any LaTeX command ⇒ math
+  const bare = inner.replace(/&[a-zA-Z]+;|&#\d+;|&#x[0-9a-fA-F]+;/g, " ");
+  return !/[a-z]{3,}/.test(bare); // an English word ⇒ prose money
+}
+
+/**
+ * Re-delimit a protected math span into the ONE delimiter pair the client
+ * renders: `\(…\)` inline, `\[…\]` display. No dollar sign survives in a
+ * delimiter position, so prose money can never pair with anything — which is
+ * why the client's KaTeX config carries no `$` / `$$` delimiter at all.
+ */
+function redelimitMath(span: string): string {
+  if (span.startsWith("$$")) return `\\[${span.slice(2, -2)}\\]`;
+  if (span.startsWith("$")) return `\\(${span.slice(1, -1)}\\)`;
+  return span; // already \(…\) or \[…\]
+}
 
 // Sentinel wrapping each protected math span. U+2063 (INVISIBLE SEPARATOR) has
 // no legitimate use in this content; any pre-existing occurrence in the source
@@ -512,26 +559,34 @@ export function sanitizeField(html: string | undefined): string {
   // (`&#8291;`) forms — any case, any leading zeros — up front, matching exactly the
   // grammar decodeEntitiesForMath would later decode (both require the trailing `;`).
   work = work.replace(/&#x0*2063;|&#0*8291;/gi, "");
-  for (const re of MATH_PATTERNS) {
-    work = work.replace(re, (m) => {
-      const token = `${MATH_TOKEN_DELIM}MATH${store.length}${MATH_TOKEN_DELIM}`;
-      store.push(m);
-      return token;
-    });
-  }
+  work = work.replace(MATH_SPAN, (m) => {
+    // A bare-`$` pair that reads as prose money is NOT math: leave it in the
+    // stream so the sanitizer treats it as the prose it is (strictly safer than
+    // protecting it) and its dollars ship as literal text.
+    if (m.startsWith("$") && !m.startsWith("$$") && !isMathSpan(m)) return m;
+    const token = `${MATH_TOKEN_DELIM}MATH${store.length}${MATH_TOKEN_DELIM}`;
+    store.push(m);
+    return token;
+  });
+  // Money the source escaped for MathJax (`\$28`) is prose here — the backslash
+  // was only ever a delimiter guard, and with every math span already tokenized
+  // above it can be dropped so the amount reads as written. Math spans are
+  // sentinels at this point, so a `\$` INSIDE math is untouched.
+  work = work.replace(/\\\$/g, "$");
   let clean = sanitizeHtml(work, sanitizeOpts);
-  // Restore each math span: entity-decode the raw source (so the client's one
-  // innerHTML decode hands KaTeX true LaTeX), then HTML-ESCAPE it. Without the
-  // escape, any markup inside `$…$` (e.g. `$<img onerror=…>$`) would bypass
-  // sanitizeHtml and reach panel.ts's innerHTML as live HTML. A missing index
-  // restores to nothing. Restoration LOOPS until no token remains (a restored
-  // span can legally contain another span's token), and any survivor fails the
-  // build — the audit found literal `MATH2` shipping in worked examples.
+  // Restore each math span: re-delimit it to `\(…\)` / `\[…\]`, entity-decode
+  // the raw source (so the client's one innerHTML decode hands KaTeX true
+  // LaTeX), then HTML-ESCAPE it. Without the escape, any markup inside the span
+  // (e.g. `$<img onerror=…>$`) would bypass sanitizeHtml and reach panel.ts's
+  // innerHTML as live HTML. A missing index restores to nothing. Restoration
+  // LOOPS until no token remains (a restored span can legally contain another
+  // span's token), and any survivor fails the build — the audit found literal
+  // `MATH2` shipping in worked examples.
   for (let pass = 0; pass < 8 && MATH_TOKEN_RE.test(clean); pass++) {
     MATH_TOKEN_RE.lastIndex = 0;
     clean = clean.replace(MATH_TOKEN_RE, (_m, i) => {
       const src = store[Number(i)];
-      return src === undefined ? "" : escapeHtml(decodeEntitiesForMath(src));
+      return src === undefined ? "" : escapeHtml(decodeEntitiesForMath(redelimitMath(src)));
     });
   }
   MATH_TOKEN_RE.lastIndex = 0;
@@ -563,11 +618,18 @@ const HTML_ENTITIES: Record<string, string> = {
  * dropped first (so a stray `<` inside `$a<b$` can't merge with a later real
  * `>` and swallow prose), then tags are stripped, entities decoded, whitespace
  * collapsed, and the result truncated at a word boundary near ~240 chars.
+ *
+ * A bare-`$` pair that reads as prose money is kept (it IS the sentence — see
+ * isMathSpan), with the source's MathJax escape on `\$28` dropped so the amount
+ * reads as written in a tooltip or a Browse snippet.
  */
 function toSearchText(html: string | undefined, limit = 240): string {
   if (!html) return "";
   let s = html;
-  for (const re of MATH_PATTERNS) s = s.replace(re, " ");
+  s = s.replace(MATH_SPAN, (m) =>
+    m.startsWith("$") && !m.startsWith("$$") && !isMathSpan(m) ? m : " ",
+  );
+  s = s.replace(/\\\$/g, "$");
   s = s.replace(/<[^>]*>/g, " ");
   s = s.replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)));
   s = s.replace(/&[a-z]+;/gi, (m) => HTML_ENTITIES[m] ?? " ");
