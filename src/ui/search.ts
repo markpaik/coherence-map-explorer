@@ -51,6 +51,14 @@ export interface FilterContext {
 }
 
 export interface SearchHandle {
+  /**
+   * Force the launcher back to a clean, closed, unfocused state: empties the
+   * query, closes the results dropdown, and drops the machine's `searching`
+   * flag. A story entering over an open dropdown calls this so playback always
+   * begins from a clean baseline (the dropdown is chrome the story does not own
+   * and `body.storying` only fades the rail, it does not close the list).
+   */
+  dismiss(): void;
   /** Briefly ring the search rail (the tour's "Find your standard" stop). */
   pulse(): void;
   /** Provide the live filter state. When filters suppress matches, results show
@@ -384,6 +392,11 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   return {
     setFilterContext(ctx) {
       filterCtx = ctx;
+    },
+    dismiss() {
+      resetQuery();
+      machine.setSearching(false);
+      if (document.activeElement === input) input.blur();
     },
     pulse() {
       rail.classList.remove("search-pulse");

@@ -250,13 +250,61 @@ export interface Machine {
 // player can frame a resolved selector union with exactly the machine's logic
 // (rather than copying it). `minRadius` mirrors the focus framing default.
 export function nodeBoundingSphere(
-  nodes: NodesHandle,
+  nodes: PositionSource,
   indices: number[],
   minRadius = 90,
 ): THREE.Sphere {
   const box = new THREE.Box3();
   const v = new THREE.Vector3();
   for (const i of indices) box.expandByPoint(nodes.getPosition(i, v));
+  const sphere = new THREE.Sphere();
+  box.getBoundingSphere(sphere);
+  sphere.radius = Math.max(sphere.radius, minRadius);
+  return sphere;
+}
+
+/** The one thing the framing helpers need from the nodes mesh (so they unit-test). */
+export type PositionSource = Pick<NodesHandle, "getPosition">;
+
+/**
+ * Bounding sphere of a node set with its OUTLIERS DROPPED: the centroid is
+ * computed over every index, the ceil(trim × n) points farthest from it are
+ * discarded, and the rest are sphered exactly as nodeBoundingSphere does.
+ *
+ * Why: a story camera that fits a large selector (a grade band, an ancestry
+ * closure) is otherwise sized by its two most distant strays — one isolated
+ * halo-ring standard on the far edge doubles the radius and the scene reads
+ * "very zoomed out" while the subject the card narrates shrinks to dust. The
+ * bleed past the frame is deliberate (the wave washing past is the drama); the
+ * FIT should follow the mass, not the tail.
+ *
+ * A dropped node is still lit and still on screen more often than not — the
+ * sphere is padded 1.35× by the rig before the fit. Pure over the position
+ * source, so it is unit-tested without a GPU.
+ */
+export function trimmedBoundingSphere(
+  nodes: PositionSource,
+  indices: number[],
+  trim = 0.1,
+  minRadius = 90,
+): THREE.Sphere {
+  if (indices.length === 0) return new THREE.Sphere(new THREE.Vector3(), minRadius);
+  const scratch = new THREE.Vector3();
+  const pts = indices.map((i) => nodes.getPosition(i, scratch).clone());
+  const centroid = new THREE.Vector3();
+  for (const p of pts) centroid.add(p);
+  centroid.divideScalar(pts.length);
+  const drop = Math.min(Math.ceil(trim * pts.length), pts.length - 1);
+  const keep =
+    drop <= 0
+      ? pts
+      : pts
+          .map((p) => ({ p, d: p.distanceToSquared(centroid) }))
+          .sort((a, b) => a.d - b.d)
+          .slice(0, pts.length - drop)
+          .map((e) => e.p);
+  const box = new THREE.Box3();
+  for (const p of keep) box.expandByPoint(p);
   const sphere = new THREE.Sphere();
   box.getBoundingSphere(sphere);
   sphere.radius = Math.max(sphere.radius, minRadius);

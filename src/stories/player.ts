@@ -20,20 +20,33 @@
 // player asks for a *silent* focus that lights the closure without opening the
 // panel or touching the hash) and it restores every borrowed surface on exit.
 
+import type { Sphere } from "three";
 import type { GraphCore } from "../data";
 import type { Machine } from "../state/machine";
-import { nodeBoundingSphere } from "../state/machine";
+import { nodeBoundingSphere, trimmedBoundingSphere } from "../state/machine";
+import { EMPHASIS } from "../scene/palette";
 import type { Pose, PoseDriver } from "../scene/pose";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
 import type { BeaconsHandle } from "../scene/beacons";
 import type { CameraRig } from "../scene/camera";
 import type { FiltersHandle } from "../ui/filters";
+import type { PanelHandle } from "../ui/panel";
+import type { SearchHandle } from "../ui/search";
 import type { DamageEngine } from "./damage";
 import type { SelectorResolver } from "./selectors";
 import { expandFamilies, bfsHops, contagionTargets, type BeaconTarget } from "./contagion";
 import { storyHref } from "../state/routing";
-import { STORIES, scenePose, sceneBody, sceneTitle, type Story, type StoryScene, type Formation } from "./scripts";
+import {
+  STORIES,
+  findStory,
+  scenePose,
+  sceneBody,
+  sceneTitle,
+  type Story,
+  type StoryScene,
+  type Formation,
+} from "./scripts";
 import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
 import { createFormationPick, type FormationPickHandle } from "./formationpick";
 
@@ -49,6 +62,61 @@ const smoothstep = (x: number): number => {
   return t * t * (3 - 2 * t);
 };
 
+/**
+ * Every surface a story BORROWS, as the one clearing call each needs. The list
+ * is the contract: entry and exit run exactly this, so a surface can never be
+ * cleared on the way out and forgotten on the way in (or the reverse). Pure
+ * indirection, unit-tested in tests/story-reset.test.ts without a GPU or a DOM.
+ */
+export interface StorySurfaces {
+  clearNodeDamage(): void;
+  clearNodeStoryLift(): void;
+  clearNodeMask(): void;
+  clearEdgeDamage(): void;
+  clearEdgeStory(): void;
+  clearEdgeMask(): void;
+  clearBeacons(): void;
+  clearCardExtra(): void;
+  clearFrameLift(): void;
+  clearFrameShift(): void;
+  clearFocalOffset(): void;
+  recomputeFilters(): void;
+  clearFocus(): void;
+  resetEmphasis(): void;
+  hidePanel(): void;
+  dismissSearch(): void;
+}
+
+/** The clearing calls, in the order the reset runs them. */
+export const STORY_SURFACE_KEYS = [
+  "clearNodeDamage",
+  "clearNodeStoryLift",
+  "clearNodeMask",
+  "clearEdgeDamage",
+  "clearEdgeStory",
+  "clearEdgeMask",
+  "clearBeacons",
+  "clearCardExtra",
+  "clearFrameLift",
+  "clearFrameShift",
+  "clearFocalOffset",
+  "recomputeFilters",
+  "clearFocus",
+  "resetEmphasis",
+  "hidePanel",
+  "dismissSearch",
+] as const satisfies readonly (keyof StorySurfaces)[];
+
+/**
+ * Return every borrowed surface to its resting state. Called on story ENTRY (so
+ * playback always begins from a clean dark baseline no matter what preceded it:
+ * an open panel, a mid-cascade focus, a hovered node, an open search dropdown)
+ * and again on story EXIT. Pure over the handle.
+ */
+export function resetStorySurfaces(surfaces: StorySurfaces): void {
+  for (const key of STORY_SURFACE_KEYS) surfaces[key]();
+}
+
 export interface StoryPlayerDeps {
   graph: GraphCore;
   machine: Machine;
@@ -60,6 +128,10 @@ export interface StoryPlayerDeps {
   beacons: BeaconsHandle;
   filters: FiltersHandle;
   rig: CameraRig;
+  /** The detail panel — hidden defensively on entry and exit (never opened). */
+  panel: PanelHandle;
+  /** The search launcher — its dropdown is closed defensively on entry/exit. */
+  search: SearchHandle;
   requestRender: () => void;
   announce: (msg: string) => void;
   reducedMotion: () => boolean;
@@ -91,7 +163,7 @@ export interface StoryPlayerHandle {
 
 export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   const { graph, machine, poseDriver, damage, resolve, nodes, edges, beacons, filters, rig } = deps;
-  const { requestRender, announce, reducedMotion } = deps;
+  const { panel, search, requestRender, announce, reducedMotion } = deps;
 
   const N = graph.nodes.length;
   const M = graph.edges.length;
@@ -497,19 +569,43 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     return litDuration;
   }
 
+  // Above this many nodes a fit is sized by its strays rather than its mass, so
+  // the sphere trims its outliers (see trimmedBoundingSphere). At or below it —
+  // a spine of four named standards, a handful of codes — every node is the
+  // subject and dropping one would cut an end off the line the card narrates.
+  const TRIM_ABOVE = 8;
+  function storyFitSphere(indices: number[]): Sphere {
+    return indices.length > TRIM_ABOVE
+      ? trimmedBoundingSphere(nodes, indices)
+      : nodeBoundingSphere(nodes, indices);
+  }
+
+  // The camera frames the SPINE when a scene names one (what the card actually
+  // narrates), otherwise its `fit` (the lit context). Everything outside the
+  // frame still lights — the bleed past the edge is the drama.
   function applyCamera(scene: StoryScene, animate: boolean): void {
     const cam = scene.camera;
-    if (!cam || cam.fit === "all") {
+    if (!cam) {
       rig.frameHome(animate);
       return;
     }
-    const idx = new Set<number>();
-    for (const sel of cam.fit) for (const i of resolve(sel)) idx.add(i);
+    if (cam.spine && cam.spine.length) {
+      const spine = resolveUnion(cam.spine);
+      if (spine.size) {
+        void rig.focusOn(storyFitSphere([...spine]), animate, 0);
+        return;
+      }
+    }
+    if (cam.fit === "all") {
+      rig.frameHome(animate);
+      return;
+    }
+    const idx = resolveUnion(cam.fit);
     if (idx.size === 0) {
       rig.frameHome(animate);
       return;
     }
-    void rig.focusOn(nodeBoundingSphere(nodes, [...idx]), animate, 0);
+    void rig.focusOn(storyFitSphere([...idx]), animate, 0);
   }
 
   async function goto(index: number, animate: boolean): Promise<void> {
@@ -565,9 +661,78 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     requestRender();
   }
 
+  // --- card-aware framing bias --------------------------------------------
+  // The story card is an occluder with a known rectangle, so the framed subject
+  // is composed in the region it leaves CLEAR — the exact mirror of the
+  // panel-aware focal offset the machine already applies for the right-side
+  // panel (there: panel occupies [W−400, W], clear centre is 200px left of
+  // screen centre; here: card occupies the bottom-left, clear centre is
+  // cardRight/2 to the RIGHT of it). Measured from the DOM at story start so a
+  // CSS width change can never leave the number stale.
+  //
+  // Phones (card is bottom-full-width) get the vertical lift only — there is no
+  // clear region beside it to bias into.
+  const PHONE_QUERY = "(max-width: 720px)";
+  const MAX_LIFT_FRAC = 0.12; // never crowd the headline block at the top
+  function applyCardBias(): void {
+    const phone = window.matchMedia(PHONE_QUERY).matches;
+    if (phone) {
+      rig.setFrameShiftPx(0);
+      rig.setFrameLiftPx(Math.round(window.innerHeight * 0.17));
+      return;
+    }
+    const el = document.querySelector(".story-card");
+    const r = el instanceof HTMLElement ? el.getBoundingClientRect() : null;
+    if (!r || r.width <= 0) {
+      rig.setFrameShiftPx(0);
+      rig.setFrameLiftPx(0);
+      return;
+    }
+    // Centre of the clear band right of the card, expressed as a shift from
+    // screen centre: (cardRight + W)/2 − W/2 = cardRight/2.
+    rig.setFrameShiftPx(Math.round(r.right / 2));
+    // A quarter of the card's vertical footprint — enough to lift the subject
+    // off the card's top edge without pushing it into the title block.
+    const footprint = Math.max(0, window.innerHeight - r.top);
+    rig.setFrameLiftPx(
+      Math.round(Math.min(footprint / 4, window.innerHeight * MAX_LIFT_FRAC)),
+    );
+  }
+
   // --- lifecycle ----------------------------------------------------------
+  // The borrowed-surface contract (see resetStorySurfaces): ONE list, run on
+  // entry and on exit, so nothing can be restored in one direction only.
+  const surfaces: StorySurfaces = {
+    clearNodeDamage: () => {
+      damageCur.fill(0);
+      nodes.setDamage(null);
+    },
+    clearNodeStoryLift: () => nodes.setStoryLift(1),
+    clearNodeMask: () => nodes.setVisibleMask(null),
+    clearEdgeDamage: () => edges.setDamage(null),
+    clearEdgeStory: () => edges.setStory(0),
+    clearEdgeMask: () => edges.setVisibleMask(null),
+    clearBeacons: () => beacons.setTargets(null),
+    clearCardExtra: () => {
+      card.setExtra(null);
+      loseYearSel = null;
+    },
+    clearFrameLift: () => rig.setFrameLiftPx(0),
+    clearFrameShift: () => rig.setFrameShiftPx(0),
+    clearFocalOffset: () => rig.clearFocalOffset(false),
+    recomputeFilters: () => filters.recompute(), // reclaim the visibility buffers
+    // A no-op internally when nothing is focused, which is exactly why the two
+    // lines below exist: an emphasis or a panel left open by anything OTHER than
+    // a live machine focus would otherwise survive into the story.
+    clearFocus: () => machine.clearFocus({ silent: true }),
+    resetEmphasis: () =>
+      machine.applyEmphasis({ baseNode: EMPHASIS.REST, baseEdge: EMPHASIS.REST }),
+    hidePanel: () => panel.hide(),
+    dismissSearch: () => search.dismiss(),
+  };
+
   function start(storyId: string, opts?: { deepLink?: boolean }): void {
-    const story = STORIES.find((s) => s.id === storyId);
+    const story = findStory(storyId);
     if (!story) {
       console.warn(`[cme] unknown story: ${storyId}`);
       return;
@@ -589,6 +754,21 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     paused = false;
 
     machine.setHover(null); // a stale hover must not linger under the backdrop
+    // The storying class goes on FIRST, before the reset below: closing the
+    // detail panel returns focus to whatever opened it, and that must not fire
+    // while a story is taking over the frame (panel.hide() reads this class to
+    // stand down, exactly as it already does for the tour).
+    document.body.classList.add("storying");
+    // HARD INVARIANT: a story begins from a clean dark baseline no matter what
+    // preceded it — an open panel, a half-run cascade, a mid-trace journey, a
+    // hovered node, an open search dropdown. Nothing about the entry path is
+    // trusted; every borrowed surface is cleared unconditionally, and the exit
+    // runs the same list (resetStorySurfaces).
+    resetStorySurfaces(surfaces);
+    if (panel.isOpen) {
+      console.warn("[cme] story entry: panel still open after reset");
+      panel.hide();
+    }
     machine.setStorying(true);
     // Keep the hash coherent while the story owns the scene: switch to the
     // story's own scheme (deep links already arrive with it) so a mid-story
@@ -597,20 +777,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     // owns the #/story/ hash (as it already did on deep-link exit); replaceState,
     // so the router never re-routes off it.
     history.replaceState(null, "", storyHref(story.id, location.pathname + location.search));
-    // Phones: the story card covers the lower ~40% of the screen — every scene
-    // fit rides the model up clear of it. Desktop card sits bottom-left; no lift.
-    rig.setFrameLiftPx(
-      window.matchMedia("(max-width: 720px)").matches
-        ? Math.round(window.innerHeight * 0.17)
-        : 0,
-    );
     // Narrative luminance: LIT nodes rise to chain-level brightness and lit
     // prereq edges glow and FLOW; everything outside the lit set is a dark
     // ghost, and damage darkens within the light. Contrast carries the story.
     nodes.setStoryLift(1.9);
     edges.setStory(1);
     litCur.fill(1); // the map is fully on at entry; scene 0 fades it down
-    document.body.classList.add("storying");
     backdrop.hidden = false;
     card.begin(story);
     formation.reflect(); // the pin persists across stories — show the live state
@@ -618,6 +790,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     card.setAutoAdvanceEnabled(autoAdvanceOn());
     card.setPaused(false);
     if (story.interactive === "lose-a-year") mountLoseAYear();
+    // AFTER card.begin() (+ any interactive extra) so the card's rectangle is
+    // measured at its real, laid-out size.
+    applyCardBias();
     void goto(0, !reducedMotion());
   }
 
@@ -632,19 +807,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     settleArmed = false;
     settleRemaining = 0;
     holdRemaining = 0;
-    damageCur.fill(0);
-    nodes.setDamage(null);
-    nodes.setStoryLift(1);
-    edges.setDamage(null);
-    edges.setStory(0);
-    nodes.setVisibleMask(null);
-    edges.setVisibleMask(null);
-    beacons.setTargets(null);
-    card.setExtra(null);
-    loseYearSel = null;
-    rig.setFrameLiftPx(0);
-    filters.recompute(); // reclaim the visibility buffers for the live filters
-    machine.clearFocus({ silent: true });
+    resetStorySurfaces(surfaces); // the same list story ENTRY runs
     card.end();
   }
 

@@ -73,6 +73,43 @@ export interface FilterSelection {
   lens: "all" | "major" | "wap";
 }
 
+/**
+ * Read a live chip-set pair out as a plain, serializable selection. Pure so the
+ * snapshot/restore round trip is testable without a DOM.
+ */
+export function readSelection(
+  gradeActive: ReadonlySet<string>,
+  strandActive: ReadonlySet<string>,
+  lens: FilterSelection["lens"],
+): FilterSelection {
+  return { grades: [...gradeActive], strands: [...strandActive], lens };
+}
+
+/**
+ * Write a selection back into the live chip sets, dropping any id the build does
+ * not know (a stale snapshot from an older grade/strand list must not poison the
+ * filter). Mutates the two sets in place and returns the lens to apply.
+ *
+ * This is a direct SET, deliberately not a replay of chip clicks: chip clicks
+ * carry solo semantics (one click on an all-on group solos that chip), so
+ * replaying them can never reconstruct an arbitrary multi-chip subset — the
+ * exact case that broke the tour's restore when a reader had grades {3,4}
+ * selected. Pure over its arguments; unit-tested in tests/filters-state.test.ts.
+ */
+export function writeSelection(
+  sel: FilterSelection,
+  knownGrades: readonly string[],
+  knownStrands: readonly string[],
+  gradeActive: Set<string>,
+  strandActive: Set<string>,
+): FilterSelection["lens"] {
+  gradeActive.clear();
+  for (const g of sel.grades) if (knownGrades.includes(g)) gradeActive.add(g);
+  strandActive.clear();
+  for (const s of sel.strands) if (knownStrands.includes(s)) strandActive.add(s);
+  return sel.lens;
+}
+
 export interface FiltersHandle {
   /** Show only the given strand (used by the tour). Syncs the chips. */
   setStrandsOnly(strand: StrandId): void;
@@ -401,17 +438,20 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
       recompute();
     },
     getSelection() {
-      return { grades: [...gradeActive], strands: [...strandActive], lens };
+      return readSelection(gradeActive, strandActive as ReadonlySet<string>, lens);
     },
     setSelection(sel) {
-      gradeActive.clear();
-      for (const g of sel.grades) if (GRADES.includes(g)) gradeActive.add(g);
-      strandActive.clear();
-      for (const s of sel.strands)
-        if ((STRAND_ORDER as readonly string[]).includes(s)) strandActive.add(s as StrandId);
-      lens = sel.lens;
+      // strandActive is Set<StrandId>; writeSelection only ever writes back ids
+      // it found in STRAND_ORDER, so the widening cast is safe.
+      lens = writeSelection(
+        sel,
+        GRADES,
+        STRAND_ORDER as readonly string[],
+        gradeActive,
+        strandActive as Set<string>,
+      );
       hideTip();
-      syncChips();
+      syncChips(); // the chips repaint from the restored sets
       recompute();
     },
     reset() {

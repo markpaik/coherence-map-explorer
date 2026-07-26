@@ -81,6 +81,17 @@ export interface CameraRig {
    */
   setFrameLiftPx(px: number): void;
   /**
+   * Persistent HORIZONTAL frame bias in CSS px: the framed content rides RIGHT
+   * by this much on every subsequent fit (negative rides left). The mirror of
+   * setFrameLiftPx, and the story card's counterpart to the panel offset the
+   * machine passes per-flight: the card sits bottom-LEFT on desktop, so a story
+   * biases its subject into the clear region right of it. 0 restores.
+   *
+   * Unlike focusOn's per-call panelOffsetPx this is PERSISTENT, so it also
+   * applies to the wide frameHome fits a "fit: all" scene makes.
+   */
+  setFrameShiftPx(px: number): void;
+  /**
    * Bottom safe-area inset in CSS px: the fixed bottom chrome (filter rail +
    * formation switcher). Every fit lifts the framed content UP by this much so
    * the scene floor (grade / course etch markers) composes ABOVE the buttons
@@ -169,13 +180,21 @@ export function createCameraRig(
   // covers the lower ~40% of the screen, so the framed content rides UP by
   // this much. 0 everywhere else. Applied by every fit (focusOn + frameHome).
   let frameLiftPx = 0;
+  // Persistent horizontal bias (CSS px): the framed content rides RIGHT by this
+  // much. Stories on desktop set ~half the story card's right edge so the
+  // narrated subject composes clear of the bottom-left card; 0 everywhere else.
+  let frameShiftPx = 0;
   // Bottom safe-area inset (the fixed bottom chrome height, CSS px); every fit
   // lifts the framed content UP by this much so the scene floor + etch markers
   // clear the filter rail + formation switcher. Composes with frameLiftPx.
   let bottomInsetPx = 0;
   function applyPanelOffset(panelOffsetPx: number, transition: boolean): void {
     const lift = frameLiftPx + bottomInsetPx;
-    if (!panelOffsetPx && !lift) {
+    // +panelOffsetPx rides the content LEFT (clear of the right-side panel);
+    // +frameShiftPx rides it RIGHT (clear of the bottom-left story card). They
+    // are the same lever from opposite sides, so they simply subtract.
+    const shift = panelOffsetPx - frameShiftPx;
+    if (!shift && !lift) {
       void controls.setFocalOffset(0, 0, 0, transition);
       return;
     }
@@ -187,7 +206,7 @@ export function createCameraRig(
     // +x focalOffset pans the camera right → the target rides to the LEFT.
     // -y pans the camera down → the target rides UP (clear of the story card
     // and the bottom chrome band).
-    void controls.setFocalOffset(panelOffsetPx * worldPerPx, -lift * worldPerPx, 0, transition);
+    void controls.setFocalOffset(shift * worldPerPx, -lift * worldPerPx, 0, transition);
   }
 
   // Home framing composition (both frameHome paths): place the fitted formation's
@@ -216,13 +235,18 @@ export function createCameraRig(
     // (the target projects to screen center when focalOffset is 0).
     homeBox.getCenter(_homeCenter);
     const vOffWorld = _homeCenter.sub(_tgt).dot(_camUp);
-    // Center of the usable band, in CSS px from the top.
-    const bandCenter = (HOME_TOP_MARGIN_PX + (H - bottomInsetPx)) / 2;
+    // Center of the usable band, in CSS px from the top. frameLiftPx joins the
+    // bottom chrome here so a story's wide "fit: all" beats honour the same
+    // card clearance every focusOn fit already does (phones, where the card is
+    // bottom-full-width, are the case this matters for).
+    const bandCenter = (HOME_TOP_MARGIN_PX + (H - bottomInsetPx - frameLiftPx)) / 2;
     // Solve for the y focalOffset that lands the box center at bandCenter:
     //   boxScreenY = H/2 − vOffWorld/worldPerPx − focalY/worldPerPx  ⇒  set = bandCenter.
     // (More-positive focalOffset.y rides the content UP by 1/worldPerPx px per unit.)
     const focalY = (H / 2 - bandCenter) * worldPerPx - vOffWorld;
-    void controls.setFocalOffset(0, focalY, 0, transition);
+    // The persistent horizontal story bias applies to the wide fits too, so a
+    // "fit: all" scene composes clear of the bottom-left card like every other.
+    void controls.setFocalOffset(-frameShiftPx * worldPerPx, focalY, 0, transition);
   }
 
   frameHome(false);
@@ -308,6 +332,9 @@ export function createCameraRig(
     },
     setFrameLiftPx(px) {
       frameLiftPx = px;
+    },
+    setFrameShiftPx(px) {
+      frameShiftPx = px;
     },
     setBottomInsetPx(px) {
       bottomInsetPx = px;

@@ -30,11 +30,60 @@ A story is a JSON script (src/stories/*.json) of scenes:
       focus: code       //   descendants("code")
     },
     reveal: { dir: "ltr" | "rtl", ms? },  // directional turn-on sweep
-    camera: { fit: sel | "all", pose?: 0 | 1 | 2 },
+    camera: { fit: sel | "all",       // the lit CONTEXT
+              spine?: [sel],          // what the camera actually frames
+              pose?: 0 | 1 | 2 },
     card: { title, body, cite? },
     holdMs, transition: "lapse" | "cut"
   }] }
 ```
+
+## The design law (from the pandemic story)
+
+"The year that vanished" is the story that works, and the reason is
+structural, so every other story is held to it:
+
+1. **The lit set is monotone.** It only grows, one grade band per scene, left
+   to right. The reader never has to re-orient, because nothing they were
+   just looking at goes away.
+2. **The camera leads half a step ahead of the lit frontier.** It frames the
+   band the card is about to talk about, not the band that just finished.
+3. **One idea per scene.** If the card needs two sentences to say what
+   changed, the scene is doing two things.
+4. **The glow may bleed past the frame.** Light spilling off the edge is the
+   argument (the damage keeps travelling); it is not a framing error.
+
+`camera.spine` is rule 2 in one field: the camera frames the SPINE (the
+handful of standards the card names) while `camera.fit` keeps naming the lit
+context. Fits resolving to more than eight standards are sized by a
+**trimmed** bounding sphere (`trimmedBoundingSphere`, state/machine.ts) which
+drops the farthest 10% before measuring, so one isolated halo-ring standard
+on the far edge cannot double the radius and shrink the subject to dust.
+
+Exceptions are declared by name, with a reason, in
+`tests/story-framing.test.ts` (the monotone-lit law is enforced there, and
+the pandemic story needs no exception at all).
+
+The story card is a known occluder, so playback biases the framed subject
+into the region it leaves clear: on desktop the card sits bottom-left, so the
+subject rides RIGHT by half the card's right edge (`rig.setFrameShiftPx`, the
+exact mirror of the panel-aware offset the machine already applies for the
+right-side panel) and up by a quarter of the card's vertical footprint. On
+phones the card is bottom-full-width, so the bias is upward only.
+
+## Entering and leaving a story
+
+A story must BEGIN from a clean dark baseline no matter what preceded it: an
+open detail panel, a half-run focus cascade, a mid-trace journey, a hovered
+node, an open search dropdown. Entry and exit therefore run the SAME
+borrowed-surface list (`resetStorySurfaces`, stories/player.ts), so a surface
+can never be restored in one direction only. `machine.clearFocus()` is a
+no-op when nothing is focused, which is exactly why the emphasis reset, the
+panel hide, and the search dismiss are unconditional and separate from it.
+The list is asserted complete in `tests/story-reset.test.ts`.
+
+Exit is synchronous for all state (hash, chrome, machine); only the closing
+pose unravel is awaited, and only the backdrop waits on it.
 
 Engine (src/stories/player.ts): drives the state machine (new state
 `storying`), one scene at a time. Timeline scrubber bottom-center: year ticks,
@@ -132,24 +181,21 @@ Timeline 2019 -> 2025. A third grader in fall 2019.
 6. Coda — full map at rest. Card: teachers do this rebuilding every day,
    student by student. The map is why it is hard, not why it is hopeless.
 
-### 2. Third grade vs eighth grade (Mark's hypothesis)
-Side-by-side scenario toggling, same student, two different lost years.
-1. Miss grade 8: 112 of the 163 standards ahead are challenged, but HS
-   statistics barely notices (7 of 27 challenged; 74% clear) and the runway
-   is one school stage. 
-2. Miss grade 3: 271 standards challenged across seven years of runway, and
-   the fraction gate closes: 240 descendants of 3.NF go dim.
-3. Card: the percentages look similar; the years of compounding and the
-   spine they sit on do not. An early gap is not "the same gap, earlier."
-   It is a different, larger thing.
-4. Honesty card (the structure is not the whole story): NWEA's own
-   analysis of recovery, a technical report rather than peer-reviewed
-   research, finds middle schoolers' recovery stalled worst, with 8th
-   graders needing months more instruction while 3rd and 4th graders
-   returned to pre-pandemic growth (Lewis & Kuhfeld 2023, NWEA technical
-   report). Structure says early gaps reach further; recovery also
-   depends on how much runway and intervention a student has left. Both
-   things can be true, and both are reasons this work is hard.
+### 2. Third grade vs eighth grade — CUT (2026-07)
+Retired. Its argument was the pandemic story's argument told twice (lose a
+year, watch the structure spread it), its "miss grade 3" scene lit the same
+271 standards the pandemic story already lights, and its honesty coda
+repeated the same NWEA technical-report caveat. Removing it makes the suite
+five distinct arguments instead of six overlapping ones.
+
+The NWEA differential-recovery caveat it carried is preserved in the
+citation ledger below, under the same heading, because the gap it documents
+(no peer-reviewed source supports that specific claim) still governs any
+future story that wants to make it.
+
+Story ids are public URLs, so `#/story/third-vs-eighth` keeps arriving.
+main.ts resolves a deep-linked id through `findStory` and, on a miss, drops
+the orphaned hash and lands the reader on the plain map.
 
 ### 3. Swiss cheese (after Sal Khan)
 One student, three silent holes: 3.OA.A.2 (division as sharing), 4.NF.B.4
@@ -166,22 +212,34 @@ One student, three silent holes: 3.OA.A.2 (division as sharing), 4.NF.B.4
    years, but finding and filling three holes. [cite Bloom / mastery]
 
 ### 4. The opportunity myth (after TNTP)
-1. A fifth grader one year behind (grade-4 band flickering). Camera sits
-   with them at grade 4 while the grade-5 band literally drifts past,
-   spotlit then fading to ghost, unvisited. Card: the most common response
-   to being behind is a year of review. Watch what passes by while it
-   happens. [cite TNTP hours below grade level]
-2. Next fall: now the ghosted grade-5 band ALSO reads as missed; damage
-   spreads further than the original gap. Card: remediation that replaces
-   grade-level content manufactures the next year's gap. [cite TNTP
-   grade-level success stat]
-3. The alternative: grade-5 band bright WITH targeted husk-filling
-   (story 3's move) shown alongside. Card: in TNTP's observational data,
-   students who got more grade-level work grew more, and those who
-   started behind gained about seven months relative to peers. Stated as
-   an association from a descriptive study, not a proven cause; the
-   peer-reviewed opportunity-to-learn literature (Schmidt et al. 2015)
-   supports the mechanism internationally.
+Rebuilt 2026-07 to the design law above. The prior cut ping-ponged K-4 → 4 →
+4+5 → K-8 → 6-8 → mix and read as complex; this one follows ONE student
+through ONE missing cluster, monotone, left to right. Six scenes:
+
+1. "Grade 4, September" — grade 4 alone, lit ltr. The fractions year, 37
+   standards, and everything ahead assumes them.
+2. "October through January" — grade 3 joins, revealed RTL. The one
+   deliberate backward look in the suite: the year regressing into review.
+   [cite TNTP hours below grade level]
+3. "The same year" — the nine standards of 4.NF.B go to husks inside the lit
+   band (damage off: no downstream yet). The cluster dims quietly. Camera
+   spines onto the cluster.
+4. "Grade 5" — grade 5 joins; damage on. 5.NF stands directly on the cluster
+   that never arrived.
+5. "Grades 6 through 8" — the band grows to grade 8, the dimness travels.
+6. "The other version" — heal ltr with the cluster spotlit. Card: TNTP's
+   finding cuts both ways; students given grade-level work rose to it more
+   often than not. Association from a descriptive study, labeled as such.
+
+The 4.NF.B cluster is hardcoded as nine `code:` selectors (the selector
+grammar has no `cluster:` form and `domain:4.NF` would sweep 4.NF.A and
+4.NF.C in with it). `tests/story-framing.test.ts` asserts the list still
+matches the live graph, so a data rebuild cannot leave it silently stale.
+
+Note for the ledger: the rebuild moved the Schmidt et al. (2015) card from
+the old scene 4 to "Compound interest" (scene 5), where the
+opportunity-to-learn evidence is the mechanism the card describes. Schmidt
+remains the story's peer-reviewed anchor, on screen and in the ledger below.
 
 ### 5. It starts with counting
 Reverse time-lapse, the empathy piece for early educators.
@@ -194,13 +252,44 @@ Reverse time-lapse, the empathy piece for early educators.
 3. Card: there is no such thing as "just" teaching counting.
 
 ### 6. Find where it begins (the diagnostic move — also a tour stop)
-Short, practical, teacher-facing. Focus a struggling student's standard
-(7.RP.A.2), then step the Builds-on chain backward one hop at a time,
-camera following, card narrating the move: "keep walking back until you
-reach the last thing they CAN do. That is where teaching starts. Not at
-the grade label — at the gap." Ends by opening the real panel so the viewer
-can do it themselves on any standard. (Tour keeps the 60-second version;
-the story is the full walk.)
+Short, practical, teacher-facing. Focus a struggling student's standard,
+then step the Builds-on chain backward one hop at a time, camera following,
+card narrating the move: "keep walking back until you reach the last thing
+they CAN do. That is where teaching starts. Not at the grade label — at the
+gap." Ends by handing the move to the viewer for any standard. (Tour keeps
+the 60-second version; the story is the full walk.)
+
+**Re-anchored 2026-07 from 7.RP.A.2 to 8.EE.C.7** (solve linear equations in
+one variable). Proportional reasoning was already the climax of Swiss
+cheese, and two stories converging on one standard read as repetition.
+Linear equations is the better diagnostic subject anyway: its chain bottoms
+out in FIRST grade, seven school years below the label on the struggle,
+which is the story's whole argument stated harder.
+
+The walk back, every rung real and mostly one direct prerequisite edge:
+
+```
+8.EE.C.7  (grade 8, solve linear equations in one variable)
+  ← 7.EE.B.4.a  solve word problems leading to px + q = r
+  ← 6.EE.B.7    solve x + p = q and px = q
+  ← 5.NF.A.1    add and subtract fractions with unlike denominators
+  ⋯ 1.OA.D.7    understand the meaning of the equal sign   ← solid ground
+```
+
+That the fraction gate turns up load-bearing under linear equations is not a
+convenience; it is what the graph says, and it keeps Siegler et al. (2012)
+carrying the card it always carried.
+
+**Engine note.** 8.EE.C.7 is a PARTIAL parent: it has zero direct
+prerequisites of its own and carries all 119 on its sub-standard 8.EE.C.7.b,
+so a bare `ancestry:8.EE.C.7` resolves to one lonely node. The story uses a
+new selector, `family-ancestry:CODE`, which seeds the closure from the whole
+family — exactly what the machine lights when a reader CLICKS that standard
+(`rollUpFamily`, state/machine.ts), so the story and the app finally agree.
+It is a separate selector, NOT a change to `ancestry:`, because several
+stories quote ancestry counts as frozen copy (7.RP.A.2's "75 earlier ones"
+would have silently become a different number). 19 of the 40 parent
+standards in this graph are partial in the same way.
 
 ## Citation ledger (peer-reviewed, linked)
 
@@ -231,7 +320,8 @@ publisher record on 2026-07-16 (via doi.org redirect and Crossref metadata).
   Guardrail carried over: never mix instruments (NWEA MAP, NAEP, national
   assessments) on one card; the two sources above use different ones.
 
-**2. Third grade vs eighth grade**
+**2. Third grade vs eighth grade** (story CUT 2026-07; this entry stays as
+the standing verdict on the claim, for any future story tempted by it)
 - No peer-reviewed article was found to support the honesty card's specific
   differential-recovery numbers (8th graders needing about nine more months
   of instruction while 3rd and 4th graders returned to pre-pandemic growth).
@@ -300,9 +390,12 @@ publisher record on 2026-07-16 (via doi.org redirect and Crossref metadata).
   that directly confirms "students who got grade-level work grew more,
   especially those who started behind" for a US remediation setting; the
   causal tracking/acceleration literature (e.g., Algebra-for-all mandates)
-  is mixed rather than uniformly supportive. Scene 3's claim should stay
-  attributed to TNTP alone and flagged as correlational/descriptive on the
-  card.
+  is mixed rather than uniformly supportive. The closing card's claim stays
+  attributed to TNTP alone and flagged as correlational/descriptive.
+  After the 2026-07 rebuild Schmidt no longer appears on a card (the cut
+  that carried it was the one the rebuild replaced); it remains the
+  peer-reviewed anchor for the story's mechanism and the source to reach for
+  if the evidence returns to screen.
 
 **5. It starts with counting**
 - Duncan, G. J., Dowsett, C. J., Claessens, A., Magnuson, K., Huston, A.

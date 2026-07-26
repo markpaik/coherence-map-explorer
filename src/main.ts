@@ -64,6 +64,7 @@ import { createPicking } from "./interaction/picking";
 import { createDamageEngine } from "./stories/damage";
 import { createSelectorResolver } from "./stories/selectors";
 import { createStoryPlayer, createStoryPicker } from "./stories/player";
+import { findStory } from "./stories/scripts";
 
 const MAX_PIXEL_RATIO = 2;
 // Adaptive floor for the pixel-ratio cap: on a weak GPU the full-res HalfFloat
@@ -384,6 +385,10 @@ function start(graph: GraphCore): void {
     beacons,
     filters,
     rig,
+    // Chrome the story does not own but must never inherit: the panel and the
+    // search dropdown are cleared defensively on entry and exit.
+    panel,
+    search,
     requestRender,
     announce,
     reducedMotion: () => reducedMotion,
@@ -875,9 +880,14 @@ function start(graph: GraphCore): void {
   // deep link, in which case routeFromHash stands down (decideRoute → ignore)
   // so assistive-tech focus lands once, in the Browse view, not the covered map.
   const deepStory = storyIdFromHash(location.hash);
-  if (deepStory) {
+  if (deepStory && findStory(deepStory)) {
     storyPlayer.start(deepStory, { deepLink: true });
   } else {
+    // A retired story id (third-vs-eighth, cut 2026-07) or a typo: story ids are
+    // public URLs and keep arriving long after the story is gone. Drop the
+    // orphaned hash so a reload can't resurrect it, then land on the plain map
+    // rather than leaving the reader on a scene that never starts.
+    if (deepStory) history.replaceState(null, "", location.pathname + location.search);
     routeFromHash(true);
   }
 

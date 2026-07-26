@@ -12,9 +12,22 @@
 //   "strand:number"       every standard in that strand
 //   "ancestry:CODE"       CODE's transitive prerequisites, plus CODE itself
 //   "descendants:CODE"    everything CODE is a transitive prerequisite of, + CODE
+//   "family-ancestry:CODE"  ancestry of CODE *and of its sub-standards*, plus
+//                           the family itself — the rolled-up form
 //
 // Ancestry/descendants walk the prerequisite DAG (edge kind 0, s → t meaning s is
 // a prerequisite of t), matching the state machine's own reverse/forward BFS.
+//
+// Why family-ancestry exists: the coherence map draws a family as ONE card and
+// the prereq DAG holds no parent↔child edge, so a PARTIAL parent carries its
+// lineage on a sub-standard instead of itself. 8.EE.C.7 ("solve linear equations
+// in one variable") has zero direct prerequisites; all 119 of them hang off
+// 8.EE.C.7.b. A bare `ancestry:8.EE.C.7` therefore resolves to one lonely node.
+// family-ancestry seeds the closure from the whole family, which is exactly what
+// the machine lights when a reader CLICKS that standard (rollUpFamily in
+// state/machine.ts) — the two now agree. It is a separate form, not a change to
+// `ancestry:`, because several stories quote ancestry counts as frozen copy
+// (7.RP.A.2's "75 earlier ones" would silently become a different number).
 // An unknown selector warns once and resolves to the empty set — never throws, so
 // a typo in a script degrades to "nothing" rather than crashing playback.
 
@@ -44,9 +57,18 @@ export function createSelectorResolver(graph: GraphCore): SelectorResolver {
     preds[t].push(s);
   }
 
+  // Family members (a node plus its sub-standards) as node indices.
+  const familyOf = (i: number): number[] => {
+    const kids = (graph.nodes[i].children ?? [])
+      .map((id) => indexById.get(id))
+      .filter((k): k is number => k !== undefined);
+    return [i, ...kids];
+  };
+
   // Closure caches (each node's answer is stable; 480 nodes, trivial memory).
   const ancestryCache = new Map<number, Set<number>>();
   const descendantCache = new Map<number, Set<number>>();
+  const familyAncestryCache = new Map<number, Set<number>>();
 
   function closure(start: number, adj: number[][]): Set<number> {
     const seen = new Set<number>([start]);
@@ -76,6 +98,16 @@ export function createSelectorResolver(graph: GraphCore): SelectorResolver {
     if (!c) {
       c = closure(i, succ);
       descendantCache.set(i, c);
+    }
+    return c;
+  }
+  // The union of every family member's ancestry (so the family itself is in it).
+  function familyAncestryOf(i: number): Set<number> {
+    let c = familyAncestryCache.get(i);
+    if (!c) {
+      c = new Set<number>();
+      for (const m of familyOf(i)) for (const a of closure(m, preds)) c.add(a);
+      familyAncestryCache.set(i, c);
     }
     return c;
   }
@@ -132,6 +164,14 @@ export function createSelectorResolver(graph: GraphCore): SelectorResolver {
           return new Set();
         }
         return new Set(ancestryOf(i));
+      }
+      case "family-ancestry": {
+        const i = indexByCode.get(arg);
+        if (i === undefined) {
+          console.warn(`[cme] unknown code in selector: ${selector}`);
+          return new Set();
+        }
+        return new Set(familyAncestryOf(i));
       }
       case "descendants": {
         const i = indexByCode.get(arg);

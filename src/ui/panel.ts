@@ -912,8 +912,13 @@ export function createPanel(
       hidePopover();
 
       // Return focus to the opening trigger (still in the DOM) or the search box.
-      // Skip while touring — the tour manages focus inside its own dialog.
-      if (wasOpen && !document.body.classList.contains("touring")) {
+      // Skip while touring or storying — both manage focus inside their own
+      // dialog, and a story may close a panel it inherited on the way in.
+      if (
+        wasOpen &&
+        !document.body.classList.contains("touring") &&
+        !document.body.classList.contains("storying")
+      ) {
         const search = document.getElementById("search-input");
         const target =
           lastTrigger && document.contains(lastTrigger) ? lastTrigger : search;

@@ -1,4 +1,4 @@
-// The six stories: final card copy (house voice; citation ledger in
+// The stories: final card copy (house voice; citation ledger in
 // docs/STORIES.md, every DOI verified resolving). Copy is design — edit only
 // with the designer. Numbers in the copy are computed from this repo's graph
 // and asserted by the engine tests; do not round them differently.
@@ -12,7 +12,9 @@
 // Selector grammar (resolved by src/stories/selectors.ts):
 //   "all" · "grade:3" · "code:4.NF.B.3" · "domain:3.NF" · "strand:number"
 //   "ancestry:CODE" (ancestor closure incl. the node) ·
-//   "descendants:CODE" (descendant closure incl. the node)
+//   "descendants:CODE" (descendant closure incl. the node) ·
+//   "family-ancestry:CODE" (ancestor closure of the node AND its sub-standards —
+//     the rolled-up form a PARTIAL parent needs, see selectors.ts)
 
 export interface StoryScene {
   /** Timeline label: a year ("2019"), a grade ("Grade 4"), or a beat name. */
@@ -40,7 +42,19 @@ export interface StoryScene {
    * still needs to find where they were.
    */
   spotlight?: string[];
-  camera?: { fit: "all" | string[]; pose?: 0 | 1 | 2 | 3 };
+  camera?: {
+    /** The lit CONTEXT this scene sets up (and the framing when no spine). */
+    fit: "all" | string[];
+    /**
+     * The SPINE: what the card actually narrates. When present the camera frames
+     * this instead of `fit`, and `fit` is left to do its other job — naming the
+     * lit context. The pandemic story's grammar in one field: the camera leads
+     * half a step ahead of the lit frontier and the glow bleeding past the frame
+     * is the drama, not a framing error.
+     */
+    spine?: string[];
+    pose?: 0 | 1 | 2 | 3;
+  };
   card: { title: string; body: string; cite?: string; citeUrl?: string };
   /**
    * Alternate body shown when the story-HUD "Formation" pin makes this scene
@@ -97,6 +111,26 @@ export function sceneTitle(scene: StoryScene, activePose: Formation): string {
   if (activePose !== authored && scene.heldTitle) return scene.heldTitle;
   return scene.card.title;
 }
+
+/**
+ * The 4.NF.B cluster ("build fractions from unit fractions"), every standard in
+ * it, resolved from this repo's graph and hardcoded here because the selector
+ * grammar has no `cluster:` form — `domain:4.NF` would sweep 4.NF.A and 4.NF.C
+ * in with it. The parents 4.NF.B.3 and 4.NF.B.4 plus their seven sub-standards;
+ * asserted against the live graph in tests/stories.test.ts so a data rebuild
+ * that moved the cluster could never leave this list silently stale.
+ */
+const NF_B_CLUSTER = [
+  "code:4.NF.B.3",
+  "code:4.NF.B.3.a",
+  "code:4.NF.B.3.b",
+  "code:4.NF.B.3.c",
+  "code:4.NF.B.3.d",
+  "code:4.NF.B.4",
+  "code:4.NF.B.4.a",
+  "code:4.NF.B.4.b",
+  "code:4.NF.B.4.c",
+];
 
 export const STORIES: Story[] = [
   {
@@ -203,91 +237,6 @@ export const STORIES: Story[] = [
     ],
   },
   {
-    id: "third-vs-eighth",
-    kicker: "A hypothesis, testable",
-    title: "Third grade against eighth grade",
-    hook: "Two students each lose one year. The structure treats them differently.",
-    scenes: [
-      {
-        year: "Student A",
-        state: { lit: ["grade:K", "grade:1", "grade:2", "grade:3", "grade:4", "grade:5", "grade:6", "grade:7", "grade:8"] },
-        reveal: { dir: "ltr", ms: 2600 },
-        camera: { fit: ["grade:7", "grade:8"], pose: 1 },
-        card: {
-          title: "An eighth grader, before",
-          body: "Kindergarten through seventh grade shine behind this student, and eighth grade is underway. This is the bridge year, where linear equations and functions turn arithmetic into algebra.",
-        },
-        holdMs: 10000,
-        transition: "lapse",
-      },
-      {
-        year: "Miss 8th",
-        state: {
-          lit: ["grade:K", "grade:1", "grade:2", "grade:3", "grade:4", "grade:5", "grade:6", "grade:7", "grade:8"],
-          missed: ["grade:8"],
-          damage: true,
-        },
-        camera: { fit: ["grade:8"], pose: 1 },
-        card: {
-          title: "Losing eighth grade",
-          body: "All 36 of its standards go dark at once, and they are consequential ones. The bridge from arithmetic to algebra crosses this year.",
-        },
-        holdMs: 9500,
-        transition: "lapse",
-      },
-      {
-        year: "The spread",
-        state: { lit: ["all"], missed: ["grade:8"], damage: true },
-        reveal: { dir: "ltr", ms: 2600 },
-        camera: { fit: ["grade:8", "grade:HS"], pose: 1 },
-        card: {
-          title: "What it touches",
-          body: "High school lights up already dimmed. The missing year touches 112 of the 163 standards ahead. Statistics is the exception, with 74 percent of it arriving bright, because it stands mostly on earlier ground. The damage is real, and the runway to repair it is short.",
-        },
-        holdMs: 12000,
-        transition: "lapse",
-      },
-      {
-        year: "Student B",
-        state: { lit: ["grade:K", "grade:1", "grade:2", "grade:3"] },
-        heal: { order: "scatter", ms: 2400 },
-        reveal: { dir: "rtl", ms: 2600 },
-        camera: { fit: ["grade:2", "grade:3"], pose: 1 },
-        card: {
-          title: "Now rewind to a third grader",
-          body: "A different student loses a different year. The map winds back to third grade, where multiplication becomes a structure instead of a trick and fractions are born.",
-        },
-        holdMs: 10000,
-        transition: "lapse",
-      },
-      {
-        year: "Miss 3rd",
-        state: { lit: ["all"], missed: ["grade:3"], damage: true },
-        reveal: { dir: "ltr", ms: 3600 },
-        camera: { fit: ["grade:3", "grade:4", "grade:5", "grade:6"], pose: 1 },
-        card: {
-          title: "Losing third grade",
-          body: "The dark spreads across 271 standards, touching every grade that remains, from fourth through high school, and 240 descendants of grade 3 fractions dim with it. An early gap is not the same gap arriving earlier. It has more years to grow.",
-        },
-        holdMs: 12000,
-        transition: "lapse",
-      },
-      {
-        year: "Both true",
-        state: { lit: ["all"], missed: ["grade:3"], damage: true },
-        camera: { fit: "all", pose: 1 },
-        card: {
-          title: "What the recovery data adds",
-          body: "The structure says early gaps reach further. NWEA's post-pandemic tracking found middle schoolers recovered slowest, because time left and access to help matter too; that analysis is a technical report, not peer-reviewed research. Both things can be true, and both are reasons this work is hard.",
-          cite: "Peer-reviewed anchor: Kuhfeld, Soland & Lewis (2022), Educational Researcher",
-          citeUrl: "https://doi.org/10.3102/0013189X221109178",
-        },
-        holdMs: 12000,
-        transition: "lapse",
-      },
-    ],
-  },
-  {
     id: "swiss-cheese",
     kicker: "After Sal Khan's metaphor",
     title: "Swiss cheese",
@@ -341,7 +290,13 @@ export const STORIES: Story[] = [
           focus: "7.RP.A.2",
         },
         reveal: { dir: "rtl", ms: 3200 },
-        camera: { fit: ["ancestry:7.RP.A.2"], pose: 1 },
+        // The card narrates four standards; the 75-node ancestry glow bleeding
+        // past the frame is the point, so the SPINE is the four, not the closure.
+        camera: {
+          fit: ["ancestry:7.RP.A.2"],
+          spine: ["code:3.OA.A.2", "code:4.NF.B.4", "code:6.RP.A.2", "code:7.RP.A.2"],
+          pose: 1,
+        },
         card: {
           title: "Then proportional reasoning arrives",
           body: "One seventh-grade standard stands on 75 earlier ones. The brightest rings are the holes themselves; the fainter rings show the damage spreading through everything built on them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one standing on the missing. Four pieces out of 75 are enough to make the floor tilt while every adult in the room wonders why this student suddenly cannot keep up.",
@@ -357,7 +312,13 @@ export const STORIES: Story[] = [
           damage: true,
         },
         reveal: { dir: "ltr", ms: 2600 },
-        camera: { fit: ["grade:7", "grade:8", "grade:HS"], pose: 1 },
+        // Spine on 7-8: the card's argument lands there and the HS glow bleeds
+        // off the right edge, which is the sentence the scene is making.
+        camera: {
+          fit: ["grade:7", "grade:8", "grade:HS"],
+          spine: ["grade:7", "grade:8"],
+          pose: 1,
+        },
         card: {
           title: "Struggle starts to look like identity",
           body: "Slope is a rate. A linear function is a proportional one with a starting value. The dimness follows this student into eighth grade and high school, and somewhere along the way it turns into a sentence: I am not a math person. The structure wrote that sentence, not the child.",
@@ -390,63 +351,79 @@ export const STORIES: Story[] = [
     kicker: "After TNTP's report",
     title: "The opportunity myth",
     hook: "A year of review, and what passes by while it happens.",
+    // Rebuilt to the pandemic story's grammar (2026-07): ONE student, ONE
+    // monotone lit set that only grows left to right, one idea per scene, and a
+    // camera that leads half a step ahead of the lit frontier. The prior cut
+    // ping-ponged K-4 → 4 → 4+5 → K-8 → 6-8 → mix and read as complex.
     scenes: [
       {
-        year: "September",
-        state: {
-          lit: ["grade:K", "grade:1", "grade:2", "grade:3", "grade:4"],
-          missed: ["code:4.NF.B.4", "code:4.NBT.B.5"],
-          damage: true,
-        },
-        reveal: { dir: "ltr", ms: 2600 },
+        year: "Grade 4, September",
+        state: { lit: ["grade:4"] },
+        reveal: { dir: "ltr" },
         camera: { fit: ["grade:4"], pose: 1 },
         card: {
-          title: "A fifth grader, two holes behind",
-          body: "A hard fourth-grade year left two real gaps, multi-digit multiplication and fraction multiplication, the second taking its three sub-standards down with it. Everything else back here lights up intact. Hold that thought.",
-        },
-        holdMs: 10500,
-        transition: "lapse",
-      },
-      {
-        year: "The plan",
-        state: { lit: ["grade:4"], missed: ["code:4.NF.B.4", "code:4.NBT.B.5"], damage: true },
-        camera: { fit: ["grade:4"], pose: 1 },
-        card: {
-          title: "The plan is a year of review",
-          body: "The most common answer to being behind is to repeat the grade below, all of it. In TNTP's study of five districts, students spent more than 500 hours a year on assignments below their grade level. On the map the plan looks like this: one year stays lit while everything else waits in the dark.",
-          cite: "TNTP (2018), The Opportunity Myth (report)",
+          title: "Fourth grade, on paper",
+          body: "Fourth grade is the fractions year: equivalence, comparison, adding and subtracting parts of the same whole. Thirty-seven standards sit in this band, and the ones ahead assume every one of them.",
         },
         holdMs: 11000,
         transition: "lapse",
       },
       {
-        year: "Meanwhile",
+        year: "October through January",
+        state: { lit: ["grade:3", "grade:4"] },
+        // The one deliberate backward look in the story: the year regressing.
+        reveal: { dir: "rtl", ms: 2000 },
+        camera: { fit: ["grade:3", "grade:4"], pose: 1 },
+        card: {
+          title: "What the year actually held",
+          body: "The Opportunity Myth found students spending most of their math time on work below their grade. For this student, October through January is third grade again: re-taught rounding, re-taught multiplication facts, a familiar worksheet with a new date.",
+        },
+        holdMs: 11000,
+        transition: "lapse",
+      },
+      {
+        year: "The same year",
         state: {
-          lit: ["grade:4", "grade:5"],
-          missed: ["code:4.NF.B.4", "code:4.NBT.B.5"],
+          lit: ["grade:3", "grade:4"],
+          missed: NF_B_CLUSTER,
+          damage: false,
+        },
+        camera: { fit: ["grade:3", "grade:4"], spine: NF_B_CLUSTER, pose: 1 },
+        card: {
+          title: "What never arrived",
+          body: "Every week spent reviewing is a week 4.NF.B does not get. The cluster dims quietly: not failed, just never reached. Report cards have no mark for material that was never assigned.",
+        },
+        holdMs: 11000,
+        transition: "lapse",
+      },
+      {
+        year: "Grade 5",
+        state: {
+          lit: ["grade:3", "grade:4", "grade:5"],
+          missed: NF_B_CLUSTER,
           damage: true,
         },
-        reveal: { dir: "ltr", ms: 2600 },
-        camera: { fit: ["grade:5"], pose: 1 },
+        reveal: { dir: "ltr" },
+        camera: { fit: ["grade:4", "grade:5"], pose: 1 },
         card: {
-          title: "What passes by meanwhile",
-          body: "Fifth grade happens anyway. Volume, the coordinate plane, line plots: 40 standards go past while this student reviews, and 30 of the 40 stand on foundations that were never broken. The student could have met them.",
+          title: "The bill, one year later",
+          body: "Fifth grade opens assuming fractions are settled. They are not. 5.NF stands directly on the cluster that never arrived, and the struggle that follows looks like a fifth-grade problem while its cause sits a year earlier.",
         },
         holdMs: 11500,
         transition: "lapse",
       },
       {
-        year: "Next fall",
+        year: "Grades 6 through 8",
         state: {
-          lit: ["grade:K", "grade:1", "grade:2", "grade:3", "grade:4", "grade:5", "grade:6"],
-          missed: ["grade:4", "grade:5"],
+          lit: ["grade:3", "grade:4", "grade:5", "grade:6", "grade:7", "grade:8"],
+          missed: NF_B_CLUSTER,
           damage: true,
         },
-        reveal: { dir: "ltr", ms: 2800 },
-        camera: { fit: ["grade:4", "grade:5", "grade:6"], pose: 1 },
+        reveal: { dir: "ltr", ms: 2600 },
+        camera: { fit: ["grade:5", "grade:6", "grade:7", "grade:8"], pose: 1 },
         card: {
-          title: "The gap the review year built",
-          body: "Next fall, the grade 5 standards read as missed too, not because this student could not learn them but because nobody offered them. Review that replaces grade-level work manufactures next year's gap. Schmidt and colleagues documented how unequal access to grade-level content widens achievement gaps.",
+          title: "Compound interest",
+          body: "Left alone, the dimness keeps traveling: ratios in sixth grade, proportional reasoning in seventh, linear functions in eighth. Each year the distance from the missing cluster grows, and the harder its origin is to see.",
           cite: "Schmidt, Burroughs, Zoido & Houang (2015), Educational Researcher",
           citeUrl: "https://doi.org/10.3102/0013189X15603982",
         },
@@ -454,32 +431,17 @@ export const STORIES: Story[] = [
         transition: "lapse",
       },
       {
-        year: "Years on",
-        state: { lit: ["grade:6", "grade:7", "grade:8"], missed: ["grade:4", "grade:5"], damage: true },
-        reveal: { dir: "ltr", ms: 2600 },
-        camera: { fit: ["grade:6", "grade:7", "grade:8"], pose: 1 },
+        year: "The other version",
+        state: { lit: ["grade:4", "grade:5"], missed: [], damage: false },
+        heal: { order: "ltr", ms: 3000 },
+        spotlight: NF_B_CLUSTER,
+        camera: { fit: ["grade:4", "grade:5"], spine: [...NF_B_CLUSTER, "code:5.NF.A.1"], pose: 1 },
         card: {
-          title: "The long shadow",
-          body: "Ratios, proportions, and the road to algebra all pass through the years this student spent reviewing. The original problem was two standards wide. The manufactured one spans two grades.",
+          title: "The other version of the year",
+          body: "TNTP's finding cuts both ways: students given grade-level work rose to it more often than not. Hold the review to what the data says a student needs, teach the year the grade promises, and the map ahead stays lit.",
+          cite: "TNTP (2018), The Opportunity Myth",
         },
-        holdMs: 11000,
-        transition: "lapse",
-      },
-      {
-        year: "The alternative",
-        state: {
-          lit: ["grade:5", "code:4.NF.B.4", "code:4.NBT.B.5"],
-          missed: ["code:4.NF.B.4", "code:4.NBT.B.5"],
-          damage: true,
-        },
-        heal: { order: "scatter", ms: 3200 },
-        camera: { fit: ["grade:4", "grade:5"], pose: 1 },
-        card: {
-          title: "The alternative fits on one screen",
-          body: "Keep fifth grade lit and repair the two specific holes underneath it. In TNTP's data, students who got more grade-level work grew more, and those who started behind gained about seven months on their peers. That is an association from a descriptive study, and it is also what the structure predicts.",
-          cite: "TNTP (2018), report, association not causation",
-        },
-        holdMs: 12500,
+        holdMs: 12000,
         transition: "lapse",
       },
     ],
@@ -506,7 +468,14 @@ export const STORIES: Story[] = [
         year: "Descending",
         state: { lit: ["ancestry:F-IF.A.1"] },
         reveal: { dir: "rtl", ms: 3600 },
-        camera: { fit: ["ancestry:F-IF.A.1"], pose: 1 },
+        // The descent line the card walks — each rung verified to lie on
+        // ancestry:F-IF.A.1 (tests/stories.test.ts). The other 74 ancestors light
+        // around it and past the frame; the line is what the camera holds.
+        camera: {
+          fit: ["ancestry:F-IF.A.1"],
+          spine: ["code:F-IF.A.1", "code:8.F.A.1", "code:6.RP.A.2", "code:K.CC.A.1"],
+          pose: 1,
+        },
         heldTitle: "Follow its foundations back",
         heldBody:
           "Watch the chain light from functions backward. Functions stand on eighth-grade relations, which stand on proportionality and ratio, which stand on fractions and the whole-number work beneath them. Nineteen steps back the light reaches kindergarten, and counting is one of the foundations under everything.",
@@ -521,7 +490,16 @@ export const STORIES: Story[] = [
         year: "K",
         state: { lit: ["descendants:K.CC.A.1"] },
         reveal: { dir: "ltr", ms: 3600 },
-        camera: { fit: "all", pose: 1 },
+        // The ascent line out of counting, each rung verified to lie ON
+        // descendants:K.CC.A.1 (3.OA.A.2 does NOT — it is not downstream of
+        // counting — so the highest-degree grade-3 descendant, 3.OA.D.8, takes
+        // that rung). The other 222 descendants wash PAST the frame: the wave is
+        // the drama, the line is the subject.
+        camera: {
+          fit: ["descendants:K.CC.A.1"],
+          spine: ["code:K.CC.A.1", "code:3.OA.D.8", "code:6.EE.B.7", "code:F-IF.A.1"],
+          pose: 1,
+        },
         card: {
           title: "Now light everything that grows from counting",
           body: "From one kindergarten standard, count to 100 by ones and tens, 225 standards light up, 47 percent of the whole map. Across six longitudinal datasets, the math children bring to school entry predicts their later achievement better than early reading or attention do. The map shows what the work stands on, never what a child can or cannot do.",
@@ -563,49 +541,78 @@ export const STORIES: Story[] = [
     kicker: "The diagnostic move",
     title: "Find where it begins",
     hook: "The move every teacher can make: walk back until you find solid ground.",
+    // Re-anchored 2026-07 from 7.RP.A.2 to 8.EE.C.7: proportional reasoning was
+    // already the climax of Swiss cheese, and two stories converging on one
+    // standard read as repetition. Solving linear equations is the better
+    // diagnostic subject anyway — its chain bottoms out in FIRST grade, seven
+    // years below the label, which is the story's whole argument.
+    //
+    // 8.EE.C.7 is a PARTIAL parent: it has zero direct prerequisites of its own
+    // and carries all 119 on its sub-standard 8.EE.C.7.b, so every selector here
+    // is the rolled-up `family-ancestry:` form (see selectors.ts). The walk-back
+    // chain the cards name is real and mostly single-hop — 8.EE.C.7's family →
+    // 7.EE.B.4.a → 6.EE.B.7 → 5.NF.A.1 are each ONE direct prereq edge, and
+    // 1.OA.D.7 (the meaning of the equal sign) is a transitive ancestor of
+    // 5.NF.A.1. All asserted in tests/story-framing.test.ts.
     scenes: [
       {
         year: "The struggle",
-        state: { lit: ["code:7.RP.A.2"], focus: "7.RP.A.2" },
-        camera: { fit: ["code:7.RP.A.2"], pose: 1 },
+        state: { lit: ["code:8.EE.C.7"], focus: "8.EE.C.7" },
+        camera: { fit: ["code:8.EE.C.7"], pose: 1 },
         card: {
-          title: "A student is failing proportional reasoning",
-          body: "One light on the map, the seventh-grade standard this student keeps failing. The grade label says to reteach seventh grade, slower and louder. The structure is about to disagree.",
+          title: "A student is failing linear equations",
+          body: "One light on the map, the eighth-grade standard this student keeps failing. Solve for x, one variable, terms on both sides. The grade label says to reteach eighth grade, slower and louder. The structure is about to disagree.",
         },
         holdMs: 10000,
         transition: "lapse",
       },
       {
         year: "The map",
-        state: { lit: ["ancestry:7.RP.A.2"], focus: "7.RP.A.2" },
+        state: { lit: ["family-ancestry:8.EE.C.7"], focus: "8.EE.C.7" },
         reveal: { dir: "rtl", ms: 3600 },
-        camera: { fit: ["ancestry:7.RP.A.2"], pose: 1 },
+        // The walk-back line the next scene names, framed while the other 116
+        // ancestors light around it.
+        camera: {
+          fit: ["family-ancestry:8.EE.C.7"],
+          spine: ["code:8.EE.C.7", "code:7.EE.B.4.a", "code:6.EE.B.7", "code:1.OA.D.7"],
+          pose: 1,
+        },
         card: {
           title: "Light what it stands on",
-          body: "The chain runs from this standard back through 75 earlier ones, all the way to kindergarten. Somewhere along it is the last thing this student can do securely, and everything after that point leans on the gap.",
+          body: "The chain runs from this standard back through 119 earlier ones, all the way to kindergarten. Somewhere along it is the last thing this student can do securely, and everything after that point leans on the gap.",
         },
         holdMs: 11500,
         transition: "lapse",
       },
       {
         year: "Walk back",
-        state: { lit: ["ancestry:7.RP.A.2"], focus: "7.RP.A.2" },
-        camera: { fit: ["code:6.RP.A.2", "code:5.NF.B.4", "code:3.OA.A.2"], pose: 1 },
+        state: { lit: ["family-ancestry:8.EE.C.7"], focus: "8.EE.C.7" },
+        camera: {
+          fit: ["family-ancestry:8.EE.C.7"],
+          spine: ["code:7.EE.B.4.a", "code:6.EE.B.7", "code:5.NF.A.1", "code:1.OA.D.7"],
+          pose: 1,
+        },
         card: {
           title: "Walk back until the ground is solid",
-          body: "Check unit rates: shaky. Check fraction multiplication: shaky. Check division as sharing: solid. Stop there. Three checks reached it, and the ground floor is a third-grade skill, four school years below the label on the struggle.",
+          body: "Check two-step equations: shaky. Check one-step equations: shaky. Check adding fractions with unlike denominators: shaky. Check what the equal sign means: solid. Stop there. The ground floor is a first-grade idea, seven school years below the label on the struggle.",
         },
         holdMs: 11500,
         transition: "lapse",
       },
       {
         year: "Build up",
-        state: { lit: ["ancestry:7.RP.A.2"], focus: "7.RP.A.2" },
+        state: { lit: ["family-ancestry:8.EE.C.7"], focus: "8.EE.C.7" },
         reveal: { dir: "ltr", ms: 3200 },
-        camera: { fit: ["ancestry:7.RP.A.2"], pose: 1 },
+        // Same spine as scene 2, now rebuilt upward — the reader holds one frame
+        // across the walk-back and the build-up, and never re-orients.
+        camera: {
+          fit: ["family-ancestry:8.EE.C.7"],
+          spine: ["code:8.EE.C.7", "code:7.EE.B.4.a", "code:6.EE.B.7", "code:1.OA.D.7"],
+          pose: 1,
+        },
         card: {
           title: "Build back up from there",
-          body: "Now light the chain the other way. From solid ground, each missing step is targeted work on one named standard, not a year of going backward. Fraction knowledge in elementary school predicts high school algebra better than almost anything else researchers measured, so every step rebuilt here keeps paying.",
+          body: "Now light the chain the other way. From solid ground, each missing step is targeted work on one named standard, not a year of going backward. Fraction knowledge in elementary school predicts high school algebra better than almost anything else researchers measured, and on this chain the fractions are load-bearing: adding unlike denominators sits directly under the first equations this student ever solved.",
           cite: "Siegler et al. (2012), Psychological Science",
           citeUrl: "https://doi.org/10.1177/0956797612440101",
         },
@@ -650,3 +657,13 @@ export const STORIES: Story[] = [
     ],
   },
 ];
+
+/**
+ * Look a story up by id. Callers that can be handed an id from OUTSIDE the app
+ * (the `#/story/<id>` deep-link router, the debug hook) must resolve through
+ * this and handle `undefined`: story ids are public URLs, so a retired story
+ * (third-vs-eighth, cut 2026-07) keeps arriving in links long after it is gone.
+ */
+export function findStory(id: string): Story | undefined {
+  return STORIES.find((s) => s.id === id);
+}

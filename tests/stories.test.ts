@@ -109,7 +109,9 @@ describe("story scripts validate against the graph", () => {
     const sels: string[] = [];
     if (scene.state?.missed) sels.push(...scene.state.missed);
     if (scene.state?.lit) sels.push(...scene.state.lit);
+    if (scene.spotlight) sels.push(...scene.spotlight);
     if (scene.camera && Array.isArray(scene.camera.fit)) sels.push(...scene.camera.fit);
+    if (scene.camera?.spine) sels.push(...scene.camera.spine);
     return sels;
   };
 
@@ -143,11 +145,11 @@ describe("story scripts validate against the graph", () => {
     }
   });
 
-  it("cultural-hook cites without a DOI are exactly the two TNTP report cites", () => {
-    // The Opportunity Myth story carries two TNTP cites (a report, not
-    // peer-reviewed) with no DOI: the "year of review" plan and the
-    // grade-level-work alternative. Every other cited scene carries a resolvable
-    // DOI. (The frozen copy defines this; the test asserts the frozen truth.)
+  it("the one cite without a DOI is the TNTP report (a cultural hook, not evidence)", () => {
+    // The rebuilt Opportunity Myth carries a single TNTP cite (a report, not
+    // peer-reviewed) with no DOI, on its closing scene. Every other cited scene
+    // carries a resolvable DOI. (The frozen copy defines this; the test asserts
+    // the frozen truth.)
     let citeNoUrl = 0;
     for (const story of STORIES) {
       for (const scene of story.scenes) {
@@ -157,11 +159,13 @@ describe("story scripts validate against the graph", () => {
         }
       }
     }
-    expect(citeNoUrl).toBe(2);
+    expect(citeNoUrl).toBe(1);
   });
 
-  it("there are seven stories (six narratives + the interactive lose-a-year), each with at least one scene", () => {
-    expect(STORIES.length).toBe(7);
+  it("there are six stories (five narratives + the interactive lose-a-year), each with at least one scene", () => {
+    // third-vs-eighth was cut in 2026-07 (its argument repeated the pandemic
+    // story's, and its "both true" coda repeated the same NWEA caveat).
+    expect(STORIES.length).toBe(6);
     for (const story of STORIES) {
       expect(story.scenes.length).toBeGreaterThan(0);
       expect(story.id).toBeTruthy();
