@@ -62,8 +62,6 @@ describe("story surface reset (entry + exit invariant)", () => {
         "clearEdgeStory",
         "clearFocalOffset",
         "clearFocus",
-        "clearFrameLift",
-        "clearFrameShift",
         "clearNodeDamage",
         "clearNodeMask",
         "clearNodeStoryLift",

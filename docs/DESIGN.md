@@ -184,6 +184,43 @@ noise, disabled with reduced-motion.
   "Mapped on <parent code>" with the family's builds-on / leads-to counts, not
   "No mapped connections".
 
+## Camera composition (one primitive, no blanket nudges)
+
+Every framing — home, focus, journey, a story scene — goes through
+`rig.frameSubject(subject, { context, contextPullback, minSubjectFrac,
+snapToAxis })` (`src/scene/frame.ts` + `src/scene/camera.ts`):
+
+- **The usable rect** is the viewport minus the LIVE chrome, measured from the
+  DOM at every fit: a modest top strip for the title block (its own bottom,
+  capped at 11% of the viewport ≈ 100px at 907px tall — the block spans only the
+  left half, so reserving all 260px of it would push every framing down for
+  nothing), the bottom chrome band (filter rail / formation switcher / story
+  scrubber, whichever is visible — an `opacity: 0` rail during a story reserves
+  nothing), and an OPEN right-side detail panel at its real width. Composition
+  happens in that rect, not in the raw viewport.
+- **The subject** (a story's spine, the one-hop focus neighbourhood, the pose
+  cloud at home) must land fully inside the rect with a 4.5% margin. Fits are
+  BOXES, never bounding spheres: these layouts are flat slabs (grades K–2 in the
+  Ascent measure 216 × 91 × 244), and a sphere hands the on-screen size to the
+  depth axis the reader cannot see.
+- **The context** — the scene's lit set, or a focus's full lit closure — is what
+  gets CENTRED, unioned with the subject so a camera that leads half a step ahead
+  of its lit frontier splits the difference instead of shoving one of them to an
+  edge. The fit retreats to take the context in until either the subject would
+  drop below 1/`contextPullback` of the frame it fills alone or below
+  `minSubjectFrac` of the frame's short axis; past that the context bleeds, which
+  is the drama.
+- **Occluders bias, they never evacuate.** The bottom-left story card earns a
+  rightward nudge of ¼ its width (≤120px and ≤6% of the viewport); the subject
+  then spans the frame with the card over its lower-left corner. Pushing the
+  subject entirely clear of the card is what used to empty the top-left half of
+  the frame.
+- Deleted with this: `setFrameShiftPx` / `setFrameLiftPx` / `setBottomInsetPx` /
+  the per-flight `panelOffsetPx`. They were blanket screen-space offsets applied
+  after the fit with nothing checking where the content landed; they pushed in
+  opposite directions (stories right, focus left) and the lift carried the wrong
+  sign, so it pushed content DOWN into the chrome it meant to clear.
+
 ## Interaction grammar (light everything, then dive in)
 
 A click shows how expansive a standard's reach is, then zooms into it — the whole
@@ -205,10 +242,11 @@ full both-direction closure; the two "framings" are a CAMERA concern.
   predicate (prior focus presence + current framing).
 - **The wide frame** is a pure camera zoom-out over the already-lit closure,
   reached by re-clicking the focused node or the panel's "Trace the full journey"
-  button. It fits the closure's actual Box3 extents (`rig.focusOnBox`, camera-
-  controls `fitToBox`, ~10% per-axis padding) rather than a bounding sphere, so an
+  button. It frames the closure's actual Box3 extents as the SUBJECT, so an
   elongated grade-band closure fills the frame tightly instead of being pushed far
-  back by its diagonal. The compact one-hop dive keeps the sphere fit. Re-clicking
+  back by its diagonal. The one-hop dive frames the neighbourhood with that same
+  closure as its composition CONTEXT, so a click on a foundational standard no
+  longer parks the camera inside the cloud it just lit. Re-clicking
   the focused node toggles the camera between the one-hop and wide frames (no
   cascade replay, no hash change). Escape, the panel's ×, or a background click
   clear the focus entirely.
@@ -252,7 +290,7 @@ full both-direction closure; the two "framings" are a CAMERA concern.
 
 | Move | Spec |
 |---|---|
-| camera focus flight | camera-controls `fitToSphere` smooth-damped; base damping ~0.25s, the dive raises it to `DIVE_SMOOTH_TIME` so the wide→close traverse reads |
+| camera focus flight | `rig.frameSubject` (fit + compose into the usable rect) smooth-damped; base damping ~0.25s, the dive raises it to `DIVE_SMOOTH_TIME` so the wide→close traverse reads |
 | fresh-click choreography | full closure cascades immediately; camera holds the wide view ~`DIVE_DELAY_MS` (750ms), then dives to the one-hop frame at moderate speed |
 | full-closure cascade | ancestors ignite in grade order stepping backward, 80ms stagger per grade layer; descendants forward after 200ms |
 | hop (new standard while zoomed) | lateral pan straight to the new one-hop frame, no wide excursion, no dive delay; the cascade still runs |

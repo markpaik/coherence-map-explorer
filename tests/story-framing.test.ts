@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { Vector3 } from "three";
 import type { GraphCore } from "../src/data";
 import { createSelectorResolver } from "../src/stories/selectors";
-import { nodeBoundingSphere, trimmedBoundingSphere } from "../src/state/machine";
+import { nodeBoundingBox } from "../src/state/machine";
 import { STORIES, findStory, type StoryScene } from "../src/stories/scripts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -40,17 +40,21 @@ const union = (sels: readonly string[]): Set<number> => {
   return out;
 };
 
-describe("trimmedBoundingSphere", () => {
+describe("nodeBoundingBox (the fit's outlier trim)", () => {
+  const size = (b: { min: Vector3; max: Vector3 }): [number, number, number] => [
+    b.max.x - b.min.x,
+    b.max.y - b.min.y,
+    b.max.z - b.min.z,
+  ];
+
   it("drops the far outliers so the fit follows the mass, not the tail", () => {
     // Ten points tight around the origin, one stray a long way out.
     const pts: [number, number, number][] = [];
     for (let i = 0; i < 10; i++) pts.push([i, 0, 0]);
     pts.push([1000, 0, 0]);
     const idx = pts.map((_p, i) => i);
-    const plain = nodeBoundingSphere(positions(pts), idx, 0);
-    const trimmed = trimmedBoundingSphere(positions(pts), idx, 0.1, 0);
-    expect(plain.radius).toBeGreaterThan(400); // the stray sets the size
-    expect(trimmed.radius).toBeLessThan(20); // the mass does
+    expect(size(nodeBoundingBox(positions(pts), idx, 0, 0))[0]).toBeGreaterThan(900);
+    expect(size(nodeBoundingBox(positions(pts), idx, 0.1, 0))[0]).toBeLessThan(20);
   });
 
   it("drops exactly ceil(trim × n) points", () => {
@@ -60,26 +64,26 @@ describe("trimmedBoundingSphere", () => {
     pts[18] = [500, 0, 0];
     pts[19] = [-500, 0, 0];
     const idx = pts.map((_p, i) => i);
-    expect(trimmedBoundingSphere(positions(pts), idx, 0.1, 0).radius).toBe(0);
+    expect(size(nodeBoundingBox(positions(pts), idx, 0.1, 0))[0]).toBe(0);
     // A 5% trim drops only 1 of the 2, so the survivor still sets the size.
-    expect(trimmedBoundingSphere(positions(pts), idx, 0.05, 0).radius).toBeGreaterThan(200);
+    expect(size(nodeBoundingBox(positions(pts), idx, 0.05, 0))[0]).toBeGreaterThan(200);
   });
 
-  it("never drops everything, and honours the minimum radius", () => {
+  it("never drops everything, and honours the minimum extent", () => {
     const pts: [number, number, number][] = [[0, 0, 0]];
-    const s = trimmedBoundingSphere(positions(pts), [0], 1, 90);
-    expect(s.radius).toBe(90);
-    expect(trimmedBoundingSphere(positions(pts), [], 0.1, 90).radius).toBe(90);
+    expect(size(nodeBoundingBox(positions(pts), [0], 1, 90))).toEqual([90, 90, 90]);
+    expect(size(nodeBoundingBox(positions(pts), [], 0.1, 90))).toEqual([90, 90, 90]);
   });
 
-  it("agrees with the plain sphere when there is nothing to trim", () => {
+  it("keeps each axis SEPARATE — a deep slab is not framed as a cube", () => {
+    // The defect a bounding sphere had: grades K-2 in the Ascent pose measure
+    // 216 x 91 x 244, and their sphere (radius 169) framed a 338 cube, so the
+    // depth the camera cannot see decided the on-screen size.
     const pts: [number, number, number][] = [
-      [-10, 0, 0],
-      [10, 0, 0],
+      [-108, -45, -122],
+      [108, 45, 122],
     ];
-    const plain = nodeBoundingSphere(positions(pts), [0, 1], 0);
-    const trimmed = trimmedBoundingSphere(positions(pts), [0, 1], 0, 0);
-    expect(trimmed.radius).toBeCloseTo(plain.radius, 6);
+    expect(size(nodeBoundingBox(positions(pts), [0, 1], 0, 0))).toEqual([216, 90, 244]);
   });
 });
 

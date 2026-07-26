@@ -20,10 +20,10 @@
 // player asks for a *silent* focus that lights the closure without opening the
 // panel or touching the hash) and it restores every borrowed surface on exit.
 
-import type { Sphere } from "three";
+import type { Box3 } from "three";
 import type { GraphCore } from "../data";
 import type { Machine } from "../state/machine";
-import { nodeBoundingSphere, trimmedBoundingSphere } from "../state/machine";
+import { MIN_FIT_EXTENT, nodeBoundingBox } from "../state/machine";
 import { EMPHASIS } from "../scene/palette";
 import type { Pose, PoseDriver } from "../scene/pose";
 import type { NodesHandle } from "../scene/nodes";
@@ -77,8 +77,6 @@ export interface StorySurfaces {
   clearEdgeMask(): void;
   clearBeacons(): void;
   clearCardExtra(): void;
-  clearFrameLift(): void;
-  clearFrameShift(): void;
   clearFocalOffset(): void;
   recomputeFilters(): void;
   clearFocus(): void;
@@ -97,8 +95,6 @@ export const STORY_SURFACE_KEYS = [
   "clearEdgeMask",
   "clearBeacons",
   "clearCardExtra",
-  "clearFrameLift",
-  "clearFrameShift",
   "clearFocalOffset",
   "recomputeFilters",
   "clearFocus",
@@ -570,29 +566,63 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   }
 
   // Above this many nodes a fit is sized by its strays rather than its mass, so
-  // the sphere trims its outliers (see trimmedBoundingSphere). At or below it —
-  // a spine of four named standards, a handful of codes — every node is the
-  // subject and dropping one would cut an end off the line the card narrates.
+  // the box trims its outliers (see nodeBoundingBox). At or below it — a spine of
+  // four named standards, a handful of codes — every node is the subject and
+  // dropping one would cut an end off the line the card narrates.
   const TRIM_ABOVE = 8;
-  function storyFitSphere(indices: number[]): Sphere {
-    return indices.length > TRIM_ABOVE
-      ? trimmedBoundingSphere(nodes, indices)
-      : nodeBoundingSphere(nodes, indices);
+  const FIT_TRIM = 0.1;
+  /** Outlier trim on the CONTEXT box (lighter than the fit's: a context is
+   *  allowed to be big, it just must not be defined by two strays). */
+  const CONTEXT_TRIM = 0.05;
+  function storyFitBox(indices: number[], trim: number): Box3 {
+    return nodeBoundingBox(nodes, indices, trim, MIN_FIT_EXTENT);
+  }
+  /**
+   * A `fit` selector is a MASS (a grade band, a closure): size it by the mass and
+   * let its strays bleed. A SPINE is named content — the standards the card
+   * talks about — so it is never trimmed: dropping one would leave a standard
+   * the reader is being told about hanging off the edge of the frame.
+   */
+  const fitTrim = (indices: number[]): number => (indices.length > TRIM_ABOVE ? FIT_TRIM : 0);
+  /**
+   * How far a scene's fit may retreat from its SPINE to take the lit context in
+   * with it. The spine is what the card narrates and must read; the lit wash
+   * around it is the drama and is allowed to bleed. Within this factor the whole
+   * lit set lands in frame; past it the spine stays hero.
+   */
+  const STORY_CONTEXT_PULLBACK = 2.6;
+  /** The scene's LIT set as a composition context box (outliers trimmed). */
+  function litContextBox(scene: StoryScene): Box3 | null {
+    const lit = scene.state?.lit;
+    if (!lit || !lit.length) return null;
+    const idx = [...resolveUnion(lit)];
+    if (!idx.length) return null;
+    return nodeBoundingBox(nodes, idx, idx.length > TRIM_ABOVE ? CONTEXT_TRIM : 0, MIN_FIT_EXTENT);
   }
 
   // The camera frames the SPINE when a scene names one (what the card actually
-  // narrates), otherwise its `fit` (the lit context). Everything outside the
-  // frame still lights — the bleed past the edge is the drama.
+  // narrates), otherwise its `fit`. The scene's LIT set rides along as the
+  // composition context, so the frame centres the mass the reader can see
+  // instead of a spine with its own lit context hanging off the bottom of the
+  // screen. Everything outside the frame still lights — the bleed is the drama.
   function applyCamera(scene: StoryScene, animate: boolean): void {
     const cam = scene.camera;
     if (!cam) {
       rig.frameHome(animate);
       return;
     }
+    const context = litContextBox(scene);
+    const frame = (indices: number[], trim: number): void => {
+      void rig.frameSubject(storyFitBox(indices, trim), {
+        transition: animate,
+        context,
+        contextPullback: STORY_CONTEXT_PULLBACK,
+      });
+    };
     if (cam.spine && cam.spine.length) {
       const spine = resolveUnion(cam.spine);
       if (spine.size) {
-        void rig.focusOn(storyFitSphere([...spine]), animate, 0);
+        frame([...spine], 0); // the spine is named content: every node of it frames
         return;
       }
     }
@@ -605,7 +635,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       rig.frameHome(animate);
       return;
     }
-    void rig.focusOn(storyFitSphere([...idx]), animate, 0);
+    frame([...idx], fitTrim([...idx]));
   }
 
   async function goto(index: number, animate: boolean): Promise<void> {
@@ -661,43 +691,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     requestRender();
   }
 
-  // --- card-aware framing bias --------------------------------------------
-  // The story card is an occluder with a known rectangle, so the framed subject
-  // is composed in the region it leaves CLEAR — the exact mirror of the
-  // panel-aware focal offset the machine already applies for the right-side
-  // panel (there: panel occupies [W−400, W], clear centre is 200px left of
-  // screen centre; here: card occupies the bottom-left, clear centre is
-  // cardRight/2 to the RIGHT of it). Measured from the DOM at story start so a
-  // CSS width change can never leave the number stale.
-  //
-  // Phones (card is bottom-full-width) get the vertical lift only — there is no
-  // clear region beside it to bias into.
-  const PHONE_QUERY = "(max-width: 720px)";
-  const MAX_LIFT_FRAC = 0.12; // never crowd the headline block at the top
-  function applyCardBias(): void {
-    const phone = window.matchMedia(PHONE_QUERY).matches;
-    if (phone) {
-      rig.setFrameShiftPx(0);
-      rig.setFrameLiftPx(Math.round(window.innerHeight * 0.17));
-      return;
-    }
-    const el = document.querySelector(".story-card");
-    const r = el instanceof HTMLElement ? el.getBoundingClientRect() : null;
-    if (!r || r.width <= 0) {
-      rig.setFrameShiftPx(0);
-      rig.setFrameLiftPx(0);
-      return;
-    }
-    // Centre of the clear band right of the card, expressed as a shift from
-    // screen centre: (cardRight + W)/2 − W/2 = cardRight/2.
-    rig.setFrameShiftPx(Math.round(r.right / 2));
-    // A quarter of the card's vertical footprint — enough to lift the subject
-    // off the card's top edge without pushing it into the title block.
-    const footprint = Math.max(0, window.innerHeight - r.top);
-    rig.setFrameLiftPx(
-      Math.round(Math.min(footprint / 4, window.innerHeight * MAX_LIFT_FRAC)),
-    );
-  }
+  // (The story card no longer needs a framing lever of its own: the camera rig
+  // measures it as live chrome — a modest rightward bias on desktop, part of the
+  // bottom band when it goes full-width on a phone. See scene/frame.ts.)
 
   // --- lifecycle ----------------------------------------------------------
   // The borrowed-surface contract (see resetStorySurfaces): ONE list, run on
@@ -717,8 +713,6 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       card.setExtra(null);
       loseYearSel = null;
     },
-    clearFrameLift: () => rig.setFrameLiftPx(0),
-    clearFrameShift: () => rig.setFrameShiftPx(0),
     clearFocalOffset: () => rig.clearFocalOffset(false),
     recomputeFilters: () => filters.recompute(), // reclaim the visibility buffers
     // A no-op internally when nothing is focused, which is exactly why the two
@@ -790,9 +784,8 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     card.setAutoAdvanceEnabled(autoAdvanceOn());
     card.setPaused(false);
     if (story.interactive === "lose-a-year") mountLoseAYear();
-    // AFTER card.begin() (+ any interactive extra) so the card's rectangle is
-    // measured at its real, laid-out size.
-    applyCardBias();
+    // goto() frames the first scene, and the rig measures the card's rectangle
+    // as it composes — which is why the card is mounted (and laid out) first.
     void goto(0, !reducedMotion());
   }
 

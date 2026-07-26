@@ -58,7 +58,15 @@ const DIVE_SMOOTH_TIME = 0.85;
 // small closure does not dive absurdly close.
 const BOX_NODE_MARGIN = 16;
 const MIN_BOX_EXTENT = 140;
-const JOURNEY_PAD_FRAC = 0.1; // ~10% breathing room per axis on the closure fit
+/**
+ * Floor on a fit box's LONGEST axis: how much world a framing shows around a
+ * lone standard. 140 reproduces the zoom the shipped bounding-sphere fit landed
+ * on for a single node (a 90-radius sphere padded 1.35×), so a standard with no
+ * mapped connections is framed exactly as tightly as it always was.
+ */
+export const MIN_FIT_EXTENT = 140;
+// (The closure fit's breathing room is now the usable rect's own margin — see
+// scene/frame.ts — so the per-fit padding fraction is gone.)
 
 /** The camera framing after a focus: the one-hop neighbourhood or the closure. */
 export type FocusFraming = "local" | "journey";
@@ -101,15 +109,19 @@ export type MachineState =
   | "touring"
   | "storying";
 
-// The right-side panel is 400px wide (see style.css); shift a focus target left
-// of center by half that (in CSS px, converted to world units by the rig) so it
-// lands in the visible region beside the panel. Below 720px the panel is a
-// bottom sheet — no horizontal offset needed.
-const PANEL_WIDTH_PX = 400;
-const PANEL_BREAKPOINT_PX = 720;
-function focusPanelOffsetPx(): number {
-  return window.innerWidth > PANEL_BREAKPOINT_PX ? PANEL_WIDTH_PX / 2 : 0;
-}
+/**
+ * How far a focus fit may retreat from its one-hop frame to take the LIT
+ * closure in with it. A click lights the standard's whole ancestry+descendant
+ * closure, which for a foundational standard is hundreds of nodes spread across
+ * the map: fitting only the one-hop frame (what shipped) parked the camera
+ * INSIDE that cloud with 93% of it off screen — the cascade played where nobody
+ * could see it. The retreat stops when the neighbourhood would fall below 1/2.2
+ * of the frame it fills alone OR below 12% of the frame's short axis, whichever
+ * leaves more room: a one-hop frame is small in absolute terms, so the ratio
+ * alone never let the camera out of the cloud.
+ */
+const FOCUS_CONTEXT_PULLBACK = 2.2;
+const FOCUS_MIN_SUBJECT_FRAC = 0.12;
 
 export interface FocusOpts {
   /** Skip the cascade + camera flight (deep links: instant reveal, camera cut). */
@@ -244,71 +256,70 @@ export interface Machine {
   edgesOfNode(nodeIndex: number): readonly number[];
 }
 
-// Bounding sphere of a set of node indices, read from CURRENT instance positions
-// (so framing stays correct after a dual-pose morph). The min radius keeps a lone
-// or tightly-clustered target from filling the frame. Exported so the story
-// player can frame a resolved selector union with exactly the machine's logic
-// (rather than copying it). `minRadius` mirrors the focus framing default.
-export function nodeBoundingSphere(
-  nodes: PositionSource,
-  indices: number[],
-  minRadius = 90,
-): THREE.Sphere {
-  const box = new THREE.Box3();
-  const v = new THREE.Vector3();
-  for (const i of indices) box.expandByPoint(nodes.getPosition(i, v));
-  const sphere = new THREE.Sphere();
-  box.getBoundingSphere(sphere);
-  sphere.radius = Math.max(sphere.radius, minRadius);
-  return sphere;
-}
-
 /** The one thing the framing helpers need from the nodes mesh (so they unit-test). */
 export type PositionSource = Pick<NodesHandle, "getPosition">;
 
 /**
- * Bounding sphere of a node set with its OUTLIERS DROPPED: the centroid is
- * computed over every index, the ceil(trim × n) points farthest from it are
- * discarded, and the rest are sphered exactly as nodeBoundingSphere does.
+ * The same set as a BOX, which is what the framing primitive wants.
  *
- * Why: a story camera that fits a large selector (a grade band, an ancestry
- * closure) is otherwise sized by its two most distant strays — one isolated
- * halo-ring standard on the far edge doubles the radius and the scene reads
- * "very zoomed out" while the subject the card narrates shrinks to dust. The
- * bleed past the frame is deliberate (the wave washing past is the drama); the
- * FIT should follow the mass, not the tail.
+ * Why not a sphere: these layouts are flat slabs. Grades K–2 in the Ascent pose
+ * measure 216 × 91 × 244 world units, so their bounding sphere has radius 169 —
+ * a 338-unit cube. Framing that cube instead of the slab pushed the camera back
+ * far enough that the band filled a fifth of the frame (the "27% of width"
+ * framings), because the DEPTH axis, which the camera cannot see, was setting
+ * the on-screen size. A box carries each axis separately, so the fit is sized by
+ * what is actually across the screen.
  *
- * A dropped node is still lit and still on screen more often than not — the
- * sphere is padded 1.35× by the rig before the fit. Pure over the position
- * source, so it is unit-tested without a GPU.
+ * `trim` drops the ceil(trim × n) points farthest from the centroid, exactly as
+ * the fits have always used (0 keeps every point); `minExtent` floors each axis
+ * so a lone standard still lands in a legible local context.
  */
-export function trimmedBoundingSphere(
+export function nodeBoundingBox(
   nodes: PositionSource,
   indices: number[],
-  trim = 0.1,
-  minRadius = 90,
-): THREE.Sphere {
-  if (indices.length === 0) return new THREE.Sphere(new THREE.Vector3(), minRadius);
+  trim = 0,
+  minExtent = 180,
+): THREE.Box3 {
+  const box = new THREE.Box3();
   const scratch = new THREE.Vector3();
   const pts = indices.map((i) => nodes.getPosition(i, scratch).clone());
-  const centroid = new THREE.Vector3();
-  for (const p of pts) centroid.add(p);
-  centroid.divideScalar(pts.length);
-  const drop = Math.min(Math.ceil(trim * pts.length), pts.length - 1);
-  const keep =
-    drop <= 0
-      ? pts
-      : pts
-          .map((p) => ({ p, d: p.distanceToSquared(centroid) }))
-          .sort((a, b) => a.d - b.d)
-          .slice(0, pts.length - drop)
-          .map((e) => e.p);
-  const box = new THREE.Box3();
+  let keep = pts;
+  const drop = pts.length ? Math.min(Math.ceil(trim * pts.length), pts.length - 1) : 0;
+  if (drop > 0) {
+    const centroid = new THREE.Vector3();
+    for (const p of pts) centroid.add(p);
+    centroid.divideScalar(pts.length);
+    keep = pts
+      .map((p) => ({ p, d: p.distanceToSquared(centroid) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, pts.length - drop)
+      .map((e) => e.p);
+  }
   for (const p of keep) box.expandByPoint(p);
-  const sphere = new THREE.Sphere();
-  box.getBoundingSphere(sphere);
-  sphere.radius = Math.max(sphere.radius, minRadius);
-  return sphere;
+  if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(), scratch.set(1, 1, 1));
+  return floorBoxSize(box, minExtent);
+}
+
+/**
+ * Floor a fit box's SIZE without changing its shape: if its longest axis is
+ * shorter than `minExtent` the whole box is scaled up about its centre (a lone
+ * standard still lands in a legible local context instead of being dived on top
+ * of). Per-AXIS flooring would be wrong — it inflates a flat band's thin axis
+ * and hands the fit to an extent the reader cannot see, which is exactly how a
+ * three-grade band ended up filling a third of the frame.
+ */
+export function floorBoxSize(box: THREE.Box3, minExtent: number): THREE.Box3 {
+  const c = box.getCenter(new THREE.Vector3());
+  const s = box.getSize(new THREE.Vector3());
+  const longest = Math.max(s.x, s.y, s.z);
+  const k = longest > 1e-6 ? Math.max(1, minExtent / longest) : 0;
+  const h =
+    k === 0
+      ? new THREE.Vector3(minExtent / 2, minExtent / 2, minExtent / 2)
+      : new THREE.Vector3((s.x * k) / 2, (s.y * k) / 2, (s.z * k) / 2);
+  box.min.copy(c).sub(h);
+  box.max.copy(c).add(h);
+  return box;
 }
 
 /** The direct connections of a focused standard after family roll-up. */
@@ -513,6 +524,9 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   let curEdgeOv = new Map<number, Emphasis>();
   let lastNeighborhood: number[] = []; // one-hop directed set, for pose-morph reframing
   let lastRelated: number[] = []; // related pairs: widen the fit only up to the cap
+  // The full lit closure of the current focus, as the composition CONTEXT of
+  // every one-hop fit (fresh, hop, dive, reframe). Null when nothing is focused.
+  let lastClosureBox: THREE.Box3 | null = null;
   let revealTimers: number[] = [];
 
   function clearRevealTimers(): void {
@@ -552,22 +566,31 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       if (token === cameraToken) rig.controls.smoothTime = baseSmoothTime;
     });
   }
-  // The compact one-hop fit (a sphere reads fine for a tight neighbourhood).
-  function flyTo(sphere: THREE.Sphere, offset: number, mode: FlyMode): void {
-    fly(mode, (t) => rig.focusOn(sphere, t, offset));
+  // The compact one-hop fit (a sphere reads fine for a tight neighbourhood),
+  // composed against the lit closure so the camera never ends up inside it.
+  function flyTo(box: THREE.Box3, context: THREE.Box3 | null, mode: FlyMode): void {
+    fly(mode, (t) =>
+      rig.frameSubject(box, {
+        transition: t,
+        context,
+        contextPullback: FOCUS_CONTEXT_PULLBACK,
+        minSubjectFrac: FOCUS_MIN_SUBJECT_FRAC,
+      }),
+    );
   }
   // The wide closure fit: a Box3 of the actual extents (a bounding sphere would
-  // push the camera far back for the elongated grade-band closures).
-  function flyToBox(box: THREE.Box3, offset: number, mode: FlyMode): void {
-    fly(mode, (t) => rig.focusOnBox(box, t, offset, JOURNEY_PAD_FRAC));
+  // push the camera far back for the elongated grade-band closures). The closure
+  // IS the subject here, so it must land inside the frame outright.
+  function flyToBox(box: THREE.Box3, mode: FlyMode): void {
+    fly(mode, (t) => rig.frameSubject(box, { transition: t, snapToAxis: true }));
   }
   // Hold the current (wide) view, then dive in to the one-hop frame — the
   // fresh-focus signature move.
-  function scheduleDive(sphere: THREE.Sphere, offset: number): void {
+  function scheduleDive(box: THREE.Box3, context: THREE.Box3 | null): void {
     clearDiveTimer();
     diveTimer = window.setTimeout(() => {
       diveTimer = null;
-      flyTo(sphere, offset, "moderate");
+      flyTo(box, context, "moderate");
     }, DIVE_DELAY_MS);
   }
 
@@ -756,37 +779,41 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     return [...base, ...m.ancestors, ...m.descendants];
   }
 
-  // Sphere CENTERED on one node, radius reaching the farthest of its neighbors:
-  // the focus fit uses this so the CLICKED standard lands dead center (then the
-  // panel offset shifts it to the center of the visible region) instead of
-  // drifting to the neighborhood's centroid, which sat off toward the heavier
-  // side of its connections and read as a random shift.
+  // Box CENTERED on one node, reaching the farthest of its neighbors on each
+  // axis: the focus fit uses this so the CLICKED standard lands dead center
+  // instead of drifting to the neighborhood's centroid, which sat off toward the
+  // heavier side of its connections and read as a random shift.
+  //
+  // Per-AXIS (it was a sphere): these layouts are flat slabs, so a sphere sized
+  // by a deep neighbour zoomed the camera out for depth the reader cannot see.
   //
   // Zoom consistency: the DIRECTED neighborhood (builds-on / leads-to / parts)
   // always fits — that is the lineage the click promises. RELATED pairs only
-  // widen the frame up to 1.6× the directed radius; a related standard across
+  // widen the frame up to 1.6× the directed reach; a related standard across
   // the map stays lit and listed in the panel but no longer yanks the camera
   // out to a wide shot (the old behavior read as arbitrary zoom-in/zoom-out).
-  const sphereAround = (
-    centerIdx: number,
-    directed: number[],
-    related: number[] = [],
-  ): THREE.Sphere => {
+  const boxAround = (centerIdx: number, directed: number[], related: number[] = []): THREE.Box3 => {
     const c = new THREE.Vector3();
     nodes.getPosition(centerIdx, c);
     const v = new THREE.Vector3();
-    let rDir = 0;
-    for (const i of directed) rDir = Math.max(rDir, c.distanceTo(nodes.getPosition(i, v)));
-    let rRel = 0;
-    for (const i of related) rRel = Math.max(rRel, c.distanceTo(nodes.getPosition(i, v)));
-    const r = Math.max(rDir, Math.min(rRel, rDir * 1.6));
-    return new THREE.Sphere(c.clone(), Math.max(r, 40));
+    const dir = new THREE.Vector3();
+    const rel = new THREE.Vector3();
+    for (const i of directed) {
+      nodes.getPosition(i, v).sub(c);
+      dir.set(Math.max(dir.x, Math.abs(v.x)), Math.max(dir.y, Math.abs(v.y)), Math.max(dir.z, Math.abs(v.z)));
+    }
+    for (const i of related) {
+      nodes.getPosition(i, v).sub(c);
+      rel.set(Math.max(rel.x, Math.abs(v.x)), Math.max(rel.y, Math.abs(v.y)), Math.max(rel.z, Math.abs(v.z)));
+    }
+    const half = new THREE.Vector3(
+      Math.max(dir.x, Math.min(rel.x, dir.x * 1.6)),
+      Math.max(dir.y, Math.min(rel.y, dir.y * 1.6)),
+      Math.max(dir.z, Math.min(rel.z, dir.z * 1.6)),
+    );
+    // A standard with no mapped connections still gets a legible local frame.
+    return floorBoxSize(new THREE.Box3(c.clone().sub(half), c.clone().add(half)), MIN_FIT_EXTENT);
   };
-
-  // Bounding sphere of a set of node indices (see nodeBoundingSphere). Keeps a
-  // lone or tightly-clustered focus from filling the frame — a standard with no
-  // mapped connections still lands in a legible local context.
-  const sphereOf = (indices: number[]): THREE.Sphere => nodeBoundingSphere(nodes, indices);
 
   // Box3 of a set of node indices, from live positions (correct after a pose
   // morph). Grown by the orb margin so lit nodes are not clipped at the frame
@@ -975,27 +1002,34 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     const directed = [nodeIndex, ...model.familyLit, ...model.buildsOn, ...model.leadsTo];
     lastNeighborhood = directed; // reframe() replays this fit after a morph
     lastRelated = [...model.related];
-    const oneHop = sphereAround(nodeIndex, directed, lastRelated);
-    const offset = silentFocus ? 0 : focusPanelOffsetPx();
+    const oneHop = boxAround(nodeIndex, directed, lastRelated);
+    // What the click LIGHTS (the full closure) is the composition's context, so
+    // the frame centres its weight instead of sitting inside it.
+    lastClosureBox = boxOf(journeyFitSet(model, "both"));
+
+    // The panel opens BEFORE the camera flies, so the fit composes against the
+    // rect the panel leaves rather than the whole viewport (it slides in over
+    // 280ms; the framing must already know it is coming).
+    if (!silentFocus) panel.show(nodeIndex, connectionsFor(model));
 
     if (silentFocus) {
       // The story owns the camera (applyCamera overrides right after). Fit the
       // one-hop frame immediately, no expanse-beat dive.
-      flyTo(oneHop, offset, cut ? "instant" : "normal");
+      flyTo(oneHop, lastClosureBox, cut ? "instant" : "normal");
     } else {
       const move = decideFocusCamera(reducedMotion, opts?.instant === true, hadFocus, priorFraming);
-      if (move === "cut") flyTo(oneHop, offset, "instant");
+      if (move === "cut") flyTo(oneHop, lastClosureBox, "instant");
       // A lateral pan, no dive — but at the MODERATE damping, not the base one.
       // The base damping's ~0.25s reads smooth over Constellation's small moves
       // yet as an abrupt cut over the Ascent massif's far larger translations;
       // moderate keeps every pose's pans legible.
-      else if (move === "hop") flyTo(oneHop, offset, "moderate");
-      else scheduleDive(oneHop, offset); // fresh focus: hold the expanse, then dive in
+      else if (move === "hop") flyTo(oneHop, lastClosureBox, "moderate");
+      else scheduleDive(oneHop, lastClosureBox); // fresh focus: hold the expanse, then dive in
     }
 
-    // Panel + narration + deep link — all owned by the story card while silent.
+    // Narration + deep link — all owned by the story card while silent (the
+    // panel itself opened above, ahead of the camera).
     if (!silentFocus) {
-      panel.show(nodeIndex, connectionsFor(model));
       const partsNote =
         model.rolledUp && partsOf[nodeIndex].length
           ? `, ${partsOf[nodeIndex].length} sub-standards`
@@ -1063,11 +1097,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     revealLighting(lit, true);
     pushFilterOverride(lit); // the filter override tracks the narrowed lit set
     if (!silentFocus)
-      flyToBox(
-        boxOf(journeyFitSet(focusModel, dir)),
-        focusPanelOffsetPx(),
-        reducedMotion ? "instant" : "moderate",
-      );
+      flyToBox(boxOf(journeyFitSet(focusModel, dir)), reducedMotion ? "instant" : "moderate");
     if (!silentFocus) {
       if (wasLocal) {
         panel.showJourney(dir, focusModel.ancestors, focusModel.descendants);
@@ -1101,8 +1131,8 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     pushFilterOverride(lit); // full closure lit again → override the full set
     if (!silentFocus)
       flyTo(
-        sphereAround(focusIndex, lastNeighborhood, lastRelated),
-        focusPanelOffsetPx(),
+        boxAround(focusIndex, lastNeighborhood, lastRelated),
+        lastClosureBox,
         reducedMotion ? "instant" : "moderate",
       );
     if (!silentFocus) {
@@ -1133,9 +1163,11 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     // stands in for the lost hold+dive rather than warping to the standard.
     const mode: FlyMode = reducedMotion ? "instant" : "moderate";
     if (stage === "journey") {
-      flyToBox(boxOf(journeyFitSet(focusModel, journeyDirection)), focusPanelOffsetPx(), mode);
+      flyToBox(boxOf(journeyFitSet(focusModel, journeyDirection)), mode);
     } else {
-      flyTo(sphereAround(focusIndex, lastNeighborhood, lastRelated), focusPanelOffsetPx(), mode);
+      // The closure moved with the pose too, so re-read it as the context.
+      lastClosureBox = boxOf(journeyFitSet(focusModel, "both"));
+      flyTo(boxAround(focusIndex, lastNeighborhood, lastRelated), lastClosureBox, mode);
     }
     requestRender();
   }
@@ -1156,14 +1188,17 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     silentFocus = false;
     lastNeighborhood = [];
     lastRelated = [];
+    lastClosureBox = null;
     tooltip.hide();
     canvas.style.cursor = "";
     deps.setFocusRing?.(null); // retire the focus marker
     deps.setFilterOverride?.(null); // the filter's own view returns exactly
     applyEmphasis({ baseNode: EMPHASIS.REST, baseEdge: EMPHASIS.REST });
     panel.hide();
-    // The panel is gone — slide the framed content back to center.
-    rig.clearFocalOffset(!reducedMotion);
+    // The panel is gone: the usable rect just got 480px wider, so re-solve the
+    // composition against it (same distance, same subject) instead of blanket-
+    // sliding the content back to the raw viewport centre.
+    rig.recompose(!reducedMotion);
     // Stories own the hash; a silent clear (between scenes / on exit) leaves it.
     if (!opts?.silent) updateHash(null);
     requestRender();

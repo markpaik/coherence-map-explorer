@@ -713,24 +713,8 @@ function start(graph: GraphCore): void {
     minDpr: MIN_PIXEL_RATIO,
   });
 
-  // The fixed bottom chrome (filter rail + formation switcher) measured from the
-  // DOM, so the framing reserves it instead of composing the scene floor + etch
-  // markers behind the buttons. Measuring (not hard-coding) tracks the ≤720px
-  // collapse where the rail becomes a pill. A display:none element yields a 0
-  // rect and is skipped, so a hidden chrome reserves nothing.
-  function measureBottomInset(): number {
-    let top = window.innerHeight;
-    for (const sel of [".filters-rail", ".view-toggle"]) {
-      const el = document.querySelector(sel);
-      if (!(el instanceof HTMLElement)) continue;
-      const r = el.getBoundingClientRect();
-      if (r.height <= 0 || r.width <= 0) continue; // hidden
-      if (r.bottom < window.innerHeight * 0.5) continue; // not bottom chrome
-      top = Math.min(top, r.top);
-    }
-    const band = window.innerHeight - top;
-    return band > 0 ? Math.min(band, window.innerHeight * 0.3) : 0; // clamp defensively
-  }
+  // (The bottom chrome band is measured by the camera rig itself now, at every
+  // fit — see scene/frame.ts measureChrome. One place, always current.)
 
   // -- sizing ------------------------------------------------------------
   // The actual resize is expensive (reallocates every postprocessing buffer),
@@ -742,7 +726,9 @@ function start(graph: GraphCore): void {
     renderer.setPixelRatio(dpr);
     bloom.setSize(w, h); // composer sizes the renderer + all buffers
     rig.setAspect(w / h);
-    rig.setBottomInsetPx(measureBottomInset()); // reserve the bottom chrome band
+    // The usable rect just changed shape: re-solve the current framing against
+    // it (no refit, no zoom change) so a resize never leaves content half off.
+    rig.recompose(false);
     edges.setViewport(w * dpr, h * dpr, dpr);
     stars.setPixelRatio(dpr);
     requestRender();
@@ -831,12 +817,27 @@ function start(graph: GraphCore): void {
   if (debug) {
     // Test/debug hook (?debug=1 only): lets automation find a node on screen
     // and exercise the real pointer pipeline.
+    const _screenPosScratch = new THREE.Vector3();
     (window as unknown as Record<string, unknown>).__cme = {
+      // Where a standard actually is on screen, in CSS px, or null when it is
+      // not in front of the camera. Two things this must get right, because the
+      // camera-composition harness measures with it:
+      //   1. LIVE position (nodes.getPosition), not graph.nodes[i].pos — the
+      //      latter is the frozen pose-0 (Constellation) coordinate, so during
+      //      a story (pose 1 Ascent) it reported where the node WOULD be in a
+      //      pose that is not on screen.
+      //   2. A view-space depth guard. Vector3.project() divides by w = −z_view,
+      //      so a point at or behind the near plane projects to garbage (a huge
+      //      or mirrored coordinate) rather than to null; z_ndc > 1 catches only
+      //      part of that. Test the view-space depth directly instead.
       screenPos(code: string): [number, number] | null {
-        const n = graph.nodes.find((node) => node.code === code);
-        if (!n) return null;
-        const p = new THREE.Vector3(n.pos[0], n.pos[1], n.pos[2]).project(rig.camera);
-        if (p.z > 1) return null; // behind camera
+        const i = graph.nodes.findIndex((node) => node.code === code);
+        if (i < 0) return null;
+        const p = nodes.getPosition(i, _screenPosScratch);
+        rig.camera.updateMatrixWorld();
+        p.applyMatrix4(rig.camera.matrixWorldInverse); // → view space (camera looks down −z)
+        if (-p.z <= rig.camera.near) return null; // at/behind the near plane
+        p.applyMatrix4(rig.camera.projectionMatrix); // perspective divide included
         return [((p.x + 1) / 2) * window.innerWidth, ((1 - p.y) / 2) * window.innerHeight];
       },
       canvas,

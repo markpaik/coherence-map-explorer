@@ -2,10 +2,25 @@
 // idle drift that pauses on interaction and resumes after 20s idle. The drift
 // is a gentle ±18° azimuth OSCILLATION (sinusoidal, full cycle ≈ 90s) rather
 // than a full orbit, so the left→right K→HS narrative never swings edge-on.
-// Exposes focusOn(sphere) for Phase 3's focus flights.
+//
+// Every framing — home, focus, journey, a story scene — goes through ONE
+// primitive, frameSubject (scene/frame.ts): fit the subject, then compose it
+// into the USABLE RECT (the viewport minus the live chrome) with the lit context
+// centred. The old blanket screen-space nudges (frame shift / frame lift /
+// bottom inset / panel offset) are gone: they pushed in opposite directions,
+// nothing checked the result landed on screen, and the lift carried the wrong
+// sign — which is why stories drifted right and down and focus clicks clipped
+// off the left edge.
 
 import * as THREE from "three";
 import CameraControls from "camera-controls";
+import {
+  compositionBias,
+  computeUsableRect,
+  measureChrome,
+  solveFrame,
+  type FrameSolution,
+} from "./frame";
 
 CameraControls.install({ THREE });
 
@@ -13,14 +28,33 @@ const DRIFT_AMPLITUDE_RAD = (18 * Math.PI) / 180; // ±18° sway
 const DRIFT_PERIOD_S = 90; // seconds per full oscillation
 const IDLE_RESUME_MS = 20_000;
 
-// Home framing composes the fitted formation's vertical CENTER into the middle
-// of the USABLE band = viewport height − the bottom chrome inset (setBottomInsetPx)
-// − this top strip reserved for the headline. The wordmark block is ~260px tall
-// but only spans the left half, so a modest strip (not the full headline height)
-// keeps the top-center/right free for the formation to rise into. The plain
-// bottom-inset lift (applyPanelOffset) only clears the chrome, which still left
-// the mass hugging the bottom; centering in this band raises it properly.
-const HOME_TOP_MARGIN_PX = 100;
+/** A subject box thinner than this on any axis is grown to it before fitting. */
+const MIN_SUBJECT_EXTENT = 24;
+
+export interface FrameOpts {
+  /** false cuts instantly (reduced motion, deep links). Default true. */
+  transition?: boolean;
+  /**
+   * The wider LIT set the subject sits in. Its weight is centred in the usable
+   * rect; it may bleed past the frame edges by design. The fit retreats up to
+   * `contextPullback` × the subject fit to take it in.
+   */
+  context?: THREE.Box3 | null;
+  /** How far the fit may retreat to admit the context (1 = never). */
+  contextPullback?: number;
+  /**
+   * The retreat's other allowance: the subject may shrink until its longest
+   * projected axis is this fraction of the rect's short axis. Whichever of the
+   * two allows more retreat wins (see scene/frame.ts).
+   */
+  minSubjectFrac?: number;
+  /**
+   * Snap the view to the nearest axis before fitting (what camera-controls'
+   * fitToBox does). The wide framings — home and the journey closure — always
+   * have; a focus hop or a story scene keeps the reader's current orientation.
+   */
+  snapToAxis?: boolean;
+}
 
 export interface CameraRig {
   camera: THREE.PerspectiveCamera;
@@ -33,26 +67,12 @@ export interface CameraRig {
    */
   update(deltaSeconds: number, driftSuspended?: boolean): boolean;
   /**
-   * Smooth flight to frame a neighborhood. transition=false cuts instantly.
-   * panelOffsetPx shifts the framed target LEFT of center by that many CSS px
-   * (converted to world units at the fitted distance) so an open right-side
-   * panel doesn't sit on top of the focus — 0 clears any prior offset.
+   * THE framing primitive. `subject` must land fully inside the usable rect;
+   * `opts.context` is the wider lit set whose weight gets centred. Everything
+   * else here is a caller of this.
    */
-  focusOn(sphere: THREE.Sphere, transition?: boolean, panelOffsetPx?: number): Promise<void>;
-  /**
-   * Tight flight to frame a Box3's actual extents (camera-controls fitToBox),
-   * padded by `padFrac` of each axis so an ELONGATED closure (a wide flat band
-   * across grades) fills the frame instead of being pushed far back by a
-   * bounding sphere's half-diagonal. transition=false cuts. panelOffsetPx shifts
-   * as in focusOn.
-   */
-  focusOnBox(
-    box: THREE.Box3,
-    transition?: boolean,
-    panelOffsetPx?: number,
-    padFrac?: number,
-  ): Promise<void>;
-  /** Return to the heroic landing framing and clear any panel focal offset. */
+  frameSubject(subject: THREE.Box3, opts?: FrameOpts): Promise<void>;
+  /** Return to the heroic landing framing. */
   frameHome(transition?: boolean): void;
   /**
    * Frame the current home bounds head-on: azimuth 0, polar π/2, so a flat plane
@@ -60,12 +80,18 @@ export interface CameraRig {
    */
   frameHomeFrontOn(transition?: boolean): void;
   /**
+   * Re-solve the CURRENT framing against the chrome as it is now — the panel
+   * closed, the window resized, a story card appeared. Distance and subject are
+   * unchanged; only the composition moves.
+   */
+  recompose(transition?: boolean): void;
+  /**
    * Swap the "home" cloud bounds (called after a pose morph) so frameHome and
    * the tour's wide shots refit to whichever pose is now on screen. Also rescales
    * the dolly min/max distance to the new cloud radius.
    */
   setHomeBounds(box: THREE.Box3, sphere: THREE.Sphere): void;
-  /** Clear the panel focal offset (used when the panel closes with no reframe). */
+  /** Zero the composition offset (the story surface contract's reset). */
   clearFocalOffset(transition?: boolean): void;
   setDriftEnabled(on: boolean): void;
   /**
@@ -75,31 +101,6 @@ export interface CameraRig {
    */
   setDriftScale(scale: number): void;
   /**
-   * Persistent vertical frame bias in CSS px: the framed content rides UP by
-   * this much on every subsequent fit. Stories on phones set ~17% of the
-   * viewport so the card doesn't cover the model; 0 restores.
-   */
-  setFrameLiftPx(px: number): void;
-  /**
-   * Persistent HORIZONTAL frame bias in CSS px: the framed content rides RIGHT
-   * by this much on every subsequent fit (negative rides left). The mirror of
-   * setFrameLiftPx, and the story card's counterpart to the panel offset the
-   * machine passes per-flight: the card sits bottom-LEFT on desktop, so a story
-   * biases its subject into the clear region right of it. 0 restores.
-   *
-   * Unlike focusOn's per-call panelOffsetPx this is PERSISTENT, so it also
-   * applies to the wide frameHome fits a "fit: all" scene makes.
-   */
-  setFrameShiftPx(px: number): void;
-  /**
-   * Bottom safe-area inset in CSS px: the fixed bottom chrome (filter rail +
-   * formation switcher). Every fit lifts the framed content UP by this much so
-   * the scene floor (grade / course etch markers) composes ABOVE the buttons
-   * instead of behind them. Measured from the DOM at resize (it differs when the
-   * filters collapse to a pill ≤720px). Composes with setFrameLiftPx.
-   */
-  setBottomInsetPx(px: number): void;
-  /**
    * Clear the idle-resume timer so drift may run on the very next unsuspended
    * frame (skipping the 20s post-interaction grace). Used when a story scene
    * settles into a hold: the constellation should breathe immediately, not 20s
@@ -108,7 +109,22 @@ export interface CameraRig {
    */
   resumeDriftNow(): void;
   setAspect(aspect: number): void;
+  /** The last composition solve (debug/automation only). */
+  lastComposition(): FrameSolution | null;
   dispose(): void;
+}
+
+/** A box that is safe to fit: never zero-extent on any axis. */
+function inflate(box: THREE.Box3, out: THREE.Box3): THREE.Box3 {
+  out.copy(box);
+  const c = out.getCenter(new THREE.Vector3());
+  const s = out.getSize(new THREE.Vector3());
+  const hx = Math.max(s.x, MIN_SUBJECT_EXTENT) / 2;
+  const hy = Math.max(s.y, MIN_SUBJECT_EXTENT) / 2;
+  const hz = Math.max(s.z, MIN_SUBJECT_EXTENT) / 2;
+  out.min.set(c.x - hx, c.y - hy, c.z - hz);
+  out.max.set(c.x + hx, c.y + hy, c.z + hz);
+  return out;
 }
 
 export function createCameraRig(
@@ -137,116 +153,79 @@ export function createCameraRig(
   controls.smoothTime = 0.25;
   controls.draggingSmoothTime = 0.12;
 
-  // Initial framing: heroic 3/4 view — slightly right of straight-on,
-  // slightly above the plane — then fit the cloud's BOX from that direction
-  // (fitToSphere over-shoots badly on this wide flat layout: the sphere is
-  // dominated by the x-extent, leaving the cloud small in frame).
-  function frameHome(transition = false): void {
-    void controls.rotateTo(0.42, Math.PI / 2 - 0.22, transition);
-    void controls.fitToBox(homeBox, transition, {
-      paddingTop: 30,
-      paddingBottom: 80, // breathing room above the search rail + grade etches
-      paddingLeft: 40,
-      paddingRight: 40,
+  const _pos = new THREE.Vector3();
+  const _tgt = new THREE.Vector3();
+  const _center = new THREE.Vector3();
+
+  // The framing currently on screen, so the composition can be re-solved when
+  // the chrome changes (panel closes, window resizes) without refitting.
+  let current: {
+    subject: THREE.Box3;
+    context: THREE.Box3 | null;
+    pullback: number;
+    minSubjectFrac: number;
+  } | null = null;
+  let lastSolution: FrameSolution | null = null;
+
+  // Compose the CURRENT framing into the usable rect. Runs off the fit's END
+  // values, so it composes with an in-flight transition rather than cutting it.
+  function compose(transition: boolean): void {
+    if (!current) return;
+    controls.getPosition(_pos, true);
+    controls.getTarget(_tgt, true);
+    const chrome = measureChrome();
+    lastSolution = solveFrame({
+      fovDeg: camera.fov,
+      viewportWidth: chrome.viewportWidth,
+      viewportHeight: chrome.viewportHeight,
+      rect: computeUsableRect(chrome),
+      bias: compositionBias(chrome),
+      eye: _pos,
+      target: _tgt,
+      subject: current.subject,
+      context: current.context,
+      maxPullback: current.pullback,
+      minSubjectFrac: current.minSubjectFrac,
+      minDistance: controls.minDistance,
+      maxDistance: controls.maxDistance,
     });
-    // AFTER the fit so the centering is computed at the new fitted distance.
-    applyHomeComposition(transition);
+    void controls.dollyTo(lastSolution.distance, transition);
+    void controls.setFocalOffset(lastSolution.offsetX, lastSolution.offsetY, 0, transition);
+  }
+
+  async function frameSubject(subject: THREE.Box3, o: FrameOpts = {}): Promise<void> {
+    const transition = o.transition ?? true;
+    const box = inflate(subject, new THREE.Box3());
+    current = {
+      subject: box,
+      context: o.context && !o.context.isEmpty() ? o.context.clone() : null,
+      pullback: Math.max(1, o.contextPullback ?? 1),
+      minSubjectFrac: Math.max(0, o.minSubjectFrac ?? 0),
+    };
+    // The FIT decides orientation + what the camera looks at; the composition
+    // below decides the distance and where it lands in frame.
+    let done: Promise<unknown>;
+    if (o.snapToAxis) {
+      done = controls.fitToBox(box, transition);
+    } else {
+      box.getCenter(_center);
+      done = controls.moveTo(_center.x, _center.y, _center.z, transition);
+    }
+    compose(transition);
+    await done;
+  }
+
+  function frameHome(transition = false): void {
+    // Heroic 3/4 intent; fitToBox rounds the view to the nearest axis, which is
+    // the straight-on read this wide flat layout has always shipped with.
+    void controls.rotateTo(0.42, Math.PI / 2 - 0.22, transition);
+    void frameSubject(homeBox, { transition, snapToAxis: true });
   }
   // Head-on framing for the flat Blueprint pose: reset azimuth/polar to look
   // straight down the +z axis at the plane, then fit its box from that angle.
   function frameHomeFrontOn(transition = false): void {
     void controls.rotateTo(0, Math.PI / 2, transition);
-    void controls.fitToBox(homeBox, transition, {
-      paddingTop: 30,
-      paddingBottom: 80,
-      paddingLeft: 40,
-      paddingRight: 40,
-    });
-    applyHomeComposition(transition);
-  }
-
-  // Convert a screen-space nudge (CSS px) at the current fitted distance into
-  // world units, then push the framed target LEFT of center via focalOffset.
-  const _pos = new THREE.Vector3();
-  const _tgt = new THREE.Vector3();
-  const _boxSize = new THREE.Vector3();
-  // Scratch for the home-centering composition (applyHomeComposition).
-  const _homeCenter = new THREE.Vector3();
-  const _fwd = new THREE.Vector3();
-  const _right = new THREE.Vector3();
-  const _camUp = new THREE.Vector3();
-  const _worldUp = new THREE.Vector3(0, 1, 0);
-  // A persistent vertical bias (CSS px): during stories on phones the card
-  // covers the lower ~40% of the screen, so the framed content rides UP by
-  // this much. 0 everywhere else. Applied by every fit (focusOn + frameHome).
-  let frameLiftPx = 0;
-  // Persistent horizontal bias (CSS px): the framed content rides RIGHT by this
-  // much. Stories on desktop set ~half the story card's right edge so the
-  // narrated subject composes clear of the bottom-left card; 0 everywhere else.
-  let frameShiftPx = 0;
-  // Bottom safe-area inset (the fixed bottom chrome height, CSS px); every fit
-  // lifts the framed content UP by this much so the scene floor + etch markers
-  // clear the filter rail + formation switcher. Composes with frameLiftPx.
-  let bottomInsetPx = 0;
-  function applyPanelOffset(panelOffsetPx: number, transition: boolean): void {
-    const lift = frameLiftPx + bottomInsetPx;
-    // +panelOffsetPx rides the content LEFT (clear of the right-side panel);
-    // +frameShiftPx rides it RIGHT (clear of the bottom-left story card). They
-    // are the same lever from opposite sides, so they simply subtract.
-    const shift = panelOffsetPx - frameShiftPx;
-    if (!shift && !lift) {
-      void controls.setFocalOffset(0, 0, 0, transition);
-      return;
-    }
-    controls.getPosition(_pos, true);
-    controls.getTarget(_tgt, true);
-    const distance = _pos.distanceTo(_tgt);
-    const worldPerPx =
-      (2 * distance * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(window.innerHeight, 1);
-    // +x focalOffset pans the camera right → the target rides to the LEFT.
-    // -y pans the camera down → the target rides UP (clear of the story card
-    // and the bottom chrome band).
-    void controls.setFocalOffset(shift * worldPerPx, -lift * worldPerPx, 0, transition);
-  }
-
-  // Home framing composition (both frameHome paths): place the fitted formation's
-  // vertical CENTER at the center of the usable band [HOME_TOP_MARGIN_PX, H −
-  // bottomInsetPx] instead of merely lifting by the chrome height. fitToBox lands
-  // this wide, front-lit cloud low in frame (its target sits below screen center
-  // from the 3/4 look), so a plain inset lift still read bottom-heavy; centering
-  // in the band raises it and clears the bottom chrome + grade etches by even more.
-  // Screen-space, via the same focalOffset lever as applyPanelOffset, off the fit's
-  // END values so it composes with an in-flight transition rather than cutting it.
-  function applyHomeComposition(transition: boolean): void {
-    controls.getPosition(_pos, true);
-    controls.getTarget(_tgt, true);
-    const distance = _pos.distanceTo(_tgt);
-    const H = Math.max(window.innerHeight, 1);
-    if (distance === 0) {
-      void controls.setFocalOffset(0, 0, 0, transition);
-      return;
-    }
-    const worldPerPx = (2 * distance * Math.tan((camera.fov * Math.PI) / 360)) / H;
-    // Camera up at the goal pose (world-up lookAt; camera-controls holds zero roll).
-    _fwd.copy(_tgt).sub(_pos).normalize();
-    _right.copy(_fwd).cross(_worldUp).normalize();
-    _camUp.copy(_right).cross(_fwd); // unit: right ⟂ fwd, both unit
-    // World-space vertical offset of the box center ABOVE the controls target
-    // (the target projects to screen center when focalOffset is 0).
-    homeBox.getCenter(_homeCenter);
-    const vOffWorld = _homeCenter.sub(_tgt).dot(_camUp);
-    // Center of the usable band, in CSS px from the top. frameLiftPx joins the
-    // bottom chrome here so a story's wide "fit: all" beats honour the same
-    // card clearance every focusOn fit already does (phones, where the card is
-    // bottom-full-width, are the case this matters for).
-    const bandCenter = (HOME_TOP_MARGIN_PX + (H - bottomInsetPx - frameLiftPx)) / 2;
-    // Solve for the y focalOffset that lands the box center at bandCenter:
-    //   boxScreenY = H/2 − vOffWorld/worldPerPx − focalY/worldPerPx  ⇒  set = bandCenter.
-    // (More-positive focalOffset.y rides the content UP by 1/worldPerPx px per unit.)
-    const focalY = (H / 2 - bandCenter) * worldPerPx - vOffWorld;
-    // The persistent horizontal story bias applies to the wide fits too, so a
-    // "fit: all" scene composes clear of the bottom-left card like every other.
-    void controls.setFocalOffset(-frameShiftPx * worldPerPx, focalY, 0, transition);
+    void frameSubject(homeBox, { transition, snapToAxis: true });
   }
 
   frameHome(false);
@@ -285,36 +264,15 @@ export function createCameraRig(
       const updated = controls.update(delta);
       return moved || updated;
     },
-    async focusOn(sphere, transition = true, panelOffsetPx = 0) {
-      const target = new THREE.Sphere(sphere.center.clone(), sphere.radius * 1.35);
-      // fitToSphere sets the goal synchronously; apply the panel offset off the
-      // fitted END values so both animate together rather than in two steps.
-      const done = controls.fitToSphere(target, transition);
-      applyPanelOffset(panelOffsetPx, transition);
-      await done;
-    },
-    async focusOnBox(box, transition = true, panelOffsetPx = 0, padFrac = 0.1) {
-      // Per-axis padding (world units) proportional to each side's own extent,
-      // so neither axis of an elongated closure is over-padded — the crop stays
-      // tight both ways. fitToBox rounds the view to the nearest axis; at the
-      // usual near-front orientation world x → horizontal, world y → vertical.
-      box.getSize(_boxSize);
-      const padX = _boxSize.x * padFrac;
-      const padY = _boxSize.y * padFrac;
-      const done = controls.fitToBox(box, transition, {
-        paddingLeft: padX,
-        paddingRight: padX,
-        paddingTop: padY,
-        paddingBottom: padY,
-      });
-      applyPanelOffset(panelOffsetPx, transition);
-      await done;
-    },
+    frameSubject,
     frameHome(transition = true) {
       frameHome(transition);
     },
     frameHomeFrontOn(transition = true) {
       frameHomeFrontOn(transition);
+    },
+    recompose(transition = true) {
+      compose(transition);
     },
     setHomeBounds(box, sphere) {
       homeBox = box.clone();
@@ -330,21 +288,15 @@ export function createCameraRig(
     setDriftScale(scale) {
       driftScale = scale;
     },
-    setFrameLiftPx(px) {
-      frameLiftPx = px;
-    },
-    setFrameShiftPx(px) {
-      frameShiftPx = px;
-    },
-    setBottomInsetPx(px) {
-      bottomInsetPx = px;
-    },
     resumeDriftNow() {
       lastInteraction = -Infinity;
     },
     setAspect(aspect) {
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
+    },
+    lastComposition() {
+      return lastSolution;
     },
     dispose() {
       controls.removeEventListener("controlstart", onInteract);
