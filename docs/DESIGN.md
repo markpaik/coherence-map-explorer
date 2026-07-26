@@ -187,8 +187,8 @@ noise, disabled with reduced-motion.
 ## Camera composition (one primitive, no blanket nudges)
 
 Every framing — home, focus, journey, a story scene — goes through
-`rig.frameSubject(subject, { context, contextPullback, minSubjectFrac,
-snapToAxis })` (`src/scene/frame.ts` + `src/scene/camera.ts`):
+`rig.frameSubject(subject, { context, contextPullback, snapToAxis })`
+(`src/scene/frame.ts` + `src/scene/camera.ts`):
 
 - **The usable rect** is the viewport minus the LIVE chrome, measured from the
   DOM at every fit: a modest top strip for the title block (its own bottom,
@@ -203,13 +203,14 @@ snapToAxis })` (`src/scene/frame.ts` + `src/scene/camera.ts`):
   BOXES, never bounding spheres: these layouts are flat slabs (grades K–2 in the
   Ascent measure 216 × 91 × 244), and a sphere hands the on-screen size to the
   depth axis the reader cannot see.
-- **The context** — the scene's lit set, or a focus's full lit closure — is what
-  gets CENTRED, unioned with the subject so a camera that leads half a step ahead
-  of its lit frontier splits the difference instead of shoving one of them to an
-  edge. The fit retreats to take the context in until either the subject would
-  drop below 1/`contextPullback` of the frame it fills alone or below
-  `minSubjectFrac` of the frame's short axis; past that the context bleeds, which
-  is the drama.
+- **The context** (stories: the scene's lit set) is what gets CENTRED, unioned
+  with the subject so a camera that leads half a step ahead of its lit frontier
+  splits the difference instead of shoving one of them to an edge. The fit
+  retreats to take the context in until the subject would drop below
+  1/`contextPullback` of the frame it fills alone; past that the context bleeds,
+  which is the drama. The two FOCUS stages pass no context at all — each frames
+  its own subject, because the camera is the only thing that separates them (see
+  the interaction grammar below).
 - **Occluders bias, they never evacuate.** The bottom-left story card earns a
   rightward nudge of ¼ its width (≤120px and ≤6% of the viewport); the subject
   then spans the frame with the card over its lower-left corner. Pushing the
@@ -233,7 +234,9 @@ full both-direction closure; the two "framings" are a CAMERA concern.
   the expanse registers (~750ms, once the ancestor waves have fired), then dives
   IN to the one-hop frame (the standard + family + builds-on / leads-to, related
   capped at 1.6x) at a moderate, legible speed. Constants `DIVE_DELAY_MS` /
-  `DIVE_SMOOTH_TIME` in `machine.ts`.
+  `DIVE_SMOOTH_TIME` in `machine.ts`. The one-hop set is the local frame's whole
+  SUBJECT: the closure lit around it may run off every edge, and that bleed is
+  the "you are here, inside something larger" read the click promises.
 - **A hop** — focusing a different standard while already zoomed on one (map
   click, panel connection, search pick) — flies straight to the new standard's
   one-hop frame: a lateral pan at comparable zoom, no wide excursion, no dive
@@ -244,9 +247,9 @@ full both-direction closure; the two "framings" are a CAMERA concern.
   reached by re-clicking the focused node or the panel's "Trace the full journey"
   button. It frames the closure's actual Box3 extents as the SUBJECT, so an
   elongated grade-band closure fills the frame tightly instead of being pushed far
-  back by its diagonal. The one-hop dive frames the neighbourhood with that same
-  closure as its composition CONTEXT, so a click on a foundational standard no
-  longer parks the camera inside the cloud it just lit. Re-clicking
+  back by its diagonal, and so the move OUT from the one-hop frame is plainly
+  perceptible (2–4x the framed distance on a closure-heavy standard). The
+  direction chips re-aim it at that direction's closure. Re-clicking
   the focused node toggles the camera between the one-hop and wide frames (no
   cascade replay, no hash change). Escape, the panel's ×, or a background click
   clear the focus entirely.

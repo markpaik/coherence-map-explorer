@@ -43,12 +43,6 @@ export interface FrameOpts {
   /** How far the fit may retreat to admit the context (1 = never). */
   contextPullback?: number;
   /**
-   * The retreat's other allowance: the subject may shrink until its longest
-   * projected axis is this fraction of the rect's short axis. Whichever of the
-   * two allows more retreat wins (see scene/frame.ts).
-   */
-  minSubjectFrac?: number;
-  /**
    * Snap the view to the nearest axis before fitting (what camera-controls'
    * fitToBox does). The wide framings — home and the journey closure — always
    * have; a focus hop or a story scene keeps the reader's current orientation.
@@ -159,12 +153,7 @@ export function createCameraRig(
 
   // The framing currently on screen, so the composition can be re-solved when
   // the chrome changes (panel closes, window resizes) without refitting.
-  let current: {
-    subject: THREE.Box3;
-    context: THREE.Box3 | null;
-    pullback: number;
-    minSubjectFrac: number;
-  } | null = null;
+  let current: { subject: THREE.Box3; context: THREE.Box3 | null; pullback: number } | null = null;
   let lastSolution: FrameSolution | null = null;
 
   // Compose the CURRENT framing into the usable rect. Runs off the fit's END
@@ -185,7 +174,6 @@ export function createCameraRig(
       subject: current.subject,
       context: current.context,
       maxPullback: current.pullback,
-      minSubjectFrac: current.minSubjectFrac,
       minDistance: controls.minDistance,
       maxDistance: controls.maxDistance,
     });
@@ -200,7 +188,6 @@ export function createCameraRig(
       subject: box,
       context: o.context && !o.context.isEmpty() ? o.context.clone() : null,
       pullback: Math.max(1, o.contextPullback ?? 1),
-      minSubjectFrac: Math.max(0, o.minSubjectFrac ?? 0),
     };
     // The FIT decides orientation + what the camera looks at; the composition
     // below decides the distance and where it lands in frame.

@@ -193,6 +193,18 @@ describe("solveFrame", () => {
     expect(inside(r, wide.subjectRect)).toBe(true);
   });
 
+  it("a stage that frames the closure is a PERCEPTIBLE move from one that frames the subject", () => {
+    // The two focus stages differ only by what they frame: local takes the
+    // one-hop neighbourhood as its subject and lets the closure bleed, journey
+    // takes the closure. Composing the closure into the local frame collapses
+    // them into the same shot and leaves "Trace the full journey" inert.
+    const oneHop = box(0, 0, 260, 180);
+    const closure = box(120, 0, 1600, 700);
+    const local = solve({ subject: oneHop });
+    const journey = solve({ subject: closure, target: closure.getCenter(new Vector3()) });
+    expect(journey.distance / local.distance).toBeGreaterThan(2);
+  });
+
   it("honours the dolly clamps", () => {
     const sol = solve({ minDistance: 5000, maxDistance: 6000 });
     expect(sol.distance).toBeGreaterThanOrEqual(5000);

@@ -177,20 +177,6 @@ export interface FrameSolveInput {
   margin?: number;
   /** How far the fit may retreat from the subject fit to admit the context. */
   maxPullback?: number;
-  /**
-   * The other way to say the same thing: the fit may also retreat until the
-   * SUBJECT's longest projected axis reaches this fraction of the rect's short
-   * axis. Whichever of the two allows the more generous retreat wins.
-   *
-   * Why both: a ratio is the right editorial rule when the subject is a real
-   * object (a story spine may not shrink past a share of the frame it would fill
-   * alone), and the wrong rule when the subject is a single standard — 2.2 × a
-   * tight one-hop fit is still a tight one-hop fit, which is how clicking a
-   * kindergarten standard used to park the camera inside a 228-node closure with
-   * 93% of it off screen. An absolute floor asks the question that actually
-   * matters there: is the thing you clicked still legible?
-   */
-  minSubjectFrac?: number;
   minDistance?: number;
   maxDistance?: number;
 }
@@ -346,15 +332,8 @@ export function solveFrame(input: FrameSolveInput): FrameSolution {
   const availH = rect.height * (1 - 2 * margin);
   let distance = distanceToFit(subject, availW, availH, k);
   if (context) {
-    const pullback = Math.max(1, input.maxPullback ?? 1);
-    const frac = input.minSubjectFrac ?? 0;
-    // The furthest the fit may go for the context's sake: the more generous of
-    // the ratio allowance and the legibility floor.
-    let limit = distance * pullback;
-    if (frac > 0) {
-      const floorPx = frac * Math.min(rect.width, rect.height);
-      limit = Math.max(limit, distanceToFit(subject, floorPx, floorPx, k));
-    }
+    // The furthest the fit may go for the context's sake.
+    const limit = distance * Math.max(1, input.maxPullback ?? 1);
     const dContext = distanceToFit(context, availW, availH, k);
     distance = Math.max(distance, Math.min(dContext, limit));
   }

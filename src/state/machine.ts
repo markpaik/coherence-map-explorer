@@ -110,18 +110,20 @@ export type MachineState =
   | "storying";
 
 /**
- * How far a focus fit may retreat from its one-hop frame to take the LIT
- * closure in with it. A click lights the standard's whole ancestry+descendant
- * closure, which for a foundational standard is hundreds of nodes spread across
- * the map: fitting only the one-hop frame (what shipped) parked the camera
- * INSIDE that cloud with 93% of it off screen — the cascade played where nobody
- * could see it. The retreat stops when the neighbourhood would fall below 1/2.2
- * of the frame it fills alone OR below 12% of the frame's short axis, whichever
- * leaves more room: a one-hop frame is small in absolute terms, so the ratio
- * alone never let the camera out of the cloud.
+ * The two focus stages are a CAMERA distinction, and the camera is the only
+ * thing that distinguishes them (lighting is always the full both-direction
+ * closure — see focus()). So each stage frames its own subject and nothing else:
+ *
+ *   LOCAL   subject = the standard + its DIRECT connections. Framed tightly —
+ *           the dive. The lit closure around it is allowed to run off every
+ *           edge; that bleed IS the "you are here, inside something larger"
+ *           read the click promises.
+ *   JOURNEY subject = the closure for the active direction, framed to contain
+ *           it. The pull-back, and a plainly perceptible camera move.
+ *
+ * Composing the closure into the LOCAL frame (as a context box) collapses the
+ * two into the same shot and leaves "Trace the full journey" visually inert.
  */
-const FOCUS_CONTEXT_PULLBACK = 2.2;
-const FOCUS_MIN_SUBJECT_FRAC = 0.12;
 
 export interface FocusOpts {
   /** Skip the cascade + camera flight (deep links: instant reveal, camera cut). */
@@ -524,9 +526,6 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   let curEdgeOv = new Map<number, Emphasis>();
   let lastNeighborhood: number[] = []; // one-hop directed set, for pose-morph reframing
   let lastRelated: number[] = []; // related pairs: widen the fit only up to the cap
-  // The full lit closure of the current focus, as the composition CONTEXT of
-  // every one-hop fit (fresh, hop, dive, reframe). Null when nothing is focused.
-  let lastClosureBox: THREE.Box3 | null = null;
   let revealTimers: number[] = [];
 
   function clearRevealTimers(): void {
@@ -566,17 +565,9 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
       if (token === cameraToken) rig.controls.smoothTime = baseSmoothTime;
     });
   }
-  // The compact one-hop fit (a sphere reads fine for a tight neighbourhood),
-  // composed against the lit closure so the camera never ends up inside it.
-  function flyTo(box: THREE.Box3, context: THREE.Box3 | null, mode: FlyMode): void {
-    fly(mode, (t) =>
-      rig.frameSubject(box, {
-        transition: t,
-        context,
-        contextPullback: FOCUS_CONTEXT_PULLBACK,
-        minSubjectFrac: FOCUS_MIN_SUBJECT_FRAC,
-      }),
-    );
+  // The compact one-hop fit: the dive's subject, composed into the usable rect.
+  function flyTo(box: THREE.Box3, mode: FlyMode): void {
+    fly(mode, (t) => rig.frameSubject(box, { transition: t }));
   }
   // The wide closure fit: a Box3 of the actual extents (a bounding sphere would
   // push the camera far back for the elongated grade-band closures). The closure
@@ -586,11 +577,11 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
   }
   // Hold the current (wide) view, then dive in to the one-hop frame — the
   // fresh-focus signature move.
-  function scheduleDive(box: THREE.Box3, context: THREE.Box3 | null): void {
+  function scheduleDive(box: THREE.Box3): void {
     clearDiveTimer();
     diveTimer = window.setTimeout(() => {
       diveTimer = null;
-      flyTo(box, context, "moderate");
+      flyTo(box, "moderate");
     }, DIVE_DELAY_MS);
   }
 
@@ -1003,9 +994,6 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     lastNeighborhood = directed; // reframe() replays this fit after a morph
     lastRelated = [...model.related];
     const oneHop = boxAround(nodeIndex, directed, lastRelated);
-    // What the click LIGHTS (the full closure) is the composition's context, so
-    // the frame centres its weight instead of sitting inside it.
-    lastClosureBox = boxOf(journeyFitSet(model, "both"));
 
     // The panel opens BEFORE the camera flies, so the fit composes against the
     // rect the panel leaves rather than the whole viewport (it slides in over
@@ -1015,16 +1003,16 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     if (silentFocus) {
       // The story owns the camera (applyCamera overrides right after). Fit the
       // one-hop frame immediately, no expanse-beat dive.
-      flyTo(oneHop, lastClosureBox, cut ? "instant" : "normal");
+      flyTo(oneHop, cut ? "instant" : "normal");
     } else {
       const move = decideFocusCamera(reducedMotion, opts?.instant === true, hadFocus, priorFraming);
-      if (move === "cut") flyTo(oneHop, lastClosureBox, "instant");
+      if (move === "cut") flyTo(oneHop, "instant");
       // A lateral pan, no dive — but at the MODERATE damping, not the base one.
       // The base damping's ~0.25s reads smooth over Constellation's small moves
       // yet as an abrupt cut over the Ascent massif's far larger translations;
       // moderate keeps every pose's pans legible.
-      else if (move === "hop") flyTo(oneHop, lastClosureBox, "moderate");
-      else scheduleDive(oneHop, lastClosureBox); // fresh focus: hold the expanse, then dive in
+      else if (move === "hop") flyTo(oneHop, "moderate");
+      else scheduleDive(oneHop); // fresh focus: hold the expanse, then dive in
     }
 
     // Narration + deep link — all owned by the story card while silent (the
@@ -1130,11 +1118,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     revealLighting(lit, true);
     pushFilterOverride(lit); // full closure lit again → override the full set
     if (!silentFocus)
-      flyTo(
-        boxAround(focusIndex, lastNeighborhood, lastRelated),
-        lastClosureBox,
-        reducedMotion ? "instant" : "moderate",
-      );
+      flyTo(boxAround(focusIndex, lastNeighborhood, lastRelated), reducedMotion ? "instant" : "moderate");
     if (!silentFocus) {
       panel.hideJourney();
       announce(`Zoomed in to ${graph.nodes[focusIndex].code} and its direct connections.`);
@@ -1165,9 +1149,7 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     if (stage === "journey") {
       flyToBox(boxOf(journeyFitSet(focusModel, journeyDirection)), mode);
     } else {
-      // The closure moved with the pose too, so re-read it as the context.
-      lastClosureBox = boxOf(journeyFitSet(focusModel, "both"));
-      flyTo(boxAround(focusIndex, lastNeighborhood, lastRelated), lastClosureBox, mode);
+      flyTo(boxAround(focusIndex, lastNeighborhood, lastRelated), mode);
     }
     requestRender();
   }
@@ -1188,7 +1170,6 @@ export function createMachine(graph: GraphCore, deps: MachineDeps): Machine {
     silentFocus = false;
     lastNeighborhood = [];
     lastRelated = [];
-    lastClosureBox = null;
     tooltip.hide();
     canvas.style.cursor = "";
     deps.setFocusRing?.(null); // retire the focus marker
