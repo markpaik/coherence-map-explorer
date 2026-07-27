@@ -37,6 +37,25 @@
   --line: #2a2848;
   --display: "Space Grotesk", system-ui, sans-serif;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* -- on-canvas control type scale ---------------------------------------
+     Every control that sits over the scene reads from these four sizes, so a
+     new button can't land on a fifth. They had drifted to eight (filter chips
+     11.5, formation segments 11, view segments 12 / 11 on mobile, year chips
+     13, scrubber pause 13, Filters pill 13, view caption 12.5, transit key
+     11.5), which is what made one band of chrome look like three.
+       --fs-btn        text buttons (Show me around, Back/Next/Exit, Trace, Filters)
+       --fs-chip       every small chip / segmented control
+       --fs-chip-touch the ≤720px bump, shared by chips and segments alike
+       --fs-label      uppercase label naming a control group (with --display, 600)
+       --fs-caption    the small caption sitting beside a control
+     Panel body copy, story card copy, and the Browse view keep their own
+     reading scales — this tier is chrome only. */
+  --fs-btn: 14px;
+  --fs-chip: 12px;
+  --fs-chip-touch: 13px;
+  --fs-label: 10px;
+  --fs-caption: 12px;
 }
 
 * {
@@ -246,7 +265,7 @@ body.art-fidenza .headline-art {
   border: 1px solid var(--line);
   border-radius: 12px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-btn);
   color: var(--ink-2);
   cursor: pointer;
   white-space: nowrap;
@@ -299,7 +318,7 @@ body.art-fidenza .headline-art {
   min-height: 44px; /* touch target */
   padding: 0 15px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-chip);
   letter-spacing: 0.01em;
   color: var(--ink-2);
   background: none;
@@ -333,7 +352,7 @@ body.art-fidenza .headline-art {
   max-width: min(90vw, 460px);
   padding: 7px 14px;
   text-align: center;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
   color: var(--ink);
   background: var(--surface);
@@ -365,7 +384,7 @@ body.art-fidenza .headline-art {
   max-width: min(92vw, 520px);
   padding: 6px 13px;
   text-align: center;
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
   color: var(--ink-2);
   background: var(--surface);
@@ -401,7 +420,7 @@ body.browsing .transit-key {
   min-height: 40px;
   padding: 0 16px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-chip);
   letter-spacing: 0.02em;
   color: var(--ink-2);
   background: var(--surface);
@@ -1173,7 +1192,7 @@ body.art-fidenza .ghost-btn:hover {
   padding: 11px 14px;
   font: inherit;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-btn);
   color: #0b0b18;
   background: linear-gradient(180deg, #b6a6ec, #8b5cf6);
   border: none;
@@ -1244,7 +1263,7 @@ body.art-fidenza .ghost-btn:hover {
   padding: 7px 6px;
   font: inherit;
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--fs-chip);
   color: var(--ink-2);
   background: transparent;
   border: none;
@@ -1471,7 +1490,7 @@ body.art-fidenza .ghost-btn:hover {
 }
 .filter-group-label {
   font-family: var(--display);
-  font-size: 10px;
+  font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1483,7 +1502,7 @@ body.art-fidenza .ghost-btn:hover {
   min-height: 26px;
   padding: 3px 9px;
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--fs-chip);
   border-radius: 20px;
   cursor: pointer;
   display: inline-flex;
@@ -1530,7 +1549,7 @@ body.art-fidenza .ghost-btn:hover {
   min-height: 34px;
   padding: 6px 14px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-btn);
   color: var(--ink);
   background: none;
   border: none;
@@ -1725,7 +1744,7 @@ body.art-fidenza .ghost-btn:hover {
   .filter-chip {
     min-height: 44px;
     padding: 6px 14px;
-    font-size: 13px;
+    font-size: var(--fs-chip-touch);
   }
 }
 
@@ -1775,7 +1794,7 @@ body.art-fidenza .ghost-btn:hover {
   }
   .view-seg {
     padding: 0 10px;
-    font-size: 11px;
+    font-size: var(--fs-chip-touch);
   }
   /* The art toggle + credit ride the same anchor + translateY stack as the pose
      toggle, so they follow it up to the mobile position (12px / 72–96px). Their
@@ -1904,7 +1923,7 @@ body.art-fidenza .ghost-btn:hover {
   min-height: 44px;
   padding: 0 16px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-btn);
   border-radius: 10px;
   cursor: pointer;
 }
@@ -2054,7 +2073,7 @@ body.touring #scene {
   min-height: 44px;
   padding: 0 16px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-btn);
   border-radius: 10px;
   cursor: pointer;
 }
@@ -2101,8 +2120,10 @@ body.touring #scene {
 }
 .formation-pick-label {
   margin-right: 4px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  font-family: var(--display);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
@@ -2110,7 +2131,7 @@ body.touring #scene {
   min-height: 34px; /* card-density touch target, matching the lose-a-year chips */
   padding: 0 10px;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-chip);
   letter-spacing: 0.01em;
   color: var(--ink-2);
   background: none;
@@ -2192,7 +2213,7 @@ body.touring #scene {
   height: 44px;
   margin-right: 2px;
   padding: 0 6px;
-  font-size: 13px;
+  font-size: var(--fs-chip);
   line-height: 1;
   color: var(--ink-2);
   background: none;
@@ -2301,7 +2322,7 @@ body.touring #scene {
   min-height: 44px;
   padding: 0 16px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-btn);
   background: none;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -2589,7 +2610,7 @@ body:has(.panel.panel-open) .browse-pill {
   min-height: 34px;
   padding: 0 10px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-chip);
   color: var(--ink-2);
   background: transparent;
   border: 1px solid var(--line);
@@ -3175,7 +3196,7 @@ body {
   min-height: 44px;
   padding: 0 14px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-btn);
   color: var(--ink);
   background: var(--surface);
   backdrop-filter: blur(14px);

@@ -153,6 +153,7 @@ noise, disabled with reduced-motion.
 | Display (title, grade etches, standard codes) | Space Grotesk (OFL, self-hosted woff2 subset: latin, wghts 400/600) | tracking +0.02em for codes |
 | Body / UI | system-ui stack | panel text, buttons |
 | Standard text in panel | system-ui, 15px/1.55 | KaTeX for math |
+| On-canvas controls | system-ui | ONE scale, tokens in `:root`: `--fs-btn` 14px (text buttons: Show me around, Back/Next/Exit, Trace the full journey, the Filters pill), `--fs-chip` 12px (every chip and segmented control: grade/strand/major-work chips, Constellation↔Ascent, art tabs, Foundations/Both/Onward, the story HUD's formation segments, the lose-a-year year chips), `--fs-chip-touch` 13px (the ≤720px bump, chips and segments alike), `--fs-label` 10px (uppercase group label in `--display` 600 / .06em: GRADES, STRANDS, FORMATION), `--fs-caption` 12px (view caption, transit key). Panel copy, story-card copy, and Browse keep their own reading scales. |
 
 ## Layout of the frame
 
