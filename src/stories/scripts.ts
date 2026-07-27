@@ -453,7 +453,11 @@ export const STORIES: Story[] = [
     hook: "Nearly half of this map descends from one Kindergarten standard: counting to one hundred.",
     scenes: [
       {
-        year: "Grade 12",
+        // F-IF.A.1 is HS Functions (Algebra I in the traditional pathway), and
+        // the scrubber's other rails carry real grade labels, so a "Grade 12"
+        // here read as a placement claim about the standard. The app's own
+        // vocabulary for the band is "High School".
+        year: "High school",
         state: { lit: ["code:F-IF.A.1"], focus: "F-IF.A.1" },
         camera: { fit: ["code:F-IF.A.1"], pose: 1 },
         heldTitle: "Start at the far end",
@@ -515,7 +519,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:K", "grade:1"], pose: 1 },
         card: {
           title: "The room where it starts",
-          body: "A rug, a number line, a five-year-old counting past twenty-nine for the first time. The teacher leading that room is laying the foundation under half of high school mathematics, at the age when the foundation is most fragile.",
+          body: "A rug, a number line, a five-year-old counting past twenty-nine for the first time. The teacher leading that room is laying the foundation under three quarters of high school mathematics, at the age when the foundation is most fragile.",
         },
         holdMs: 11000,
         transition: "lapse",
@@ -589,7 +593,18 @@ export const STORIES: Story[] = [
         state: { lit: ["family-ancestry:8.EE.C.7"], focus: "8.EE.C.7" },
         camera: {
           fit: ["family-ancestry:8.EE.C.7"],
-          spine: ["code:7.EE.B.4.a", "code:6.EE.B.7", "code:5.NF.A.1", "code:1.OA.D.7"],
+          // 8.EE.C.7 rides the spine even though the walk-back names only the
+          // rungs below it: the card ends on "seven school years below the
+          // label on the struggle", and that label has to be in frame for the
+          // sentence to land. Without it the anchor exits right and returns in
+          // s4, which read as an unmotivated push-in.
+          spine: [
+            "code:8.EE.C.7",
+            "code:7.EE.B.4.a",
+            "code:6.EE.B.7",
+            "code:5.NF.A.1",
+            "code:1.OA.D.7",
+          ],
           pose: 1,
         },
         card: {
