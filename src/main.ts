@@ -730,6 +730,9 @@ function start(graph: GraphCore): void {
     // it (no refit, no zoom change) so a resize never leaves content half off.
     rig.recompose(false);
     edges.setViewport(w * dpr, h * dpr, dpr);
+    // The beacon rings size their minimum on-screen radius from this (a hollow
+    // must stay a hollow at a wide framing — scene/beacons.ts MIN_RING_PX).
+    beacons.setViewportHeight(h);
     stars.setPixelRatio(dpr);
     requestRender();
   }

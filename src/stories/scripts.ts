@@ -187,7 +187,12 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:3", "grade:4"], pose: 1 },
         card: {
           title: "Fourth grade arrives anyway",
-          body: "New content lands fine where it stands on its own and struggles where it stands on last year. Watch grade 4 come on. Geometry arrives bright, because most of what it stands on was built before third grade. Fractions arrive dimmer, because they stand on the nine standards that went dark.",
+          // The bright/dim exemplars are measured, not asserted: 11 of grade 4's
+          // 37 standards carry zero exposure to the lost year (the angle
+          // measurement cluster 4.MD.C.5–7 among them), 4.OA.A.1 sits at exactly
+          // 0.500, and 4.NF.A.1 at 0.231. The old copy named geometry as the
+          // bright case, but 4.G.A.1/.2 are themselves damaged (0.125/0.111).
+          body: "New content lands fine where it stands on its own and struggles where it stands on last year. Watch grade 4 come on. Eleven of its thirty-seven standards arrive at full brightness, angle measurement among them, because they lean on almost nothing from the lost spring. The other twenty-six carry the mark: multiplicative comparison stands on half a foundation, fraction equivalence on about three quarters of one.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -260,7 +265,10 @@ export const STORIES: Story[] = [
         camera: { fit: ["code:4.NF.B.4"], pose: 1 },
         card: {
           title: "The second",
-          body: "A year later, multiplying a fraction by a whole number never quite clicks. Partial credit and a good memory carry the test. The student does not know anything is missing either.",
+          // Five husks render here, not two: 4.NF.B.4 is written in three parts
+          // and a missed parent takes its sub-standards with it. The clause says
+          // so, because s3 does not explain the family until a scene later.
+          body: "A year later, multiplying a fraction by a whole number never quite clicks. That standard is written in parts, so four lights go out together beside October's. Partial credit and a good memory carry the test, and the student does not know anything is missing either.",
         },
         holdMs: 10500,
         transition: "lapse",
@@ -299,7 +307,11 @@ export const STORIES: Story[] = [
         },
         card: {
           title: "Then proportional reasoning arrives",
-          body: "One seventh-grade standard stands on 75 earlier ones. The brightest rings are the holes themselves; the fainter rings show the damage spreading through everything built on them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one standing on the missing. Four pieces out of 75 are enough to make the floor tilt while every adult in the room wonders why this student suddenly cannot keep up.",
+          // Six husks exist, four are inside this ancestry: 3.OA.A.2, 4.NF.B.4,
+          // 4.NF.B.4.c and 6.RP.A.2. The other two family parts (4.NF.B.4.a/.b)
+          // sit outside it, so this scene leaves them dark and unringed — four
+          // rings, four pieces, one countable number.
+          body: "One seventh-grade standard stands on 75 earlier ones. The brightest rings are the holes themselves; the fainter rings show the damage spreading through everything built on them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one standing on the missing. Three holes account for four of those 75 standards, because the fraction hole is written in parts and one of its parts is load-bearing here. Four pieces are enough to make the floor tilt while every adult in the room wonders why this student suddenly cannot keep up.",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -391,7 +403,9 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:3", "grade:4"], spine: NF_B_CLUSTER, pose: 1 },
         card: {
           title: "What never arrived",
-          body: "Every week spent reviewing is a week 4.NF.B does not get. The cluster dims quietly: not failed, just never reached. Report cards have no mark for material that was never assigned.",
+          // "Dims quietly" oversold it: the nine render as ringed hollows inside
+          // a lit year, which is what the copy now says.
+          body: "Every week spent reviewing is a week 4.NF.B does not get. Nine standards go hollow inside a lit year: not failed, just never reached. Report cards have no mark for material that was never assigned.",
         },
         holdMs: 11000,
         transition: "lapse",
@@ -438,7 +452,10 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:4", "grade:5"], spine: [...NF_B_CLUSTER, "code:5.NF.A.1"], pose: 1 },
         card: {
           title: "The other version of the year",
-          body: "TNTP's finding cuts both ways: students given grade-level work rose to it more often than not. Hold the review to what the data says a student needs, teach the year the grade promises, and the map ahead stays lit.",
+          // The scene drops to grades 4 and 5 (77 lit) with the cluster spotlit
+          // and healed, so the closing clause names THAT frame — the old "the
+          // map ahead stays lit" described 163 lights this scene removes.
+          body: "TNTP's finding cuts both ways: students given grade-level work rose to it more often than not. Hold the review to what the data says a student actually needs, teach the year the grade promises, and fifth grade opens standing on fractions that are there.",
           cite: "TNTP (2018), The Opportunity Myth",
         },
         holdMs: 12000,

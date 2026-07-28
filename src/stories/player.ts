@@ -35,7 +35,14 @@ import type { PanelHandle } from "../ui/panel";
 import type { SearchHandle } from "../ui/search";
 import type { DamageEngine } from "./damage";
 import type { SelectorResolver } from "./selectors";
-import { expandFamilies, bfsHops, contagionTargets, type BeaconTarget } from "./contagion";
+import {
+  expandFamilies,
+  bfsHops,
+  contagionTargets,
+  displayDamage,
+  sceneRingTargets,
+  type BeaconTarget,
+} from "./contagion";
 import { storyHref } from "../state/routing";
 import {
   STORIES,
@@ -51,7 +58,13 @@ import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
 import { createFormationPick, type FormationPickHandle } from "./formationpick";
 
 const LAPSE_MS = 2000; // "lapse" transition length (damage crossfade)
-const RING_FLOOR = 0.1; // a node rings only once its damage clears this floor
+// The interactive story's ring floor: absolute, because a lost YEAR always puts
+// plenty of exposure above it. Authored scenes use a floor relative to their own
+// distribution instead (sceneRingTargets) — a three-hole story's exposure runs
+// 0.01–0.09 and would clear no absolute floor at all.
+const RING_FLOOR = 0.1;
+/** Share of a scene's lit, partly-damaged standards that earn a ring. */
+const RING_SHARE = 0.4;
 const DEFAULT_HOLD_MS = 10500; // auto-advance dwell when a scene omits holdMs
 const LIT_FADE_MS = 1200; // lit-set crossfade when a scene has no directional reveal
 const DEFAULT_REVEAL_MS = 3200; // directional reveal duration when unspecified
@@ -315,11 +328,21 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       edgeLit[j] = s >= 0 && t >= 0 ? Math.min(litCur[s], litCur[t]) : 0;
     }
     edges.setVisibleMask(edgeLit);
+    pushDamage(); // the lit gate just moved — re-push the damage it masks
   }
 
+  // Damage is pushed through the LIT MASK: a node outside the scene's lit set
+  // shows no dimming and no ember, because a ghost is not part of the argument
+  // the card is making. (The pandemic story's March-2020 frame carried damage on
+  // 271 unlit standards — including the whole of grade 4, whose own card says
+  // those grades "have not happened yet".) The gate is the node's fractional lit
+  // amount, so during a directional reveal a standard's damage arrives exactly as
+  // it lights, never before. Edges inherit it through edgeDamage.
+  const damageOut = new Float32Array(N);
   function pushDamage(): void {
-    nodes.setDamage(damageCur);
-    edges.setDamage(damage.edgeDamage(damageCur));
+    for (let i = 0; i < N; i++) damageOut[i] = damageCur[i] * litCur[i];
+    nodes.setDamage(damageOut);
+    edges.setDamage(damage.edgeDamage(damageOut));
   }
 
   function resolveUnion(selectors: string[]): Set<number> {
@@ -404,19 +427,35 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     }
   }
 
-  // The contagion: ring every damaged node (intensity = its damage, so the
-  // directly-missed set keeps today's full ring and downstream nodes fade), and
-  // stage the rings in hop order from the missed set over the leads-to direction
-  // so the spread reads as a wave. A scene's `spotlight` codes ring at full
-  // strength on the first hop (the healed holes the reader still needs to find).
-  // `cut` (reduced motion, or a scene cut) shows the whole set instantly — the
-  // motion is cut, never the information.
-  function armBeacons(scene: StoryScene, missedIdx: Set<number>, damageArr: Float32Array, cut: boolean): void {
+  // The contagion: ring the holes at full strength and the heaviest downstream
+  // exposure faintly, staged in hop order from the missed set over the leads-to
+  // direction so the spread reads as a wave. Three rules the audit put here
+  // (sceneRingTargets owns them, pure): rings are MASKED to the scene's lit set,
+  // the exposure floor is relative to the scene's own distribution, and a hole
+  // always out-weighs a downstream ring. A scene's `spotlight` codes ring at
+  // full strength on the first hop (the healed holes the reader still needs to
+  // find) — also masked, so a spotlight can never light a ghost. `cut` (reduced
+  // motion, or a scene cut) shows the whole set instantly — the motion is cut,
+  // never the information. `rawDamage` is the ENGINE's damage, never the floored
+  // display copy: ring weight tracks the honest numbers.
+  function armBeacons(scene: StoryScene, missedIdx: Set<number>, rawDamage: Float32Array, cut: boolean): void {
     const hops = bfsHops(missedIdx, succ, N);
+    // A node's own reveal delay, in seconds, so its ring waits for its light.
+    const revealDelay = (i: number): number =>
+      cut || !litAnimating ? 0 : (litDelay[i] * (1 - REVEAL_WINDOW) * litDuration) / 1000;
     const byIndex = new Map<number, BeaconTarget>();
-    for (const t of contagionTargets(damageArr, hops, RING_FLOOR)) byIndex.set(t.index, t);
+    for (const t of sceneRingTargets(rawDamage, hops, {
+      lit: litTo,
+      share: RING_SHARE,
+      delayOf: revealDelay,
+    })) {
+      byIndex.set(t.index, t);
+    }
     if (scene.spotlight) {
-      for (const i of resolveUnion(scene.spotlight)) byIndex.set(i, { index: i, intensity: 1, hop: 0 });
+      for (const i of resolveUnion(scene.spotlight)) {
+        if (litTo[i] < 0.5) continue; // never ring a standard this scene leaves dark
+        byIndex.set(i, { index: i, intensity: 1, hop: 0, delaySec: revealDelay(i) });
+      }
     }
     const targets = [...byIndex.values()];
     beacons.setTargets(targets.length ? targets : null, { instant: cut });
@@ -668,18 +707,28 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     // drives BOTH the damage engine and the contagion rings. Grade selectors
     // already include their sub-standards, so it is a no-op for them.
     const missedIdx = expandFamilies(resolveUnion(scene.state?.missed ?? []), childrenOf);
+    // The lit set is armed FIRST: both the damage mask and the rings are scoped
+    // to it (and the rings ride its reveal stagger), so it has to exist before
+    // either of them is computed.
+    const revealMs = armLit(scene, cut);
     // Interactive story: the chosen year drives damage, not the scene state.
+    // Authored scenes split the two readings of damage: the ENGINE's values
+    // (rawDamage) weight the rings and carry every number a card quotes, while
+    // the display copy is floored so a lightly-exposed standard is still
+    // unmistakably dimmer than a healthy one (contagion.ts displayDamage). This
+    // is the discipline armYearDamage has used since round 7, applied to the
+    // authored scenes the audit found unreadable.
+    const rawDamage = damageTargetFor(scene, missedIdx);
     const damageMs =
       currentStory.interactive === "lose-a-year"
         ? armYearDamage(loseYearSel ?? "3", !cut)
-        : applyDamage(scene, damageTargetFor(scene, missedIdx), !cut);
+        : applyDamage(scene, displayDamage(rawDamage), !cut);
     // Contagion: rings spread from the missed set out along the leads-to
     // direction, faint with distance, staged as a wave. The interactive story
     // arms its own beacons inside armYearDamage.
     if (currentStory.interactive !== "lose-a-year") {
-      armBeacons(scene, missedIdx, damageTo, cut);
+      armBeacons(scene, missedIdx, rawDamage, cut);
     }
-    const revealMs = armLit(scene, cut);
     applyCamera(scene, !cut);
     renderScene(scene, index, activePose);
 
@@ -897,7 +946,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
           const k = smoothstep((T - startAt) / REVEAL_WINDOW);
           damageCur[i] = damageFrom[i] + (damageTo[i] - damageFrom[i]) * k;
         }
-        pushDamage();
+        // A lit transition in the same frame pushes damage itself (through the
+        // moving gate), so don't pay for the pass twice.
+        if (!litAnimating) pushDamage();
         if (easeElapsed >= damageDuration) {
           damageCur.set(damageTo);
           easing = false;

@@ -133,6 +133,39 @@ Damage never uses the strand hues for the ember (colorblind-safe: ember is a
 luminance+shape change, not only a hue change; flicker is the secondary
 encoding).
 
+### Three display laws (round 13, after the visual audit)
+
+The audit measured what the engine's honest numbers look like on screen and
+found three places where the frame did not say what the card said. All three
+fixes are DISPLAY-side; `damage.ts` is untouched and every number a card
+quotes still comes from it.
+
+1. **The display floor.** A scene's damage is shown through the monotone ramp
+   `d ↦ 0.35 + 0.65·d` (`displayDamage`, stories/contagion.ts), so a standard
+   that stands on ANYTHING missing always lands past the point where the story
+   lift dies — unmistakably dimmer than a healthy neighbour — while the real
+   gradient (0.06 → 0.67 on a lost year) keeps its order and a missed standard
+   still lands exactly on 1. Before it, a three-hole story's exposure ran
+   0.01–0.09, a brightness change of a fraction of a percent: three cards
+   described a dimness that was not on screen. The interactive "lose a year"
+   story has floored its display values this way since round 7; this is the
+   same law, applied to the authored scenes.
+2. **The lit mask owns damage too.** Damage is pushed through the scene's lit
+   amount, so a ghost carries no ember, no dimming, and no ring. (The pandemic
+   story used to ring 257 unlit standards in its March-2020 frame, brightest of
+   them a grade-4 cluster whose own card says those years "have not happened
+   yet".) During a directional reveal the damage arrives exactly as the light
+   does, never ahead of it.
+3. **Rings are relative, masked, and weighted.** Every hole rings at full
+   strength; downstream exposure rings only in the top 40% of the scene's OWN
+   damage distribution (`sceneRingTargets`), because no absolute floor can
+   serve both a lost year and a lost cluster. Ring intensity drives brightness,
+   alpha AND width, so a hole is plainly heavier than a d ≈ 0.2 descendant —
+   which is what the swiss-cheese card claims in words. The Galaxy ring sits
+   BELOW the bloom threshold (damage never glows — DESIGN.md), and it holds a
+   minimum on-screen radius so the dark core stays visible inside it at a wide
+   framing: a missing standard is never the brightest thing in the frame.
+
 ## Impact model (the honest math)
 
 Structural exposure, not a learning model, and one card per story says so
