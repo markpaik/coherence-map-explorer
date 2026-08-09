@@ -169,7 +169,7 @@ quotes still comes from it.
 ## Impact model (the honest math)
 
 Structural exposure, not a learning model, and one card per story says so
-plainly ("The map shows what the work stands on, not what any child can or
+plainly ("The map shows what the work depends on, never what a child can or
 cannot do").
 
 One model: **structural exposure**. For standard v with ancestor set A(v),
@@ -202,15 +202,18 @@ Timeline 2019 -> 2025. A third grader in fall 2019.
    What was missed did not announce itself. [cite NWEA math loss]
 3. "2021 · Grade 4" — damage propagates: 4.NF flickers hard (its ancestry
    runs through 3.NF), while grade-4 geometry and measurement stay bright.
-   Card: the cruel asymmetry — new content lands fine where it stands on
-   its own, and struggles exactly where it stands on last year.
+   Card: the cruel asymmetry — new content lands fine where it starts
+   fresh, and struggles exactly where it depends on last year.
 4. "2022-2024 · The compounding" — lapse through grades 5-7: the challenge
    flows down the number -> ratio -> algebra spine. 271 of the 366 standards
-   ahead of grade 3 carry broken ancestry (74%); 95 stay untouched.
+   ahead of grade 3 carry broken ancestry (74%); 95 stay untouched. This is
+   the scene Kuhfeld, Soland & Lewis (2022) carries (ledger below): losses
+   persisting year over year, which is what the card narrates.
 5. "Today · High school ahead" — camera pulls to HS: even F-IF.A.1 (the
-   concept of a function) carries the scar; 135 HS standards descend from
-   grade-3 fractions alone. Card: recovery is not reteaching one year; it is
-   rebuilding the floor under six. [cite recovery status]
+   concept of a function) shows the loss; 135 HS standards descend from
+   grade-3 fractions alone. Card: recovery means rebuilding what six later
+   years depend on while those years keep coming, not reteaching one year
+   slower. Uncited: the numbers are graph-internal.
 6. Coda — full map at rest. Card: teachers do this rebuilding every day,
    student by student. The map is why it is hard, not why it is hopeless.
 
@@ -238,8 +241,8 @@ One student, three silent holes: 3.OA.A.2 (division as sharing), 4.NF.B.4
    nobody noticed, including the student.
 2. "Grade 7 arrives" — focus 7.RP.A.2, its 75-standard ancestry lights;
    the three holes glow ember at the heart of it; damage shading shows the
-   convergence. Card: proportional reasoning stands on 75 earlier standards.
-   Three holes is all it takes for the floor to feel like it is tilting.
+   convergence. Card: proportional reasoning depends on 75 earlier standards.
+   Four missing pieces are enough to unsettle everything above them.
 3. The remediation move: trace-back lights ONLY the three husks. Card:
    this is the promise of seeing the structure — not re-teaching three
    years, but finding and filling three holes. [cite Bloom / mastery]
@@ -253,13 +256,15 @@ through ONE missing cluster, monotone, left to right. Six scenes:
    standards, and everything ahead assumes them.
 2. "October through January" — grade 3 joins, revealed RTL. The one
    deliberate backward look in the suite: the year regressing into review.
-   [cite TNTP hours below grade level]
+   The card states the report's core finding, so it carries the TNTP cite
+   (no DOI, house pattern for a report).
 3. "The same year" — the nine standards of 4.NF.B go to husks inside the lit
    band (damage off: no downstream yet). The cluster dims quietly. Camera
    spines onto the cluster.
-4. "Grade 5" — grade 5 joins; damage on. 5.NF stands directly on the cluster
+4. "Grade 5" — grade 5 joins; damage on. 5.NF builds directly on the cluster
    that never arrived.
 5. "Grades 6 through 8" — the band grows to grade 8, the dimness travels.
+   Uncited since 2026-08 (Schmidt dropped; see the ledger).
 6. "The other version" — heal ltr with the cluster spotlit. Card: TNTP's
    finding cuts both ways; students given grade-level work rose to it more
    often than not. Association from a descriptive study, labeled as such.
@@ -269,10 +274,16 @@ grammar has no `cluster:` form and `domain:4.NF` would sweep 4.NF.A and
 4.NF.C in with it). `tests/story-framing.test.ts` asserts the list still
 matches the live graph, so a data rebuild cannot leave it silently stale.
 
-Note for the ledger: the rebuild moved the Schmidt et al. (2015) card from
-the old scene 4 to "Compound interest" (scene 5), where the
-opportunity-to-learn evidence is the mechanism the card describes. Schmidt
-remains the story's peer-reviewed anchor, on screen and in the ledger below.
+Note for the ledger: the 2026-07 rebuild moved the Schmidt et al. (2015) card
+from the old scene 4 to "Compound interest" (scene 5); the 2026-08 grounding
+audit took it off screen entirely. Schmidt is cross-national,
+single-timepoint PISA/OTL correlational work and does not test the
+compounding mechanism the card narrates — that mechanism is graph-internal
+structure anyway — so scene 5 goes uncited. Schmidt stays in the ledger below
+as the source to reach for if the evidence returns to screen. The TNTP cite
+now appears on TWO cards, each carrying a different TNTP finding: scene 2
+(most math time spent below grade level) and scene 6 (students given
+grade-level work rose to it more often than not).
 
 ### 5. It starts with counting
 Reverse time-lapse, the empathy piece for early educators.
@@ -337,9 +348,15 @@ publisher record on 2026-07-16 (via doi.org redirect and Crossref metadata).
 - Kuhfeld, M., Soland, J., & Lewis, K. (2022). Test Score Patterns Across
   Three COVID-19-Impacted School Years. *Educational Researcher*, 51(7),
   500-506. https://doi.org/10.3102/0013189X221109178
-  Supports: the scene 2 numbers. Math fell 0.20-0.27 SD and reading fell
-  0.09-0.18 SD, grades 3-8, fall 2021 vs. fall 2019 (5.4 million US
-  students).
+  On card: "Year over year" (2022–24), whose "each new year lights up a
+  little dimmer" IS this paper's finding — score deficits persisting across
+  three COVID-impacted school years rather than closing. Math fell 0.20-0.27
+  SD and reading fell 0.09-0.18 SD, grades 3-8, fall 2021 vs. fall 2019 (5.4
+  million US students).
+  Moved here 2026-08 from "High school, from here", which frames RECOVERY —
+  something this paper never discusses. That scene is now uncited; its
+  remaining numbers (135 HS standards tracing to grade-3 fractions) are
+  graph-internal.
 - Betthäuser, B. A., Bach-Mortensen, A. M., & Engzell, P. (2023). A
   systematic review and meta-analysis of the evidence on learning during
   the COVID-19 pandemic. *Nature Human Behaviour*, 7(3), 375-385.
@@ -394,8 +411,13 @@ the standing verdict on the claim, for any future story tempted by it)
   empirical weight.
 
 **4. The opportunity myth**
-- Cultural hook (report, not peer-reviewed, hook only; empirical weight
-  carried by Schmidt et al. 2015 below): TNTP. (2018). *The Opportunity
+- Cultural hook (report, not peer-reviewed) AND the only source now on this
+  story's cards, cited on both scenes that state a TNTP finding: scene 2
+  ("What the year actually held", most math time spent on below-grade work)
+  and scene 6 ("The other version of the year", students given grade-level
+  work rose to it more often than not). No DOI on either — the house pattern
+  for a report. Both claims are descriptive/correlational and the cards say
+  so. TNTP. (2018). *The Opportunity
   Myth: What Students Can Show Us About How School Is Letting Them
   Down and How to Fix It*. Descriptive study of five school systems, about
   1,000 lessons and 5,000 assignments observed; an association, not a
@@ -425,10 +447,14 @@ the standing verdict on the claim, for any future story tempted by it)
   causal tracking/acceleration literature (e.g., Algebra-for-all mandates)
   is mixed rather than uniformly supportive. The closing card's claim stays
   attributed to TNTP alone and flagged as correlational/descriptive.
-  After the 2026-07 rebuild Schmidt no longer appears on a card (the cut
-  that carried it was the one the rebuild replaced); it remains the
-  peer-reviewed anchor for the story's mechanism and the source to reach for
-  if the evidence returns to screen.
+  OFF SCREEN since 2026-08. The grounding audit dropped Schmidt from
+  "Compound interest": the design is cross-national and single-timepoint
+  (PISA 2012), so it does not test the year-by-year compounding mechanism the
+  card narrates — and that mechanism is graph-internal structure, needing no
+  external source. The scene is now uncited. Schmidt stays in this ledger as
+  the peer-reviewed anchor for the general "access to grade-level content
+  matters" claim and the source to reach for if the evidence returns to
+  screen.
 
 **5. It starts with counting**
 - Duncan, G. J., Dowsett, C. J., Claessens, A., Magnuson, K., Huston, A.

@@ -158,7 +158,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:2", "grade:3", "grade:4"], pose: 1 },
         card: {
           title: "The fraction spring ahead",
-          body: "Nine fraction standards sit in the spring of third grade, and more than four fifths of high school mathematics eventually rests on them. In a normal year this student meets them in a normal classroom, and they light up like everything else did.",
+          body: "Nine fraction standards come in the spring of third grade, and more than four fifths of high school mathematics eventually depends on them. In a normal year this student meets them in a normal classroom, and they light up like everything else did.",
         },
         holdMs: 10000,
         transition: "lapse",
@@ -192,7 +192,7 @@ export const STORIES: Story[] = [
           // measurement cluster 4.MD.C.5–7 among them), 4.OA.A.1 sits at exactly
           // 0.500, and 4.NF.A.1 at 0.231. The old copy named geometry as the
           // bright case, but 4.G.A.1/.2 are themselves damaged (0.125/0.111).
-          body: "New content lands fine where it stands on its own and struggles where it stands on last year. Watch grade 4 come on. Eleven of its thirty-seven standards arrive at full brightness, angle measurement among them, because they lean on almost nothing from the lost spring. The other twenty-six carry the mark: multiplicative comparison stands on half a foundation, fraction equivalence on about three quarters of one.",
+          body: "New content lands fine where it starts fresh and struggles where it depends on last year. Watch grade 4 come on. Eleven of its thirty-seven standards arrive at full brightness, angle measurement among them, because they need almost nothing from the lost spring. The other twenty-six show the loss: multiplicative comparison kept only half of its foundation, fraction equivalence about three quarters of its own.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -208,7 +208,9 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:4", "grade:5", "grade:6", "grade:7"], pose: 1 },
         card: {
           title: "Year over year",
-          body: "Each new year lights up a little dimmer along the number, ratio, and algebra line. Of the 366 standards ahead of grade 3, 271 now stand on something that went dark. The other 95 stay bright, and that difference maps exactly where this student still gets to feel capable.",
+          body: "Each new year lights up a little dimmer along the number, ratio, and algebra line. Of the 366 standards ahead of grade 3, 271 now depend on something that went dark. The other 95 stay bright, and that difference maps exactly where this student still gets to feel capable.",
+          cite: "Kuhfeld, Soland & Lewis (2022), Educational Researcher",
+          citeUrl: "https://doi.org/10.3102/0013189X221109178",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -220,9 +222,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:8", "grade:HS"], pose: 1 },
         card: {
           title: "High school, from here",
-          body: "In ninth grade, even the concept of a function carries the mark. 135 high school standards trace back to grade 3 fractions alone. Recovery is not reteaching one year slower. It is rebuilding the floor under six years while those years keep coming.",
-          cite: "Kuhfeld, Soland & Lewis (2022), Educational Researcher",
-          citeUrl: "https://doi.org/10.3102/0013189X221109178",
+          body: "In ninth grade, even the concept of a function shows the loss. 135 high school standards trace back to grade 3 fractions alone. Recovery means rebuilding what six later years depend on while those years keep coming, not reteaching one year slower.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -234,7 +234,7 @@ export const STORIES: Story[] = [
         camera: { fit: "all", pose: 1 },
         card: {
           title: "Why this is hard, and not hopeless",
-          body: "Teachers rebuild these floors every day, one student at a time. Watch the lights come back the way the work actually happens: one standard, one child, one small win at a time. The map shows what the mathematics stands on. It never says what a child can or cannot do.",
+          body: "Teachers rebuild these foundations every day, one student at a time. Watch the lights come back the way the work actually happens: one standard, one child, one small win at a time. The map shows what the mathematics depends on. It never says what a child can or cannot do.",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -311,7 +311,7 @@ export const STORIES: Story[] = [
           // 4.NF.B.4.c and 6.RP.A.2. The other two family parts (4.NF.B.4.a/.b)
           // sit outside it, so this scene leaves them dark and unringed — four
           // rings, four pieces, one countable number.
-          body: "One seventh-grade standard stands on 75 earlier ones. The brightest rings are the holes themselves; the fainter rings show the damage spreading through everything built on them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one standing on the missing. Three holes account for four of those 75 standards, because the fraction hole is written in parts and one of its parts is load-bearing here. Four pieces are enough to make the floor tilt while every adult in the room wonders why this student suddenly cannot keep up.",
+          body: "One seventh-grade standard depends on 75 earlier ones. The brightest rings are the holes themselves; the fainter rings show the damage spreading through everything built on them. The ladder thins right before grade 7 because two of its three sixth-grade rungs are casualties: one missing outright, one built on the missing. Three holes account for four of those 75 standards, because the fraction hole is written in parts and one of its parts is a direct prerequisite here. Four missing pieces are enough to unsettle everything above them, while every adult in the room wonders why this student suddenly cannot keep up.",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -349,7 +349,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["code:3.OA.A.2", "code:4.NF.B.4", "code:6.RP.A.2", "code:7.RP.A.2"], pose: 1 },
         card: {
           title: "Find three holes, not three years",
-          body: "Four lights remain: the three ringed holes and the seventh-grade standard they hold up. Seeing the structure changes the assignment. In Bloom's small studies, one-to-one mastery tutoring moved students about two standard deviations; across 108 studies of scalable mastery programs, the average is about half of one. The distance between those numbers is the work, and it starts with knowing exactly which three standards to rebuild.",
+          body: "Four lights remain: the three ringed holes and the seventh-grade standard they hold up. Seeing the structure changes the assignment. In Bloom's small studies, one-to-one mastery tutoring moved the average student from the middle of the class to the top of it, about two standard deviations; across 108 studies of scalable mastery programs, the average is about half of one. The distance between those numbers is the work, and it starts with knowing exactly which three standards to rebuild.",
           cite: "Bloom (1984); Kulik, Kulik & Bangert-Drowns (1990)",
           citeUrl: "https://doi.org/10.3102/00346543060002265",
         },
@@ -375,7 +375,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:4"], pose: 1 },
         card: {
           title: "Fourth grade, on paper",
-          body: "Fourth grade is the fractions year: equivalence, comparison, adding and subtracting parts of the same whole. Thirty-seven standards sit in this band, and the ones ahead assume every one of them.",
+          body: "Fourth grade is the fractions year: equivalence, comparison, adding and subtracting parts of the same whole. Thirty-seven standards make up this band, and the ones ahead assume every one of them.",
         },
         holdMs: 11000,
         transition: "lapse",
@@ -389,6 +389,7 @@ export const STORIES: Story[] = [
         card: {
           title: "What the year actually held",
           body: "The Opportunity Myth found students spending most of their math time on work below their grade. For this student, October through January is third grade again: re-taught rounding, re-taught multiplication facts, a familiar worksheet with a new date.",
+          cite: "TNTP (2018), The Opportunity Myth",
         },
         holdMs: 11000,
         transition: "lapse",
@@ -421,7 +422,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:4", "grade:5"], pose: 1 },
         card: {
           title: "The bill, one year later",
-          body: "Fifth grade opens assuming fractions are settled. They are not. 5.NF stands directly on the cluster that never arrived, and the struggle that follows looks like a fifth-grade problem while its cause sits a year earlier.",
+          body: "Fifth grade opens assuming fractions are settled. They are not. 5.NF builds directly on the cluster that never arrived, and the struggle that follows looks like a fifth-grade problem when the cause is a year earlier.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -437,9 +438,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:5", "grade:6", "grade:7", "grade:8"], pose: 1 },
         card: {
           title: "Compound interest",
-          body: "Left alone, the dimness keeps traveling: ratios in sixth grade, proportional reasoning in seventh, linear functions in eighth. Each year the distance from the missing cluster grows, and the harder its origin is to see.",
-          cite: "Schmidt, Burroughs, Zoido & Houang (2015), Educational Researcher",
-          citeUrl: "https://doi.org/10.3102/0013189X15603982",
+          body: "Left alone, the dimness keeps traveling: ratios in sixth grade, proportional reasoning in seventh, linear functions in eighth. Each year the distance from the missing cluster grows, and its origin gets harder to see.",
         },
         holdMs: 12000,
         transition: "lapse",
@@ -455,7 +454,7 @@ export const STORIES: Story[] = [
           // The scene drops to grades 4 and 5 (77 lit) with the cluster spotlit
           // and healed, so the closing clause names THAT frame — the old "the
           // map ahead stays lit" described 163 lights this scene removes.
-          body: "TNTP's finding cuts both ways: students given grade-level work rose to it more often than not. Hold the review to what the data says a student actually needs, teach the year the grade promises, and fifth grade opens standing on fractions that are there.",
+          body: "TNTP's finding cuts both ways: students given grade-level work rose to it more often than not. Hold the review to what the data says a student actually needs, teach the year the grade promises, and fifth grade opens with the fractions in place.",
           cite: "TNTP (2018), The Opportunity Myth",
         },
         holdMs: 12000,
@@ -499,10 +498,10 @@ export const STORIES: Story[] = [
         },
         heldTitle: "Follow its foundations back",
         heldBody:
-          "Watch the chain light from functions backward. Functions stand on eighth-grade relations, which stand on proportionality and ratio, which stand on fractions and the whole-number work beneath them. Nineteen steps back the light reaches kindergarten, and counting is one of the foundations under everything.",
+          "Watch the chain light from functions backward. Functions build on eighth-grade relations, which build on proportionality and ratio, which build on fractions and the whole-number work beneath them. Nineteen steps back the light reaches kindergarten, and counting is one of the foundations under everything.",
         card: {
           title: "Follow its foundations down",
-          body: "Watch the chain light from the summit downward. Functions stand on eighth-grade relations, which stand on proportionality and ratio, which stand on fractions and the whole-number work beneath them. Nineteen floors down the light reaches kindergarten, and counting is one of the foundations under everything.",
+          body: "Watch the chain light from the summit downward. Functions build on eighth-grade relations, which build on proportionality and ratio, which build on fractions and the whole-number work beneath them. Nineteen floors down the light reaches kindergarten, and counting is one of the foundations under everything.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -523,7 +522,7 @@ export const STORIES: Story[] = [
         },
         card: {
           title: "Now light everything that grows from counting",
-          body: "From one kindergarten standard, count to 100 by ones and tens, 225 standards light up, 47 percent of the whole map. Across six longitudinal datasets, the math children bring to school entry predicts their later achievement better than early reading or attention do. The map shows what the work stands on, never what a child can or cannot do.",
+          body: "From one kindergarten standard, “count to 100 by ones and tens,” 225 standards light up, 47 percent of the whole map. Across six longitudinal datasets, the math children bring to school entry predicts their later achievement better than early reading or attention do. The map shows what the work depends on, never what a child can or cannot do.",
           cite: "Duncan et al. (2007), Developmental Psychology; Watts et al. (2014)",
           citeUrl: "https://doi.org/10.1037/0012-1649.43.6.1428",
         },
@@ -536,7 +535,7 @@ export const STORIES: Story[] = [
         camera: { fit: ["grade:K", "grade:1"], pose: 1 },
         card: {
           title: "The room where it starts",
-          body: "A rug, a number line, a five-year-old counting past twenty-nine for the first time. The teacher leading that room is laying the foundation under three quarters of high school mathematics, at the age when the foundation is most fragile.",
+          body: "A rug, a number line, a five-year-old counting past twenty-nine for the first time. The teacher leading that room is laying the foundation for three quarters of high school mathematics, at the age when the foundation is most fragile.",
         },
         holdMs: 11000,
         transition: "lapse",
@@ -599,8 +598,8 @@ export const STORIES: Story[] = [
           pose: 1,
         },
         card: {
-          title: "Light what it stands on",
-          body: "The chain runs from this standard back through 119 earlier ones, all the way to kindergarten. Somewhere along it is the last thing this student can do securely, and everything after that point leans on the gap.",
+          title: "Light what it depends on",
+          body: "The chain runs from this standard back through 119 earlier ones, all the way to kindergarten. Somewhere along it is the last thing this student can do securely, and everything after that point inherits the gap.",
         },
         holdMs: 11500,
         transition: "lapse",
@@ -644,7 +643,7 @@ export const STORIES: Story[] = [
         },
         card: {
           title: "Build back up from there",
-          body: "Now light the chain the other way. From solid ground, each missing step is targeted work on one named standard, not a year of going backward. Fraction knowledge in elementary school predicts high school algebra better than almost anything else researchers measured, and on this chain the fractions are load-bearing: adding unlike denominators sits directly under the first equations this student ever solved.",
+          body: "Now light the chain the other way. From solid ground, each missing step is targeted work on one named standard, not a year of going backward. Fraction knowledge in elementary school predicts high school algebra better than almost anything else researchers measured, and on this chain the fractions matter most: adding unlike denominators is the direct prerequisite for the first equations this student ever solved.",
           cite: "Siegler et al. (2012), Psychological Science",
           citeUrl: "https://doi.org/10.1177/0956797612440101",
         },
@@ -681,7 +680,7 @@ export const STORIES: Story[] = [
           // Placeholder copy only: the player rewrites title + body live with
           // the chosen year's computed numbers (see armYearDamage).
           title: "Choose the missing year",
-          body: "Every light is a standard taught and learned. Pick a grade below to take it away; the map recomputes what stands on it.",
+          body: "Every light is a standard taught and learned. Pick a grade below to take it away; the map recomputes what depends on it.",
         },
         holdMs: 0, // interactive: never auto-advances
         transition: "lapse",

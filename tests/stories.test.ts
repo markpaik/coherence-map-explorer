@@ -145,21 +145,51 @@ describe("story scripts validate against the graph", () => {
     }
   });
 
-  it("the one cite without a DOI is the TNTP report (a cultural hook, not evidence)", () => {
-    // The rebuilt Opportunity Myth carries a single TNTP cite (a report, not
-    // peer-reviewed) with no DOI, on its closing scene. Every other cited scene
-    // carries a resolvable DOI. (The frozen copy defines this; the test asserts
-    // the frozen truth.)
-    let citeNoUrl = 0;
+  it("the only cites without a DOI are the two TNTP cards (a cultural hook, not evidence)", () => {
+    // The Opportunity Myth carries TWO TNTP cites (a report, not peer-reviewed,
+    // so no DOI — the house pattern): scene 2, where the report's core finding
+    // is stated, and the closing scene, which uses a different TNTP finding.
+    // Every other cited scene carries a resolvable DOI. (The frozen copy defines
+    // this; the test asserts the frozen truth.)
+    const noUrl: string[] = [];
     for (const story of STORIES) {
       for (const scene of story.scenes) {
         if (scene.card.cite && !scene.card.citeUrl) {
-          citeNoUrl++;
+          noUrl.push(`${story.id}: ${scene.card.title}`);
           expect(scene.card.cite, `${story.id}: ${scene.card.title}`).toMatch(/TNTP/);
         }
       }
     }
-    expect(citeNoUrl).toBe(1);
+    expect(noUrl).toEqual([
+      "opportunity-myth: What the year actually held",
+      "opportunity-myth: The other version of the year",
+    ]);
+  });
+
+  it("Kuhfeld backs the year-over-year scene, and no card cites Schmidt", () => {
+    // Kuhfeld, Soland & Lewis (2022) measures losses PERSISTING across three
+    // COVID-impacted years, which is what "Year over year" narrates; it says
+    // nothing about recovery, so "High school, from here" goes uncited (its
+    // numbers are graph-internal). Schmidt (2015) is cross-national,
+    // single-timepoint PISA/OTL and does not test the compounding mechanism
+    // "Compound interest" narrates, so that scene is uncited too.
+    const vanished = STORIES.find((s) => s.id === "vanished-year")!;
+    const yearOverYear = vanished.scenes.find((s) => s.card.title === "Year over year")!;
+    expect(yearOverYear.card.cite).toBe("Kuhfeld, Soland & Lewis (2022), Educational Researcher");
+    expect(yearOverYear.card.citeUrl).toBe("https://doi.org/10.3102/0013189X221109178");
+    const hs = vanished.scenes.find((s) => s.card.title === "High school, from here")!;
+    expect(hs.card.cite).toBeUndefined();
+    expect(hs.card.citeUrl).toBeUndefined();
+
+    const om = STORIES.find((s) => s.id === "opportunity-myth")!;
+    const compound = om.scenes.find((s) => s.card.title === "Compound interest")!;
+    expect(compound.card.cite).toBeUndefined();
+    expect(compound.card.citeUrl).toBeUndefined();
+    for (const story of STORIES) {
+      for (const scene of story.scenes) {
+        expect(scene.card.cite ?? "").not.toMatch(/Schmidt/);
+      }
+    }
   });
 
   it("there are six stories (five narratives + the interactive lose-a-year), each with at least one scene", () => {
