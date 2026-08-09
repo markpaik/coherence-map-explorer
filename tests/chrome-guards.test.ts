@@ -321,6 +321,30 @@ describe("data fetches cannot stall silently", () => {
     expect(search).toContain("indexFailed = false;");
     expect(search).toContain("void ensureIndex().then(");
   });
+
+  it("a query that matches nothing says so, once, quietly", () => {
+    // The copy is the designer's, verbatim — drift fails here.
+    expect(search).toContain('label.textContent = "No matches. Try a code like 4.NF.B.3.";');
+    // Presentational, so it is not a listbox option…
+    const row = search.slice(search.indexOf("function emptyRow()"));
+    const body = row.slice(0, row.indexOf("\n  }"));
+    expect(body).toContain('li.setAttribute("role", "presentation")');
+    expect(body).toContain('label.setAttribute("role", "status")');
+    expect(body, "the row is not selectable").not.toContain("pointerdown");
+    // …and the keyboard never lands on it: totalOptions() counts results plus the
+    // hidden-by-filters row only, so ↑/↓, Enter and aria-activedescendant skip it.
+    expect(search).toContain(
+      "const totalOptions = (): number => results.length + (hiddenCount > 0 ? 1 : 0);",
+    );
+    // It shows only for a real query the index actually ran (never mid-fetch),
+    // and only after the index-failure branch has had its say.
+    const render = search.slice(search.indexOf("function renderResults()"));
+    const emptyAt = render.indexOf("if (!totalOptions() && index && lastQuery)");
+    expect(emptyAt).toBeGreaterThan(-1);
+    expect(render.indexOf("indexFailed && lastQuery")).toBeLessThan(emptyAt);
+    // A blur/refocus on the same dead query brings the row back.
+    expect(search).toContain("(totalOptions() || indexFailed || index)");
+  });
 });
 
 // ---------------------------------------------------------------------------

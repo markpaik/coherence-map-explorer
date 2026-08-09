@@ -283,12 +283,41 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     return li;
   }
 
+  // The "no matches" row. Like the failure row it is NOT a listbox option (there
+  // is nothing to select), so it is presentational to AT, carries a live region
+  // for the message, and sits outside totalOptions() — ↑/↓, Enter and
+  // aria-activedescendant never reach it. A worked example beats an apology: the
+  // commonest miss is a reader typing a topic where the index wants a code.
+  function emptyRow(): HTMLLIElement {
+    const li = document.createElement("li");
+    li.className = "search-empty";
+    li.setAttribute("role", "presentation");
+    const label = document.createElement("span");
+    label.className = "search-empty-label";
+    label.setAttribute("role", "status");
+    label.textContent = "No matches. Try a code like 4.NF.B.3.";
+    li.append(label);
+    return li;
+  }
+
   function renderResults(): void {
     dropdown.replaceChildren();
     // A failed index outranks an empty result list: the reader is owed the
     // difference between "nothing matched" and "we could not look".
     if (indexFailed && lastQuery) {
       dropdown.appendChild(unavailableRow());
+      dropdown.hidden = false;
+      active = -1;
+      input.setAttribute("aria-expanded", "true");
+      syncActiveDescendant();
+      machine.setSearching(false);
+      return;
+    }
+    // Nothing matched a query the index actually ran (the `index` gate matters:
+    // lastQuery is set before runSearch's !index early return, so without it a
+    // keystroke landing mid-fetch would read as "no matches").
+    if (!totalOptions() && index && lastQuery) {
+      dropdown.appendChild(emptyRow());
       dropdown.hidden = false;
       active = -1;
       input.setAttribute("aria-expanded", "true");
@@ -406,7 +435,9 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     // them. After a pick the box is cleared, so a programmatic focus-return
     // (the panel's X returns focus here) can't reopen a stale dropdown.
     const q = input.value.trim();
-    if (q && q === lastQuery && (totalOptions() || indexFailed)) renderResults();
+    // `index` carries the no-match row back too: a zero-match query is a state
+    // the dropdown holds, so it survives blur/refocus like every other one.
+    if (q && q === lastQuery && (totalOptions() || indexFailed || index)) renderResults();
   };
   const onInput = (): void => {
     // With a failed index there is nothing to query, but the reader still needs
