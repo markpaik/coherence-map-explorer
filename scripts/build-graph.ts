@@ -19,6 +19,7 @@ import { gzipSync } from "node:zlib";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import sanitizeHtml from "sanitize-html";
+import { decodeHTML } from "entities";
 import {
   forceSimulation,
   forceLink,
@@ -457,7 +458,9 @@ const MATH_SPAN =
 export function isMathSpan(span: string): boolean {
   const inner = span.slice(1, -1);
   if (/\\[a-zA-Z]/.test(inner)) return true; // any LaTeX command ⇒ math
-  const bare = inner.replace(/&[a-zA-Z]+;|&#\d+;|&#x[0-9a-fA-F]+;/g, " ");
+  // Entity names can carry digits (`&frac12;`, `&sup2;`), which must not read
+  // as an English word.
+  const bare = inner.replace(/&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#x[0-9a-fA-F]+;/g, " ");
   return !/[a-z]{3,}/.test(bare); // an English word ⇒ prose money
 }
 
@@ -511,39 +514,41 @@ function escapeHtml(s: string): string {
 /**
  * Decode the source's HTML entities inside a MATH span to real characters, so
  * that after the client's single innerHTML decode KaTeX sees true LaTeX
- * (`A'`, `>`, `÷`, `&` in align environments). Numeric (decimal + hex) and the
- * common named entities the snapshot uses; unknown named entities pass through
- * untouched (no worse than the source). Safety is unchanged: the result is
- * still run through escapeHtml, so every `<`/`>`/`&` is inert on assignment.
+ * (`A'`, `>`, `÷`, `&` in align environments). The decode is the FULL HTML
+ * table (the `entities` package, browser rules), because the source's math was
+ * written for MathJax reading browser-decoded DOM text. A hand-kept subset let
+ * `&shy;` through: 18 soft hyphens in F-IF.C.7.a's worked example shipped as
+ * `&amp;shy;`, which KaTeX rendered as red errors or as the letters "shy".
+ * Safety is unchanged: the result is still run through escapeHtml, so every
+ * `<`/`>`/`&` is inert on assignment.
+ *
+ * Then the characters that mean something different in math mode:
+ * - U+00AD soft hyphen is a prose line-break hint. In math it is nothing.
+ * - U+00A0 becomes a plain space, which math mode ignores (KaTeX would print a
+ *   forced space for U+00A0).
+ * - U+2013 en dash is how the snapshot writes a minus. KaTeX has no math-mode
+ *   glyph for it and warns; `-` is the minus sign KaTeX renders.
+ * - U+2063 is the math-token sentinel. `&ic;`/`&InvisibleComma;` decode to it,
+ *   so drop it here too (sanitizeField also strips every entity form up front).
  */
 function decodeEntitiesForMath(s: string): string {
-  return s
-    .replace(/&#x([0-9a-f]+);/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
-    .replace(/&[a-z]+;/gi, (m) => MATH_ENTITIES[m.toLowerCase()] ?? m);
+  return decodeHTML(s)
+    .replace(/[\u00ad\u2063]/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\u2013/g, "-");
 }
 
-const MATH_ENTITIES: Record<string, string> = {
-  "&nbsp;": " ",
-  "&amp;": "&",
-  "&lt;": "<",
-  "&gt;": ">",
-  "&quot;": '"',
-  "&rsquo;": "’",
-  "&lsquo;": "‘",
-  "&mdash;": "—",
-  "&ndash;": "–",
-  "&hellip;": "…",
-  "&times;": "×",
-  "&divide;": "÷",
-  "&cent;": "¢",
-  "&deg;": "°",
-  "&plusmn;": "±",
-  "&minus;": "−",
-  "&middot;": "·",
-  "&ge;": "≥",
-  "&le;": "≤",
-};
+/**
+ * Every entity spelling a browser would decode to the U+2063 sentinel: named
+ * (`&ic;`, `&InvisibleComma;`), hex, and decimal, with or without the trailing
+ * `;` (the legacy numeric forms decode without it, in htmlparser2 and in
+ * browsers alike). Each entity-shaped run is decoded on its own and dropped
+ * only when it yields the sentinel.
+ */
+const ENTITY_LIKE = /&(?:#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);?/g;
+function stripEncodedSentinels(s: string): string {
+  return s.replace(ENTITY_LIKE, (m) => (decodeHTML(m).includes(MATH_TOKEN_DELIM) ? "" : m));
+}
 
 export function sanitizeField(html: string | undefined): string {
   if (!html) return "";
@@ -552,13 +557,13 @@ export function sanitizeField(html: string | undefined): string {
   // cannot forge a placeholder token (and thus smuggle a stored index).
   let work = html.split(MATH_TOKEN_DELIM).join("");
   // …including ENTITY-ENCODED forms of the U+2063 sentinel. A math span captured
-  // below is restored via escapeHtml(decodeEntitiesForMath(src)); decodeEntities-
-  // ForMath turns `&#x2063;`/`&#8291;` back into a LITERAL U+2063, which would
-  // re-materialize a delimiter INSIDE a restored span and let the restoration loop
-  // splice in another span's stored index. Strip the hex (`&#x2063;`) and decimal
-  // (`&#8291;`) forms — any case, any leading zeros — up front, matching exactly the
-  // grammar decodeEntitiesForMath would later decode (both require the trailing `;`).
-  work = work.replace(/&#x0*2063;|&#0*8291;/gi, "");
+  // below is restored via escapeHtml(decodeEntitiesForMath(src)), and prose goes
+  // through sanitizeHtml, which decodes entities too. Either decode would turn
+  // `&#x2063;`/`&#8291;`/`&ic;`/`&InvisibleComma;` (or a legacy `&#x2063` with no
+  // `;`) back into a LITERAL U+2063, re-materializing a delimiter that lets the
+  // restoration loop splice another span's stored index into the output. Strip
+  // every spelling that decodes to the sentinel up front.
+  work = stripEncodedSentinels(work);
   work = work.replace(MATH_SPAN, (m) => {
     // A bare-`$` pair that reads as prose money is NOT math: leave it in the
     // stream so the sanitizer treats it as the prose it is (strictly safer than
@@ -596,43 +601,70 @@ export function sanitizeField(html: string | undefined): string {
   return clean.trim();
 }
 
-const HTML_ENTITIES: Record<string, string> = {
-  "&nbsp;": " ",
-  "&amp;": "&",
-  "&lt;": "<",
-  "&gt;": ">",
-  "&quot;": '"',
-  "&#39;": "'",
-  "&rsquo;": "’",
-  "&lsquo;": "‘",
-  "&mdash;": "—",
-  "&ndash;": "–",
-  "&hellip;": "…",
-  "&times;": "×",
-  "&ge;": "≥",
-  "&le;": "≤",
-};
+// Inline elements draw no box of their own, so their tags vanish without a
+// word break: `<a …>whole numbers</a>, e.g.` reads "whole numbers, e.g.", not
+// "whole numbers , e.g.". `<sup>` is handled on its own (see supToText). Every
+// other tag (p, br, li, td, h3, …) still separates words with a space.
+const INLINE_TAG =
+  /<\/?(?:a|abbr|b|big|cite|code|em|font|i|kbd|mark|q|s|samp|small|span|strike|strong|sub|tt|u|var)\b[^>]*>/gi;
+const SUP_ELEMENT = /<sup\b[^>]*>([\s\S]*?)<\/sup>/gi;
+// A lone number or letter, optionally signed, needs no brackets after `^`.
+const EXPONENT_ATOM = /^[-–−]?(?:\d+(?:\.\d+)?|[A-Za-z])$/;
 
 /**
- * Plain-text projection of a raw HTML desc for the search index. Math spans are
- * dropped first (so a stray `<` inside `$a<b$` can't merge with a later real
- * `>` and swallow prose), then tags are stripped, entities decoded, whitespace
- * collapsed, and the result truncated at a word boundary near ~240 chars.
+ * A `<sup>` in a desc is either an EXPONENT, written straight after its base
+ * (`3<sup>2</sup>`, `(x + y)<sup>n</sup>`, `sin<sup>2</sup>(&theta;)`), or a
+ * FOOTNOTE: a paragraph that opens `<p><sup>*Expectations …</sup></p>`, or a
+ * `*` marker after a word. Exponents project to `^`, with brackets around any
+ * exponent longer than one number or letter, so `5<sup>1/3</sup>` reads
+ * "5^(1/3)" and not "5^1/3". A space the source put INSIDE the tag is dropped
+ * before the exponent (`i<sup> 2</sup>` reads "i^2") and kept after it
+ * (`<sup>12t </sup>to` reads "^(12t) to"). Footnotes keep their text and lose
+ * only the tag. The raw inner HTML is carried through undecoded, so the single
+ * entity decode that follows still sees it exactly once.
+ */
+function supToText(_m: string, inner: string, offset: number, whole: string): string {
+  const plain = decodeHTML(inner.replace(/<[^>]*>/g, "")).trim();
+  const before = whole[offset - 1];
+  const exponent = before !== undefined && !/[\s>]/.test(before) && !plain.startsWith("*");
+  if (!exponent) return inner;
+  const body = inner.replace(/^(?:\s|&nbsp;)+|(?:\s|&nbsp;)+$/g, "");
+  const after = /(?:\s|&nbsp;)$/.test(inner) ? " " : "";
+  return (EXPONENT_ATOM.test(plain) ? `^${body}` : `^(${body})`) + after;
+}
+
+/**
+ * Plain-text projection of a raw HTML desc for the search index. It feeds the
+ * hover card, Browse snippets, the panel's offline excerpt, and search, so it
+ * must read as the panel does. Math spans are dropped first (so a stray `<`
+ * inside `$a<b$` can't merge with a later real `>` and swallow prose). Then
+ * inline tags drop with no space, superscripts become `^`, every other tag
+ * becomes a word break, and ONE full-table entity decode runs (`&divide;` →
+ * "÷", `&ne;` → "≠", `&radic;` → "√", `&theta;` → "θ"; the old hand-kept
+ * subset turned every unlisted entity into a space, so hover cards read
+ * "interpret 56 8" and "i 2 = –1"). Soft hyphens and zero-width characters
+ * drop, whitespace collapses, and the result is truncated at a word boundary
+ * near ~240 chars.
  *
  * A bare-`$` pair that reads as prose money is kept (it IS the sentence — see
  * isMathSpan), with the source's MathJax escape on `\$28` dropped so the amount
  * reads as written in a tooltip or a Browse snippet.
  */
-function toSearchText(html: string | undefined, limit = 240): string {
+export function toSearchText(html: string | undefined, limit = 240): string {
   if (!html) return "";
   let s = html;
   s = s.replace(MATH_SPAN, (m) =>
     m.startsWith("$") && !m.startsWith("$$") && !isMathSpan(m) ? m : " ",
   );
   s = s.replace(/\\\$/g, "$");
+  s = s.replace(INLINE_TAG, "");
+  // Back-to-back superscripts are one exponent: F-IF.C.8.b writes (1.01)^12t
+  // as `<sup>12</sup><sup>t</sup>`.
+  s = s.replace(/<\/sup><sup\b[^>]*>/gi, "");
+  s = s.replace(SUP_ELEMENT, supToText);
   s = s.replace(/<[^>]*>/g, " ");
-  s = s.replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)));
-  s = s.replace(/&[a-z]+;/gi, (m) => HTML_ENTITIES[m] ?? " ");
+  s = decodeHTML(s);
+  s = s.replace(/[\u00ad\u200b\u2063]/g, "");
   s = s.replace(/\s+/g, " ").trim();
   if (s.length <= limit) return s;
   const cut = s.slice(0, limit);

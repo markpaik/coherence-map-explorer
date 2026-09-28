@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decodeHTML } from "entities";
 import {
   buildGraph,
   sanitizeField,
   absolutize,
   safeLinkUrl,
+  toSearchText,
 } from "../scripts/build-graph";
 import { classifyStations } from "../src/scene/stations";
 import { classifyDrafts } from "../src/scene/drafts";
@@ -683,6 +685,82 @@ describe("math-span sanitization (no placeholder bypass)", () => {
   });
 });
 
+// Finding 46 (2026-09): the math decoder kept a hand-picked entity subset with
+// no `&shy;`, so F-IF.C.7.a's worked example shipped 18 `&amp;shy;` inside
+// math. KaTeX showed 12 red parse errors and printed "shy;" as variables in 4
+// align blocks. The decoder now uses the full HTML table, then drops the soft
+// hyphen and writes the snapshot's en-dash minus as `-`.
+describe("entity decoding inside math", () => {
+  // What the client's single innerHTML decode hands KaTeX for each span.
+  const MATH = /\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)/g;
+  const ENTITY = /&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);/;
+  const shippedMath: { where: string; tex: string }[] = [];
+  const walk = (v: unknown, where: string): void => {
+    if (typeof v === "string") {
+      for (const m of v.match(MATH) ?? []) shippedMath.push({ where, tex: decodeHTML(m) });
+    } else if (v && typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) walk(x, `${where}.${k}`);
+    }
+  };
+  for (const [g, shard] of Object.entries(detailShards)) walk(shard, g);
+
+  it("decodes a soft hyphen inside math to nothing", () => {
+    const out = sanitizeField("<p>$(-&shy;2,-&shy;5)$ and $$y &amp;= &shy;-(x + 2)^2 - 5$$</p>");
+    expect(out).toContain("\\((-2,-5)\\)");
+    expect(out).toContain("\\[y &amp;= -(x + 2)^2 - 5\\]");
+    expect(out).not.toContain("shy");
+    expect(out).not.toContain("\u00ad");
+  });
+
+  it("decodes every named entity inside math, not a hand-kept subset", () => {
+    const out = sanitizeField("<p>$&theta; &ne; &pi;, &radic;2 &asymp; 1.41, a&nbsp;b, &frac12;$</p>");
+    expect(out).toContain("\\(θ ≠ π, √2 ≈ 1.41, a b, ½\\)");
+    // The snapshot writes minus as an en dash. KaTeX has no math-mode glyph for
+    // U+2013, so it ships as the `-` that KaTeX renders as a minus sign.
+    expect(sanitizeField("<p>$24 &ndash; 16 = a$</p>")).toContain("\\(24 - 16 = a\\)");
+  });
+
+  it("neutralizes a NAMED or legacy entity-encoded sentinel (&ic;, &InvisibleComma;, &#x2063)", () => {
+    // `&ic;` and `&InvisibleComma;` decode to U+2063, the math-token sentinel.
+    // In prose, sanitizeHtml decodes them. In math, the full-table decoder
+    // would. Either way a forged token must stay inert text.
+    for (const forged of ["&ic;", "&InvisibleComma;", "&#x2063", "&#8291"]) {
+      const prose = sanitizeField(`<p>${forged}MATH0${forged} then $y<z$</p>`);
+      expect(prose, forged).not.toContain("\u2063");
+      expect(prose, forged).toContain("MATH0 then");
+      expect(prose.match(/\\\(y&lt;z\\\)/g), forged).toHaveLength(1);
+      const math = sanitizeField(`<p>$${forged}MATH1${forged}$ then $s<t$</p>`);
+      expect(math, forged).not.toContain("\u2063");
+      expect(math, forged).toContain("\\(MATH1\\)");
+      expect(math, forged).toContain("\\(s&lt;t\\)");
+    }
+  });
+
+  it("ships no HTML entity inside any math span in the corpus", () => {
+    expect(shippedMath.length).toBeGreaterThan(5000);
+    const bad = shippedMath.filter((s) => ENTITY.test(s.tex));
+    expect(bad.map((s) => `${s.where}: ${s.tex.slice(0, 80)}`)).toEqual([]);
+  });
+
+  it("ships no soft hyphen or en dash inside any math span in the corpus", () => {
+    const bad = shippedMath.filter((s) => /[\u00ad\u2013]/.test(s.tex));
+    expect(bad.map((s) => `${s.where}: ${s.tex.slice(0, 80)}`)).toEqual([]);
+  });
+
+  it("ships no `shy;` anywhere in the detail shards", () => {
+    for (const [g, shard] of Object.entries(detailShards)) {
+      expect(JSON.stringify(shard), `${g}.json`).not.toContain("shy;");
+    }
+  });
+
+  it("F-IF.C.7.a's worked example reads its points and align rows as written", () => {
+    const id = core.nodes.find((n) => n.code === "F-IF.C.7.a")!.id;
+    const example = (detailShards.HS[id] as { example: string }).example;
+    expect(example).toContain("\\((-2,-5)\\)");
+    expect(example).toContain("y &amp;= -(x + 2)^2 - 5");
+  });
+});
+
 // The 2026-07 delimiter finding: prose money read as math. Nine standard/field
 // pairs shipped garbled because a bare `$` amount paired with the next one and
 // KaTeX rendered the sentence between them as an equation. The fix is in the
@@ -866,6 +944,114 @@ describe("search index", () => {
     // every graph-core node has a matching search doc
     const searchIds = new Set(docs.map((d) => d.id));
     for (const n of core.nodes) expect(searchIds.has(n.id)).toBe(true);
+  });
+});
+
+// Finding 45 (2026-09): the search-text projection turned every tag and every
+// unlisted entity into a space. Hover cards, Browse snippets, and the offline
+// excerpt then showed false arithmetic ("interpret 56 8", "i 2 = –1").
+describe("search text projection", () => {
+  interface Doc {
+    id: string;
+    code: string;
+    grade: string;
+    text: string;
+  }
+  const docs: Doc[] = JSON.parse(readFileSync(resolve(DATA, "search.json"), "utf8"));
+  const byCode = new Map(docs.map((d) => [d.code, d]));
+  const textOf = (code: string): string => {
+    const d = byCode.get(code);
+    expect(d, `${code} has a search doc`).toBeDefined();
+    return d!.text;
+  };
+
+  it("decodes operator entities to their characters", () => {
+    expect(toSearchText("<p>interpret 56 &divide; 8, b &ne; 0, &radic;2, &theta;, &pi;/3</p>")).toBe(
+      "interpret 56 ÷ 8, b ≠ 0, √2, θ, π/3",
+    );
+    expect(toSearchText("<p>a&shy;b&nbsp;c &frac12; &#215; &#x2264;</p>")).toBe("ab c ½ × ≤");
+  });
+
+  it("drops inline tags without adding a space", () => {
+    expect(toSearchText('<p>of <a id="def">whole numbers</a>, e.g., <em>x</em>.</p>')).toBe(
+      "of whole numbers, e.g., x.",
+    );
+    // Block tags still separate words.
+    expect(toSearchText("<p>one</p><p>two<br>three</p>")).toBe("one two three");
+  });
+
+  it("writes an exponent as ^, bracketing any exponent longer than one number or letter", () => {
+    expect(toSearchText("<p>i<sup> 2</sup>&nbsp;= &ndash;1</p>")).toBe("i^2 = –1");
+    expect(toSearchText("<p>3<sup>&ndash;5</sup> and (x + y)<sup>n</sup></p>")).toBe("3^–5 and (x + y)^n");
+    expect(toSearchText("<p>5<sup>1/3</sup> and 1.012<sup>12t </sup>to reveal</p>")).toBe(
+      "5^(1/3) and 1.012^(12t) to reveal",
+    );
+    // Back-to-back superscripts are one exponent.
+    expect(toSearchText("<p>(1.01)<sup>12</sup><sup>t</sup></p>")).toBe("(1.01)^(12t)");
+  });
+
+  it("keeps a footnote superscript as text, not an exponent", () => {
+    expect(
+      toSearchText("<p>of operations.<sup>*</sup></p><p><sup>*Explanations may be supported.</sup></p>"),
+    ).toBe("of operations.* *Explanations may be supported.");
+  });
+
+  // Each pair: a standard, and a string its shipped text showed before the fix.
+  const BROKEN: [string, string][] = [
+    ["3.OA.A.2", "interpret 56 8 as"],
+    ["3.OA.A.2", "whole numbers , e.g."],
+    ["5.NF.B.3", "(a/b = a b)"],
+    ["6.RP.A.2", "with b 0,"],
+    ["3.OA.C.7", "one knows 40 5 = 8"],
+    ["3.OA.B.6", "find 32 8 by"],
+    ["N-CN.A.1", "i such that i 2 = –1"],
+    ["8.EE.A.1", "3 2 × 3 –5 = 3 –3 = 1/3 3 = 1/27"],
+    ["N-CN.B.5", "(–1 + 3 i) 3 = 8"],
+    ["F-TF.C.8", "sin 2 ( ) + cos 2 ( ) = 1"],
+    ["F-TF.A.3", "for /3, /4 and /6"],
+  ];
+  // The same places, read the way the panel shows them.
+  const FIXED: [string, string][] = [
+    ["3.OA.A.2", "interpret 56 ÷ 8 as"],
+    ["3.OA.A.2", "whole numbers, e.g."],
+    ["5.NF.B.3", "(a/b = a ÷ b)"],
+    ["6.RP.A.2", "with b ≠ 0,"],
+    ["3.OA.C.7", "one knows 40 ÷ 5 = 8"],
+    ["3.OA.B.6", "find 32 ÷ 8 by"],
+    ["N-CN.A.1", "i such that i^2 = –1"],
+    ["8.EE.A.1", "3^2 × 3^–5 = 3^–3 = 1/3^3 = 1/27"],
+    ["N-CN.B.5", "(–1 + √3 i)^3 = 8"],
+    ["F-TF.C.8", "sin^2(θ) + cos^2(θ) = 1"],
+    ["F-TF.A.3", "for π/3, π/4 and π/6"],
+    ["F-IF.C.8.b", "y = (1.01)^(12t), y = (1.2)^(t/10)"],
+  ];
+
+  it("shows none of the broken readings from the evidence", () => {
+    for (const [code, broken] of BROKEN) expect(textOf(code), code).not.toContain(broken);
+  });
+
+  it("shows the evidence standards the way the panel reads them", () => {
+    for (const [code, fixed] of FIXED) expect(textOf(code), code).toContain(fixed);
+  });
+
+  it("carries no entity text, soft hyphen, or space before a comma or full stop", () => {
+    for (const d of docs) {
+      expect(d.text, d.code).not.toMatch(/&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);/);
+      expect(d.text, d.code).not.toContain("\u00ad");
+      // "0, 1, 2, ..., and" (2.MD.B.6) is the source's own ellipsis.
+      expect(d.text, d.code).not.toMatch(/\s,|\s\.(?!\.)/);
+    }
+  });
+
+  it("keeps every operator symbol the panel desc shows, in order", () => {
+    const SYMBOLS = /[÷×≠√πθ±≈≥≤°−]/g;
+    for (const d of docs) {
+      const desc = (detailShards[d.grade][d.id] as { desc?: string }).desc ?? "";
+      const panel = decodeHTML(desc.replace(/<[^>]*>/g, "")).match(SYMBOLS) ?? [];
+      const shown = d.text.match(SYMBOLS) ?? [];
+      const expected = d.text.endsWith("…") ? panel.slice(0, shown.length) : panel;
+      expect(shown.join(""), d.code).toBe(expected.join(""));
+    }
   });
 });
 
