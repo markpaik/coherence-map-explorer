@@ -439,18 +439,35 @@ export function createPanel(
   }
   const isTerm = (t: EventTarget | null): t is HTMLElement =>
     t instanceof HTMLElement && t.classList.contains("term");
+  // A touch tap goes through the click toggle only. The same tap also fires
+  // pointerover, pointerout and focusin before its click, and when those opened
+  // the popover the click toggled it straight back shut, so the first tap
+  // showed nothing. Hover and focus stay live for mouse, pen and keyboard.
+  let touchPress = false;
+  body.addEventListener("pointerdown", (e) => {
+    touchPress = e.pointerType === "touch";
+  });
+  body.addEventListener("pointercancel", () => {
+    touchPress = false;
+  });
   body.addEventListener("pointerover", (e) => {
-    if (isTerm(e.target)) showPopover(e.target);
+    if (e.pointerType !== "touch" && isTerm(e.target)) showPopover(e.target);
   });
   body.addEventListener("pointerout", (e) => {
-    if (isTerm(e.target)) hidePopover();
+    if (e.pointerType !== "touch" && isTerm(e.target)) hidePopover();
   });
   body.addEventListener("focusin", (e) => {
+    // A touch press focuses the chip just before its click; the click decides.
+    if (touchPress) {
+      touchPress = false;
+      return;
+    }
     if (isTerm(e.target)) showPopover(e.target);
   });
   body.addEventListener("focusout", hidePopover);
   // Tap support: a term toggles the popover (chips get tabindex for keyboards).
   body.addEventListener("click", (e) => {
+    touchPress = false;
     if (isTerm(e.target)) {
       e.preventDefault();
       if (popover.hidden) showPopover(e.target);

@@ -815,6 +815,22 @@ body.art-fidenza .ghost-btn:hover {
   left: auto;
   right: 0;
 }
+/* Detail panel open (desktop): hung from the right, the dropdown lands wholly
+   under the panel (z 18 over the rail's z 10), and no result row can be seen
+   or clicked. Hang it from the search bar's LEFT edge instead and stop it 12px
+   short of the panel. The rail and the panel are both right-anchored, so the
+   panel's left edge sits a fixed 480px - 18px (panel width minus the docked
+   rail's right inset) in from the rail's right edge at every viewport width,
+   and 100% here is the rail's width. The panel is a later body child than the
+   rail, so this needs :has(), not the ~ rule the view toggle uses. Panel
+   closed, the rule above still applies unchanged. */
+@media (min-width: 721px) {
+  body:has(.panel.panel-open) .search-rail.search-docked .search-results {
+    left: 0;
+    right: auto;
+    width: min(420px, calc(100% - (480px - 18px + 12px)));
+  }
+}
 .ghost-btn.soon {
   color: var(--ink);
   border-color: var(--ink-3);
@@ -1447,6 +1463,13 @@ body.art-fidenza .ghost-btn:hover {
 }
 .glossary-pop[hidden] {
   display: none;
+}
+/* Browse's popover is a body child like the panel's, but the Browse overlay it
+   annotates is opaque and sits at z 45. At the base z 22 the definition painted
+   behind the overlay and never showed. One step above the overlay, still under
+   the story and dialog layers (55+). */
+.glossary-pop.glossary-pop-browse {
+  z-index: 46;
 }
 
 /* -- filters rail (bottom) ------------------------------------------------- */

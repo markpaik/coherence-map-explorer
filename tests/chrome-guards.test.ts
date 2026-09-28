@@ -247,6 +247,164 @@ describe("Browse glossary chips are keyboard-operable, like the panel's", () => 
 });
 
 // ---------------------------------------------------------------------------
+// Glossary chips on touch: one tap opens, the next tap closes.
+// ---------------------------------------------------------------------------
+
+type GlossEv = { type: string; pointerType?: "touch" | "mouse" };
+
+/**
+ * The popover handlers as panel.ts and browse.ts wire them. `fixed: false` is the
+ * old wiring (every pointerover/pointerout/focusin acted), `fixed: true` the
+ * current one (touch skips hover, and a touch press leaves focus to the click).
+ */
+function glossaryModel(fixed: boolean) {
+  let hidden = true;
+  let touchPress = false;
+  const on = (e: GlossEv): void => {
+    const touch = e.pointerType === "touch";
+    if (e.type === "pointerdown" && fixed) touchPress = touch;
+    else if (e.type === "pointercancel" && fixed) touchPress = false;
+    else if (e.type === "pointerover" && !(fixed && touch)) hidden = false;
+    else if (e.type === "pointerout" && !(fixed && touch)) hidden = true;
+    else if (e.type === "focusin") {
+      if (fixed && touchPress) touchPress = false;
+      else hidden = false;
+    } else if (e.type === "click") {
+      if (fixed) touchPress = false;
+      hidden = !hidden;
+    }
+  };
+  return {
+    run(evs: GlossEv[]): boolean {
+      for (const e of evs) on(e);
+      return hidden;
+    },
+  };
+}
+
+const t = (type: string): GlossEv => ({ type, pointerType: "touch" });
+const plain = (type: string): GlossEv => ({ type });
+// The event order Chromium dispatched for one tap on a term (audit trace,
+// 1024x768 touch and 390x844 phone): the first tap also focuses the chip.
+const TAP_UNFOCUSED = [
+  t("pointerover"), t("pointerdown"), t("pointerup"), t("pointerout"),
+  plain("mousedown"), plain("focusin"), plain("mouseup"), t("click"),
+];
+// The second tap on the same, already-focused chip: no focusin.
+const TAP_FOCUSED = [
+  t("pointerover"), t("pointerdown"), t("pointerup"), t("pointerout"),
+  plain("mousedown"), plain("mouseup"), t("click"),
+];
+
+describe("glossary chips: a touch tap goes through the click toggle only", () => {
+  it("the OLD wiring shows nothing on the first tap", () => {
+    expect(glossaryModel(false).run(TAP_UNFOCUSED), "hidden after tap 1").toBe(true);
+  });
+
+  it("now the first tap opens the popover and the second closes it", () => {
+    const m = glossaryModel(true);
+    expect(m.run(TAP_UNFOCUSED), "shown after tap 1").toBe(false);
+    expect(m.run(TAP_FOCUSED), "hidden after tap 2").toBe(true);
+    expect(m.run(TAP_FOCUSED), "shown after tap 3").toBe(false);
+  });
+
+  it("mouse hover and keyboard focus still open it on their own", () => {
+    const mouse = { type: "pointerover", pointerType: "mouse" } as const;
+    expect(glossaryModel(true).run([mouse]), "hover shows").toBe(false);
+    expect(
+      glossaryModel(true).run([mouse, { type: "pointerout", pointerType: "mouse" }]),
+      "leaving hides",
+    ).toBe(true);
+    expect(glossaryModel(true).run([plain("focusin")]), "focus shows").toBe(false);
+    // A touch scroll that never clicks does not swallow the next keyboard focus.
+    expect(glossaryModel(true).run([t("pointerdown"), t("pointercancel"), plain("focusin")])).toBe(
+      false,
+    );
+  });
+
+  it("panel.ts and browse.ts both carry that wiring", () => {
+    for (const [name, host] of [
+      ["src/ui/panel.ts", "body"],
+      ["src/ui/browse.ts", "viewHost"],
+    ] as const) {
+      const src = read(name);
+      const handler = (type: string): string => {
+        const at = src.indexOf(`${host}.addEventListener("${type}"`);
+        expect(at, `${name} has a ${type} handler`).toBeGreaterThan(-1);
+        return src.slice(at, src.indexOf("\n  });", at));
+      };
+      expect(handler("pointerdown")).toContain('touchPress = e.pointerType === "touch";');
+      expect(handler("pointercancel")).toContain("touchPress = false;");
+      for (const type of ["pointerover", "pointerout"]) {
+        expect(handler(type), `${name} ${type} ignores touch`).toContain(
+          'e.pointerType !== "touch" && isTerm(e.target)',
+        );
+      }
+      const focusin = handler("focusin");
+      expect(focusin.indexOf("if (touchPress)"), `${name} focusin defers to the click`).toBeLessThan(
+        focusin.indexOf("showPopover"),
+      );
+      expect(focusin.indexOf("if (touchPress)")).toBeGreaterThan(-1);
+      expect(handler("click"), `${name} click ends the gesture`).toContain("touchPress = false;");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chrome stacking: the Browse popover and the docked search dropdown.
+// ---------------------------------------------------------------------------
+
+describe("glossary popover and search dropdown paint where they can be seen", () => {
+  const css = read("src/style.css");
+  /** The declarations of the first rule whose selector line matches exactly. */
+  const rule = (selectorLine: string): string => {
+    const at = css.indexOf(selectorLine + " {\n");
+    expect(at, `rule "${selectorLine}" exists`).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  const px = (block: string, prop: string): number => {
+    const m = block.match(new RegExp(`\\n\\s*${prop}: (-?\\d+)(px)?;`));
+    expect(m, `${prop} is a plain number`).not.toBeNull();
+    return Number(m![1]);
+  };
+
+  it("the Browse popover sits above the opaque Browse overlay", () => {
+    const browse = read("src/ui/browse.ts");
+    expect(browse).toContain('popover.className = "glossary-pop glossary-pop-browse";');
+    const overlayZ = px(rule("\n.browse"), "z-index");
+    const popZ = px(rule("\n.glossary-pop.glossary-pop-browse"), "z-index");
+    expect(popZ, "above the overlay").toBeGreaterThan(overlayZ);
+    // …and still under the story blocker and dialogs (55+).
+    expect(popZ).toBeLessThan(55);
+  });
+
+  it("with the panel open, the docked dropdown ends short of the panel's left edge", () => {
+    const panelW = px(rule("\n.panel"), "width");
+    const railInset = px(rule("\n.search-rail.search-docked"), "right");
+    const open = rule(
+      "@media (min-width: 721px) {\n  body:has(.panel.panel-open) .search-rail.search-docked .search-results",
+    );
+    expect(open).toContain("left: 0;");
+    expect(open).toContain("right: auto;");
+    const m = open.match(/width: min\(420px, calc\(100% - \((\d+)px - (\d+)px \+ (\d+)px\)\)\);/);
+    expect(m, "width is read off the rail").not.toBeNull();
+    const [cPanel, cInset, gap] = m!.slice(1).map(Number);
+    expect(cPanel, "calc uses the real panel width").toBe(panelW);
+    expect(cInset, "calc uses the real docked-rail inset").toBe(railInset);
+    // Rail right edge = W - inset. The dropdown starts at the rail's left edge and
+    // spans railW - (panelW - inset + gap), so it ends at W - panelW - gap: left
+    // of the panel (W - panelW) at every width W and every rail width.
+    for (const W of [1280, 1440, 1920]) {
+      for (const railW of [700, 847, 1000]) {
+        const left = W - railInset - railW;
+        const right = left + Math.min(420, railW - (cPanel - cInset + gap));
+        expect(right, `W=${W} railW=${railW}`).toBeLessThanOrEqual(W - panelW - gap);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Story card focus trap: DOM order, so the wrap reaches the citation.
 // ---------------------------------------------------------------------------
 

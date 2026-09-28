@@ -252,7 +252,8 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
 
   // --- shared glossary popover (for .term chips inside desc HTML) ---------
   const popover = document.createElement("div");
-  popover.className = "glossary-pop";
+  // The modifier lifts it above the opaque overlay (see .glossary-pop-browse).
+  popover.className = "glossary-pop glossary-pop-browse";
   popover.hidden = true;
   popover.setAttribute("role", "tooltip");
   const isTerm = (t: EventTarget | null): t is HTMLElement =>
@@ -311,17 +312,33 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   // the 3D panel: the chips are tabIndex=0 role=button, so focus must open the
   // popover exactly as hover does, and Enter/Space must activate it (a
   // span[role=button] synthesizes no click of its own).
+  // A touch tap goes through the click toggle only, as in the panel: the tap's
+  // own pointerover and focusin would open the popover just before its click
+  // toggled it shut, so the first tap showed nothing.
+  let touchPress = false;
+  viewHost.addEventListener("pointerdown", (e) => {
+    touchPress = e.pointerType === "touch";
+  });
+  viewHost.addEventListener("pointercancel", () => {
+    touchPress = false;
+  });
   viewHost.addEventListener("pointerover", (e) => {
-    if (isTerm(e.target)) showPopover(e.target);
+    if (e.pointerType !== "touch" && isTerm(e.target)) showPopover(e.target);
   });
   viewHost.addEventListener("pointerout", (e) => {
-    if (isTerm(e.target)) hidePopover();
+    if (e.pointerType !== "touch" && isTerm(e.target)) hidePopover();
   });
   viewHost.addEventListener("focusin", (e) => {
+    // A touch press focuses the chip just before its click; the click decides.
+    if (touchPress) {
+      touchPress = false;
+      return;
+    }
     if (isTerm(e.target)) showPopover(e.target);
   });
   viewHost.addEventListener("focusout", hidePopover);
   viewHost.addEventListener("click", (e) => {
+    touchPress = false;
     if (isTerm(e.target)) {
       e.preventDefault();
       popover.hidden ? showPopover(e.target) : hidePopover();
