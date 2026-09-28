@@ -59,6 +59,8 @@ import { FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
 import { decideRoute, storyIdFromHash, codeFromHash } from "./state/routing";
+import { claimChunkReload } from "./state/chunkreload";
+import { hasFloatColorBuffer } from "./scene/glcaps";
 import { shouldPlayOpener } from "./scene/opener";
 import { createPicking } from "./interaction/picking";
 import { createDamageEngine } from "./stories/damage";
@@ -75,12 +77,30 @@ const MAX_PIXEL_RATIO = 2;
 // engages; it is a safety net for weaker devices, not a normal-path behavior.
 const MIN_PIXEL_RATIO = 1.5;
 
-// Probe: is a WebGL2 context obtainable at all? (Cheap throwaway canvas.)
-function supportsWebGL2(): boolean {
+// Stale-chunk recovery (state/chunkreload). Vite fires `vite:preloadError` when
+// a lazy chunk (KaTeX, MiniSearch) or its CSS fails to load. After a deploy that
+// means an open tab is asking for a chunk name that no longer exists, so reload
+// once into the new build. Registered before any dynamic import can run. The
+// event is not cancelled: when the guard declines (already reloaded into this
+// build), the error still reaches each caller's own failure path.
+window.addEventListener("vite:preloadError", () => {
+  if (claimChunkReload(() => window.sessionStorage, import.meta.url)) location.reload();
+});
+
+// Probe: can this device run the scene? Returns null when it can, otherwise the
+// reason for the DOM list fallback (logged to the console only). A WebGL2
+// context is not enough: the bloom chain needs a float color buffer, and a GPU
+// without one drew a solid black scene (scene/glcaps). Cheap throwaway canvas,
+// released after the probe.
+function webglBlocker(): string | null {
   try {
-    return !!document.createElement("canvas").getContext("webgl2");
+    const gl = document.createElement("canvas").getContext("webgl2");
+    if (!gl) return "WebGL2 unavailable";
+    const ok = hasFloatColorBuffer(gl);
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return ok ? null : "WebGL2 without a float color buffer (bloom needs one)";
   } catch {
-    return false;
+    return "WebGL2 unavailable";
   }
 }
 
@@ -132,9 +152,11 @@ function start(graph: GraphCore): void {
   if (og) document.body.classList.add("og");
 
   // -- no-WebGL fallback --------------------------------------------------
-  // ?nowebgl=1 forces it; otherwise fall back only if WebGL2 is truly absent.
-  if (params.has("nowebgl") || !supportsWebGL2()) {
-    createFallback(graph, params.has("nowebgl") ? "forced via ?nowebgl=1" : "WebGL2 unavailable");
+  // ?nowebgl=1 forces it; otherwise fall back only if WebGL2 is truly absent or
+  // cannot render the bloom chain's float color buffers.
+  const glBlocker = params.has("nowebgl") ? "forced via ?nowebgl=1" : webglBlocker();
+  if (glBlocker) {
+    createFallback(graph, glBlocker);
     return;
   }
 

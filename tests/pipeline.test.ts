@@ -1078,15 +1078,18 @@ describe("determinism", () => {
 });
 
 describe("wrangler config", () => {
-  it("parses (comments stripped) and targets ./dist as an SPA", () => {
+  it("parses (comments stripped), targets ./dist, and has no SPA fallback", () => {
     const jsonc = readFileSync(resolve(ROOT, "wrangler.jsonc"), "utf8");
     const stripped = jsonc
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/^\s*\/\/.*$/gm, "");
     const cfg = JSON.parse(stripped) as {
-      assets: { directory: string; not_found_handling: string };
+      assets: { directory: string; not_found_handling?: string };
     };
     expect(cfg.assets.directory).toBe("./dist");
-    expect(cfg.assets.not_found_handling).toBe("single-page-application");
+    // Finding 55: the app routes by hash only, so the SPA fallback served no
+    // route. It only turned a missing /assets/*.js into index.html with HTTP 200
+    // under the one-year immutable cache rule. A missing file must be a 404.
+    expect(cfg.assets.not_found_handling ?? "none").not.toBe("single-page-application");
   });
 });

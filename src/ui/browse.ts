@@ -22,6 +22,7 @@ import type { GraphCore, GraphNode, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
 import { STRAND_COLORS } from "../scene/palette";
 import { resolveConnections, type Machine } from "../state/machine";
+import { codeFromHash, storyIdFromHash } from "../state/routing";
 import type { StoryPickerHandle } from "../stories/player";
 import { rankResults, type RankItem } from "./searchrank";
 import { httpsUpgrade } from "./urls";
@@ -119,7 +120,7 @@ function wrapBareEnvironments(root: HTMLElement): void {
 }
 function loadKatex(): Promise<(el: HTMLElement) => void> {
   if (!katexPromise) {
-    katexPromise = (async () => {
+    const p = (async () => {
       const [{ default: renderMathInElement }] = await Promise.all([
         import("katex/contrib/auto-render"),
         import("katex/dist/katex.min.css"),
@@ -136,6 +137,13 @@ function loadKatex(): Promise<(el: HTMLElement) => void> {
         });
       };
     })();
+    katexPromise = p;
+    // Never cache a failure. A chunk that failed once (a stale tab after a
+    // deploy, a dropped connection) used to leave math raw for the rest of the
+    // session. Dropping the rejected promise lets the next render try again.
+    p.catch(() => {
+      if (katexPromise === p) katexPromise = null;
+    });
   }
   return katexPromise;
 }
@@ -427,8 +435,9 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       }
       return;
     }
-    // Same parent-boost + grade-tiebreak ranking as the desktop search rail, so
-    // a family parent (4.NF.B.3) never sorts below its own sub-standards.
+    // Same exact-code-first + parent-boost + grade-tiebreak ranking as the
+    // desktop search rail, so a typed full code leads and a family parent
+    // (4.NF.B.3) never sorts below its own sub-standards.
     const items: RankItem[] = [];
     for (const h of searchIndex.search(q)) {
       const i = nodeById.get(h.id);
@@ -436,7 +445,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       const n = graph.nodes[i];
       items.push({ id: n.id, code: n.code, grade: n.grade, score: h.score, parentId: n.parent });
     }
-    const idxs = rankResults(items)
+    const idxs = rankResults(items, q)
       .slice(0, SEARCH_MAX)
       .map((it) => nodeById.get(it.id)!)
       .filter((i): i is number => i !== undefined);
@@ -1128,9 +1137,10 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   // --- boot --------------------------------------------------------------
   // A story deep link at boot owns the scene — leave Browse closed (the pill,
   // hidden by CSS while a story runs, brings it back when the story exits).
-  const storyHashAtBoot = /^#\/story\//.test(location.hash);
-  const codeMatch = /^#\/s\/(.+)$/.exec(location.hash);
-  const bootCode = codeMatch ? decodeURIComponent(codeMatch[1]) : null;
+  // The shared parser (state/routing) owns the regex + decode, so a malformed
+  // %-escape reads as "no deep link" here too instead of throwing at boot.
+  const storyHashAtBoot = storyIdFromHash(location.hash) !== null;
+  const bootCode = codeFromHash(location.hash);
   if (bootCode && nodeByCode.has(bootCode)) {
     // Open Browse directly at the deep-linked standard's view (Back → Home).
     stack = [{ t: "home" }, { t: "standard", code: bootCode }];

@@ -103,6 +103,12 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   // dropdown says so and offers a retry, and the flag clears the moment a retry
   // gets through.
   let indexFailed = false;
+  // The failure came from the MiniSearch CHUNK, not the search.json payload.
+  // After a deploy an open tab asks for a chunk name that no longer exists, and
+  // the browser keeps that failed module for the life of the page: a re-import
+  // makes no new request (observed in Chromium). Only a reload, which fetches
+  // the new index.html and its new chunk names, can recover it.
+  let chunkFailed = false;
   let active = -1;
   let results: SearchDoc[] = [];
   // Matches suppressed by the active filters (surfaced as a "Show all" row).
@@ -147,7 +153,10 @@ export function createSearch(deps: SearchDeps): SearchHandle {
     indexFailed = false;
     try {
       const [{ default: MiniSearch }, docs] = await Promise.all([
-        import("minisearch"),
+        import("minisearch").catch((err: unknown) => {
+          chunkFailed = true;
+          throw err;
+        }),
         loadSearchDocs(),
       ]);
       for (const d of docs) docsById.set(d.id, d);
@@ -250,7 +259,13 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   }
 
   // Rebuild the index and, if it lands, run the query the reader already typed.
+  // A failed chunk cannot be re-imported in place, so Retry reloads the page
+  // instead (a reader's click, so it can never loop on its own).
   function retryIndex(): void {
+    if (chunkFailed) {
+      location.reload();
+      return;
+    }
     indexFailed = false;
     renderResults(); // drop the failure row while the retry is in flight
     void ensureIndex().then(() => {
@@ -353,15 +368,16 @@ export function createSearch(deps: SearchDeps): SearchHandle {
       renderResults();
       return;
     }
-    // Rank ALL matches: parent-boosted score, grade only as a tiebreak (never a
-    // global bias). Then partition against the active filters so suppressed
-    // matches are counted and surfaced, not silently sliced off the end.
+    // Rank ALL matches: an exact code match first, then parent-boosted score,
+    // grade only as a tiebreak (never a global bias). Then partition against
+    // the active filters so suppressed matches are counted and surfaced, not
+    // silently sliced off the end.
     const items: RankItem[] = [];
     for (const h of index.search(q)) {
       const d = docsById.get(h.id);
       if (d) items.push({ id: d.id, code: d.code, grade: d.grade, score: h.score, parentId: parentById.get(d.id) });
     }
-    const rankedDocs = rankResults(items)
+    const rankedDocs = rankResults(items, q)
       .map((it) => docsById.get(it.id))
       .filter((d): d is SearchDoc => d !== undefined);
 

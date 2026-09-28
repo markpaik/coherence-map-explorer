@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseHash,
+  safeDecode,
   codeFromHash,
   storyIdFromHash,
   standardHref,
@@ -37,6 +38,49 @@ describe("parseHash", () => {
   it("story is matched before standard (distinct prefixes, no overlap)", () => {
     // A story id that itself contains "/s/" must still parse as a story.
     expect(parseHash("#/story/s/weird")).toEqual({ kind: "story", id: "s/weird" });
+  });
+});
+
+describe("malformed %-escapes (redteam finding 5: boot crash)", () => {
+  // A hash is reader-editable input. decodeURIComponent threw a URIError on
+  // these at boot, which read as "Check your connection", and Reload replayed it.
+  const MALFORMED = ["#/s/4.NF.B.3%", "#/s/%E0%A4%A", "#/s/%", "#/story/%", "#/story/%E0%A4%A"];
+
+  it("safeDecode returns null on a URIError and decodes everything else", () => {
+    expect(safeDecode("%")).toBeNull();
+    expect(safeDecode("%E0%A4%A")).toBeNull();
+    expect(safeDecode("4.NF.B.3%")).toBeNull();
+    expect(safeDecode("4.NF.B.3")).toBe("4.NF.B.3");
+    expect(safeDecode("a%20b")).toBe("a b");
+    expect(safeDecode("%E0%A4%A4")).toBe("\u0924");
+  });
+
+  it("parseHash never throws and reads a malformed escape as 'none'", () => {
+    for (const h of MALFORMED) {
+      expect(() => parseHash(h)).not.toThrow();
+      expect(parseHash(h)).toEqual({ kind: "none" });
+    }
+  });
+
+  it("codeFromHash / storyIdFromHash return null for a malformed escape", () => {
+    for (const h of MALFORMED) {
+      expect(codeFromHash(h)).toBeNull();
+      expect(storyIdFromHash(h)).toBeNull();
+    }
+  });
+
+  it("decideRoute treats a malformed hash as no hash (never throws)", () => {
+    const ctx: RouteContext = {
+      hash: "#/s/%E0%A4%A",
+      storyRunning: false,
+      tourRunning: false,
+      browseOpen: false,
+      focusedCode: null,
+    };
+    expect(decideRoute(ctx)).toEqual({ action: "noop" });
+    // At runtime (a reader edits the hash while focused) it closes the focus,
+    // exactly as an emptied hash does.
+    expect(decideRoute({ ...ctx, focusedCode: "6.RP.A.3" })).toEqual({ action: "clear" });
   });
 });
 

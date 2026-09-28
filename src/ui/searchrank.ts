@@ -2,6 +2,12 @@
 // tested directly (tests/searchrank.test.ts). MiniSearch gives a relevance score;
 // this shapes it into the order a teacher expects:
 //
+//   0. An EXACT code match ranks first, ahead of everything below (including
+//      the parent boost). Typing the full code "4.NF.B.3.c" and pressing Enter
+//      must open 4.NF.B.3.c: MiniSearch splits a code on its dots, so the fuzzy
+//      and prefix hits on "4" / "nf" / "b" / "3" / "c" outscored the true match
+//      (it ranked 7th of 8, and Enter opened 5.NF.B.4). The match ignores case
+//      and surrounding whitespace ("4.nf.b.3" is 4.NF.B.3).
 //   1. A PARENT standard never ranks below its own sub-standards. A family is one
 //      idea on the original coherence map, so a parent inherits the best score
 //      among itself and any of its matched children (a "parent boost"). Query
@@ -28,12 +34,20 @@ export interface RankItem {
   parentId?: string;
 }
 
+/** A code or query in comparable form: trimmed, lower-cased. */
+export function normalizeCode(s: string): string {
+  return s.trim().toLowerCase();
+}
+
 /**
- * Order matched standards: parent-boosted score descending, then grade ascending,
- * then code ascending. Pure and stable-enough (total order via the code tiebreak).
+ * Order matched standards: an exact code match for `query` first (when given),
+ * then parent-boosted score descending, then grade ascending, then code
+ * ascending. Pure and stable-enough (total order via the code tiebreak).
  * Returns a new array; the input is not mutated.
  */
-export function rankResults<T extends RankItem>(items: readonly T[]): T[] {
+export function rankResults<T extends RankItem>(items: readonly T[], query?: string): T[] {
+  const exact = query !== undefined ? normalizeCode(query) : "";
+  const isExact = (it: RankItem): boolean => exact !== "" && normalizeCode(it.code) === exact;
   const present = new Set(items.map((i) => i.id));
   // Effective score: a parent gets the max score across itself and its matched
   // children, so a strong sub-standard lifts its whole family (parent first).
@@ -46,6 +60,9 @@ export function rankResults<T extends RankItem>(items: readonly T[]): T[] {
     }
   }
   return [...items].sort((a, b) => {
+    const xa = isExact(a);
+    const xb = isExact(b);
+    if (xa !== xb) return xa ? -1 : 1;
     const sa = eff.get(a.id) ?? a.score;
     const sb = eff.get(b.id) ?? b.score;
     if (sb !== sa) return sb - sa;

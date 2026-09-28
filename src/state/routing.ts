@@ -13,11 +13,35 @@ export type HashRoute =
   | { kind: "story"; id: string }
   | { kind: "none" };
 
+/**
+ * decodeURIComponent that returns null instead of throwing on a malformed
+ * %-escape. The hash is reader-editable input: `#/s/4.NF.B.3%` or
+ * `#/s/%E0%A4%A` used to throw a URIError at boot, which surfaced as the false
+ * "Check your connection" error, and Reload replayed the same crash.
+ */
+export function safeDecode(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch (err) {
+    if (err instanceof URIError) return null;
+    throw err;
+  }
+}
+
+/** The single hash parser. A malformed escape in either scheme reads as
+ *  "none" (no deep link), never as a throw. Every hash reader (main's router,
+ *  Browse's boot, the no-WebGL list) routes through here. */
 export function parseHash(hash: string): HashRoute {
   const story = /^#\/story\/(.+)$/.exec(hash);
-  if (story) return { kind: "story", id: decodeURIComponent(story[1]) };
+  if (story) {
+    const id = safeDecode(story[1]);
+    return id === null ? { kind: "none" } : { kind: "story", id };
+  }
   const std = /^#\/s\/(.+)$/.exec(hash);
-  if (std) return { kind: "standard", code: decodeURIComponent(std[1]) };
+  if (std) {
+    const code = safeDecode(std[1]);
+    return code === null ? { kind: "none" } : { kind: "standard", code };
+  }
   return { kind: "none" };
 }
 

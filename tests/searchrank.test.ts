@@ -42,6 +42,37 @@ describe("rankResults: parent boost", () => {
   });
 });
 
+describe("rankResults: an exact code match ranks first (redteam finding 85)", () => {
+  it("puts the exact sub-standard ahead of higher-scoring fuzzy hits and its parent", () => {
+    const ranked = rankResults(
+      [
+        { id: "x", code: "5.NF.B.4", grade: "5", score: 90 },
+        { id: "p", code: "4.NF.B.3", grade: "4", score: 60 },
+        { id: "c", code: "4.NF.B.3.c", grade: "4", score: 50, parentId: "p" },
+      ],
+      "4.NF.B.3.c",
+    );
+    expect(codes(ranked)[0]).toBe("4.NF.B.3.c");
+  });
+
+  it("ignores case and surrounding whitespace", () => {
+    const items = [
+      { id: "x", code: "4.NF.B.4", grade: "4", score: 90 },
+      { id: "p", code: "4.NF.B.3", grade: "4", score: 10 },
+    ];
+    expect(codes(rankResults(items, "4.nf.b.3"))[0]).toBe("4.NF.B.3");
+    expect(codes(rankResults(items, "  4.NF.B.3 \t"))[0]).toBe("4.NF.B.3");
+  });
+
+  it("leaves the order unchanged when nothing matches the query exactly", () => {
+    const items = [
+      { id: "p", code: "4.NF.B.3", grade: "4", score: 30 },
+      { id: "c", code: "4.NF.B.3.c", grade: "4", score: 36, parentId: "p" },
+    ];
+    expect(codes(rankResults(items, "add fractions"))).toEqual(codes(rankResults(items)));
+  });
+});
+
 describe("rankResults: grade is only a tiebreak, never a global bias", () => {
   it("a higher-scoring later grade still beats a lower-scoring early grade", () => {
     const ranked = rankResults([
@@ -66,7 +97,7 @@ describe("rankResults: grade is only a tiebreak, never a global bias", () => {
   });
 });
 
-describe("rankResults on the real index: 'add fractions'", () => {
+describe("rankResults on the real index", () => {
   const docs = JSON.parse(
     readFileSync(resolve(ROOT, "public/data/search.json"), "utf8"),
   ) as { id: string; code: string; grade: string }[];
@@ -84,19 +115,23 @@ describe("rankResults on the real index: 'add fractions'", () => {
   });
   ms.addAll(docs as unknown as Record<string, unknown>[]);
 
-  const ranked = rankResults(
-    ms.search("add fractions").map((h) => {
-      const d = byId.get(h.id as string)!;
-      return {
-        id: h.id as string,
-        code: d.code,
-        grade: d.grade,
-        score: h.score,
-        parentId: parentById.get(h.id as string),
-      };
-    }),
-  );
-  const order = ranked.map((r) => r.code);
+  // The same mapping search.ts / browse.ts run: MiniSearch hits → rank items
+  // → rankResults with the typed query.
+  const rankQuery = (q: string): string[] =>
+    rankResults(
+      ms.search(q).map((h) => {
+        const d = byId.get(h.id as string)!;
+        return {
+          id: h.id as string,
+          code: d.code,
+          grade: d.grade,
+          score: h.score,
+          parentId: parentById.get(h.id as string),
+        };
+      }),
+      q,
+    ).map((r) => r.code);
+  const order = rankQuery("add fractions");
 
   it("4.NF.B.3 beats its own sub-standards .c and .d", () => {
     const p = order.indexOf("4.NF.B.3");
@@ -109,5 +144,24 @@ describe("rankResults on the real index: 'add fractions'", () => {
 
   it("the top result is still the strongest raw relevance match", () => {
     expect(order[0]).toBe("5.NF.A.1");
+  });
+
+  // Finding 85: typing a full code and pressing Enter opened the wrong standard.
+  // "4.NF.B.3.c" ranked 7th of 8 behind 5.NF.B.4; "A-SSE.B.3.c" ranked 4th behind
+  // 3.MD.C.7. Enter picks the first row, so the exact code must lead.
+  it.each([
+    ["4.NF.B.3.c", "4.NF.B.3.c"],
+    ["A-SSE.B.3.c", "A-SSE.B.3.c"],
+    ["6.RP.A.3.a", "6.RP.A.3.a"],
+    ["4.nf.b.3", "4.NF.B.3"],
+    ["4.NF.B.3", "4.NF.B.3"],
+    [" 4.NF.B.3.c ", "4.NF.B.3.c"],
+  ])("an exact code query %j ranks %s first", (q, want) => {
+    expect(rankQuery(q)[0]).toBe(want);
+  });
+
+  it("an exact sub-standard query outranks its own parent (exact beats the boost)", () => {
+    const order = rankQuery("4.NF.B.3.c");
+    expect(order.indexOf("4.NF.B.3.c")).toBeLessThan(order.indexOf("4.NF.B.3"));
   });
 });
