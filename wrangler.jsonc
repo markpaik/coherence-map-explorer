@@ -1,11 +1,16 @@
 {
-  // Coherence Map Explorer — Cloudflare static-assets (SPA) deployment.
-  // The built Vite output in ./dist is served directly; unmatched routes
-  // fall back to index.html so client-side state (deep links) resolves.
+  // Coherence Map Explorer — Cloudflare static-assets deployment.
+  // The built Vite output in ./dist is served directly. There is deliberately
+  // NO single-page-application fallback: every app route is a hash on the one
+  // root page (#/s/<CODE>, #/story/<id>), so "/" (and "/?browse=1" etc.) is the
+  // only document path. With the fallback on, a missing hashed chunk
+  // (/assets/*.js from a build that a newer deploy replaced) came back as
+  // index.html with HTTP 200 and the one-year immutable /assets/* cache header,
+  // and the browser stored that HTML under the JS URL. Unmatched paths now
+  // return a plain 404, which the app's stale-chunk reload can recover from.
   "name": "coherence-map-explorer",
   "compatibility_date": "2026-07-15",
   "assets": {
-    "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    "directory": "./dist"
   }
 }

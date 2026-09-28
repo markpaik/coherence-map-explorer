@@ -129,7 +129,7 @@ function wrapBareEnvironments(root: HTMLElement): void {
 
 function loadKatex(): Promise<(el: HTMLElement) => void> {
   if (!katexPromise) {
-    katexPromise = (async () => {
+    const p = (async () => {
       const [{ default: renderMathInElement }] = await Promise.all([
         import("katex/contrib/auto-render"),
         import("katex/dist/katex.min.css"),
@@ -146,6 +146,13 @@ function loadKatex(): Promise<(el: HTMLElement) => void> {
         });
       };
     })();
+    katexPromise = p;
+    // Never cache a failure. A chunk that failed once (a stale tab after a
+    // deploy, a dropped connection) used to leave math raw for the rest of the
+    // session. Dropping the rejected promise lets the next render try again.
+    p.catch(() => {
+      if (katexPromise === p) katexPromise = null;
+    });
   }
   return katexPromise;
 }

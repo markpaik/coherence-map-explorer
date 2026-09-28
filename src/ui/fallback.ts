@@ -13,6 +13,7 @@
 import type { GraphCore } from "../data";
 import { createPanel, type Connections } from "./panel";
 import { resolveConnections } from "../state/machine";
+import { codeFromHash } from "../state/routing";
 import { STRAND_COLORS } from "../scene/palette";
 
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
@@ -215,10 +216,11 @@ export function createFallback(graph: GraphCore, reason: string): void {
     }
   });
 
-  // Honor a deep link (#/s/<CODE>) into the list view.
-  const m = /^#\/s\/(.+)$/.exec(location.hash);
-  if (m) {
-    const i = indexByCode.get(decodeURIComponent(m[1]));
+  // Honor a deep link (#/s/<CODE>) into the list view. The shared parser owns
+  // the decode, so a malformed %-escape is simply no deep link, not a throw.
+  const code = codeFromHash(location.hash);
+  if (code !== null) {
+    const i = indexByCode.get(code);
     if (i !== undefined) openStandard(i);
   }
 }
