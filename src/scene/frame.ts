@@ -67,10 +67,15 @@ const TITLE_BAND_MAX = 140;
  * The chrome may never eat more than this much of the frame. These two caps are
  * what keep the rect from collapsing into a sliver no matter what the DOM says
  * (a mis-measured bottom band, a panel that went full-bleed): the rect is always
- * at least 55% of the width and 54% of the height.
+ * at least 25% of the width and 54% of the height.
+ *
+ * The panel cap is a sanity bound ONLY — a real side panel never reaches it. The
+ * panel is a fixed 480px from 721px up, so it takes at most 67% of the width, and
+ * it must be reserved in full: at 45% (the old cap) every window from 721 to
+ * 1066px wide composed the focused standard behind the panel.
  */
 const MAX_BOTTOM_FRAC = 0.35;
-const MAX_PANEL_FRAC = 0.45;
+const MAX_PANEL_FRAC = 0.75;
 
 /** The on-screen rectangle a framing targets. Pure over measured chrome. */
 export function computeUsableRect(m: ChromeMetrics): Rect {
@@ -139,11 +144,16 @@ export function measureChrome(): ChromeMetrics {
   // 720px; a sheet covers the map outright, so it reserves nothing. Keyed on the
   // OPEN CLASS, not the rect: the panel slides in over 280ms and is measured the
   // instant it is asked to open, so its transform would otherwise read as closed.
+  // For the same reason it is read from its LAYOUT box (offsetLeft/offsetWidth
+  // ignore transforms). The two shapes differ by where they start: a side panel
+  // leaves the map to its left, the sheet spans the width from x = 0. A side
+  // panel is reserved whatever share of the width it takes (the old 60%-of-width
+  // gate dropped the 480px panel on every window under 800px).
   let panelWidth = 0;
   const panelEl = document.querySelector(".panel");
   if (panelEl instanceof HTMLElement && !panelEl.hidden && panelEl.classList.contains("panel-open")) {
-    const r = panelEl.getBoundingClientRect();
-    if (r.width > 0 && r.width < W * 0.6) panelWidth = r.width;
+    const left = panelEl.offsetLeft;
+    if (panelEl.offsetWidth > 0 && left > 0 && left < W) panelWidth = W - left;
   }
 
   return {
@@ -291,22 +301,21 @@ function distanceToFit(c: Float64Array, availW: number, availH: number, k: numbe
   return hi;
 }
 
-/**
- * Solve the framing: a distance that fits the subject inside the usable rect
- * (retreating up to `maxPullback` to take the context in with it), and the focal
- * offset that lands the composition where it belongs — the context's weight on
- * the rect's centre (plus any bias), clamped so the subject never leaves the
- * rect. Pure: no THREE side effects beyond the scratch vectors.
- */
-export function solveFrame(input: FrameSolveInput): FrameSolution {
-  const W = Math.max(1, input.viewportWidth);
-  const H = Math.max(1, input.viewportHeight);
-  const rect = input.rect;
-  const margin = input.margin ?? DEFAULT_MARGIN;
-  const bias = input.bias ?? { x: 0, y: 0 };
-  // Pixels per (world unit / depth unit): both screen axes share it.
-  const k = H / 2 / Math.tan((input.fovDeg * Math.PI) / 360);
+/** Pixels per (world unit / depth unit) for a vertical FOV: both screen axes share it. */
+function pxPerUnit(fovDeg: number, viewportHeight: number): number {
+  return Math.max(1, viewportHeight) / 2 / Math.tan((fovDeg * Math.PI) / 360);
+}
 
+interface View {
+  W: number;
+  H: number;
+  k: number;
+  subject: Float64Array;
+  context: Float64Array | null;
+}
+
+/** Aim the scratch basis down the eye → target view and put the boxes in it. */
+function viewOf(input: FrameSolveInput): View {
   _fwd.copy(input.target).sub(input.eye);
   if (_fwd.lengthSq() < 1e-12) _fwd.set(0, 0, -1);
   _fwd.normalize();
@@ -316,17 +325,36 @@ export function solveFrame(input: FrameSolveInput): FrameSolution {
   _up.copy(_right).cross(_fwd).normalize();
 
   const pivot = input.target;
-  const subject = cornersInView(input.subject, pivot);
   // The context is composed as the WHOLE VISIBLE MASS: the lit set UNION the
   // subject. A scene whose camera leads half a step ahead of its lit frontier
   // (the story grammar) has a subject sticking out of its lit set; centring the
   // lit set alone would then shove the subject to an edge and the containment
   // clamp would drag everything back off-centre anyway. Centring the union puts
   // the compromise where it belongs — in the middle.
-  const context =
-    input.context && !input.context.isEmpty()
-      ? cornersInView(_ctxBox.copy(input.context).union(input.subject), pivot)
-      : null;
+  return {
+    W: Math.max(1, input.viewportWidth),
+    H: Math.max(1, input.viewportHeight),
+    k: pxPerUnit(input.fovDeg, input.viewportHeight),
+    subject: cornersInView(input.subject, pivot),
+    context:
+      input.context && !input.context.isEmpty()
+        ? cornersInView(_ctxBox.copy(input.context).union(input.subject), pivot)
+        : null,
+  };
+}
+
+/**
+ * Solve the framing: a distance that fits the subject inside the usable rect
+ * (retreating up to `maxPullback` to take the context in with it), and the focal
+ * offset that lands the composition where it belongs — the context's weight on
+ * the rect's centre (plus any bias), clamped so the subject never leaves the
+ * rect. Pure: no THREE side effects beyond the scratch vectors.
+ */
+export function solveFrame(input: FrameSolveInput): FrameSolution {
+  const rect = input.rect;
+  const margin = input.margin ?? DEFAULT_MARGIN;
+  const bias = input.bias ?? { x: 0, y: 0 };
+  const { W, H, k, subject, context } = viewOf(input);
 
   const availW = rect.width * (1 - 2 * margin);
   const availH = rect.height * (1 - 2 * margin);
@@ -387,4 +415,115 @@ export function solveFrame(input: FrameSolveInput): FrameSolution {
     subjectRect: [sp.x0, sp.y0, sp.x1, sp.y1],
     contextRect: cp ? [cp.x0, cp.y0, cp.x1, cp.y1] : null,
   };
+}
+
+// --- the re-solve -------------------------------------------------------------
+//
+// A framing on screen stays the reader's after a fit. Between a fit and a
+// resize the reader may have wheel-zoomed (which also slides the target toward
+// the cursor), panned, or let the idle drift turn the view. Re-solving the fit
+// from scratch at every resize, tab return and pixel-ratio step threw all of
+// that away (a wheel zoom at 197 came back at 917 on every tab switch) and cut
+// any flight in progress to its end.
+//
+// So a re-solve answers only to what the chrome change asks for:
+//   • DISTANCE scales by exactly as much as the fit changes between the old
+//     chrome and the new. A reader at the framed distance lands on the new fit
+//     (the subject still fits the new rect); a reader zoomed to a quarter of it
+//     stays at a quarter of the new one. An unchanged rect scales by 1.
+//   • OFFSET moves by exactly as much as the composition moves, evaluated at
+//     the reader's own distance: the world point under the old rect's centre
+//     lands under the new rect's centre. The reader's own pan rides on top.
+// A framing the reader never touched therefore re-solves to exactly what a fresh
+// fit against the new chrome would give, and unchanged chrome is a no-op.
+
+export interface RecomposeInput
+  extends Omit<FrameSolveInput, "viewportWidth" | "viewportHeight" | "rect" | "bias"> {
+  /** The chrome the framing was last composed against. */
+  before: ChromeMetrics;
+  /** The chrome now. */
+  after: ChromeMetrics;
+  /** The reader's view now: the END values, so a flight re-targets rather than cuts. */
+  distance: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+/** Same chrome to half a pixel: nothing the composition answers to has changed. */
+export function sameChrome(a: ChromeMetrics, b: ChromeMetrics): boolean {
+  const near = (x: number, y: number): boolean => Math.abs(x - y) < 0.5;
+  return (
+    near(a.viewportWidth, b.viewportWidth) &&
+    near(a.viewportHeight, b.viewportHeight) &&
+    near(a.titleBottom, b.titleBottom) &&
+    near(a.bottomChromeTop, b.bottomChromeTop) &&
+    near(a.panelWidth, b.panelWidth) &&
+    near(a.cardWidth, b.cardWidth)
+  );
+}
+
+/**
+ * The composition offset per unit of distance for this chrome: how far the
+ * focal offset shifts, per world unit of distance, to carry the screen centre
+ * onto the rect's centre (plus bias). The solve's offset at distance D is a
+ * pose-dependent constant minus slope × D, so this is what carries the offset
+ * to the reader's own distance without re-projecting there (a reader zoomed
+ * deep into the cloud has box corners behind the camera, where no projection
+ * is defined).
+ */
+function compositionSlope(m: ChromeMetrics, fovDeg: number): { x: number; y: number } {
+  const rect = computeUsableRect(m);
+  const bias = compositionBias(m);
+  const k = pxPerUnit(fovDeg, m.viewportHeight);
+  return {
+    x: (rect.x + rect.width / 2 + bias.x - Math.max(1, m.viewportWidth) / 2) / k,
+    y: (rect.y + rect.height / 2 + bias.y - Math.max(1, m.viewportHeight) / 2) / k,
+  };
+}
+
+/**
+ * Re-solve the framing on screen against changed chrome, keeping what the
+ * reader did to it (see the block comment above). Pure.
+ */
+export function solveRecompose(input: RecomposeInput): FrameSolution {
+  const { before, after, distance, offsetX, offsetY, ...frame } = input;
+  const against = (m: ChromeMetrics): FrameSolveInput => ({
+    ...frame,
+    viewportWidth: m.viewportWidth,
+    viewportHeight: m.viewportHeight,
+    rect: computeUsableRect(m),
+    bias: compositionBias(m),
+  });
+  const now = against(after);
+  const at = (d: number, ox: number, oy: number): FrameSolution => {
+    const v = viewOf(now);
+    const sp = projectCorners(v.subject, d, ox, oy, v.k, v.W, v.H);
+    const cp = v.context ? projectCorners(v.context, d, ox, oy, v.k, v.W, v.H) : null;
+    return {
+      distance: d,
+      offsetX: ox,
+      offsetY: oy,
+      subjectRect: [sp.x0, sp.y0, sp.x1, sp.y1],
+      contextRect: cp ? [cp.x0, cp.y0, cp.x1, cp.y1] : null,
+    };
+  };
+  if (sameChrome(before, after)) return at(distance, offsetX, offsetY);
+
+  // The fresh fits against the old chrome and the new, at the reader's pose.
+  const fitWas = solveFrame(against(before));
+  const fitNow = solveFrame(now);
+  let d = distance * (fitNow.distance / Math.max(fitWas.distance, 1e-6));
+  if (frame.minDistance !== undefined) d = Math.max(d, frame.minDistance);
+  if (frame.maxDistance !== undefined) d = Math.min(d, frame.maxDistance);
+
+  // The composition each fit asks for, carried from the fit's distance to the
+  // reader's (old chrome) and to the re-solved one (new chrome). The reader's
+  // own deviation from it is kept as it is.
+  const was = compositionSlope(before, frame.fovDeg);
+  const is = compositionSlope(after, frame.fovDeg);
+  const wasX = fitWas.offsetX + was.x * (fitWas.distance - distance);
+  const wasY = fitWas.offsetY + was.y * (fitWas.distance - distance);
+  const isX = fitNow.offsetX + is.x * (fitNow.distance - d);
+  const isY = fitNow.offsetY + is.y * (fitNow.distance - d);
+  return at(d, isX + (offsetX - wasX), isY + (offsetY - wasY));
 }

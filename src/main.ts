@@ -741,6 +741,8 @@ function start(graph: GraphCore): void {
   // -- sizing ------------------------------------------------------------
   // The actual resize is expensive (reallocates every postprocessing buffer),
   // so coalesce a burst of resize events into one apply on the next frame.
+  let composedW = 0;
+  let composedH = 0;
   function applyResize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -748,9 +750,16 @@ function start(graph: GraphCore): void {
     renderer.setPixelRatio(dpr);
     bloom.setSize(w, h); // composer sizes the renderer + all buffers
     rig.setAspect(w / h);
-    // The usable rect just changed shape: re-solve the current framing against
-    // it (no refit, no zoom change) so a resize never leaves content half off.
-    rig.recompose(false);
+    // A new viewport SIZE reshapes the usable rect: re-solve the framing against
+    // it so a resize never leaves content half off. The rig keeps the reader's
+    // zoom and never cuts a flight. A pixel-ratio step (the governor, a monitor
+    // move) or a tab return at the same size reshapes nothing, so it re-solves
+    // nothing — those used to throw the reader's zoom away.
+    if (w !== composedW || h !== composedH) {
+      composedW = w;
+      composedH = h;
+      rig.recompose(false);
+    }
     edges.setViewport(w * dpr, h * dpr, dpr);
     // The beacon rings size their minimum on-screen radius from this (a hollow
     // must stay a hollow at a wide framing — scene/beacons.ts MIN_RING_PX).
