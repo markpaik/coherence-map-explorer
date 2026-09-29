@@ -29,6 +29,17 @@ import type { NodesHandle } from "./nodes";
 import type { BeaconTarget } from "../stories/contagion";
 import { FIDENZA, RINGERS } from "./artstyle";
 
+/**
+ * Damage rings breathe once per 4.5 s (0.22 Hz), the same period as the node
+ * struggle breath. Mark's ceiling for anything that marks a damaged standard is
+ * a slow breath under 0.3 Hz (2026-09-29); at the old 2.2 rad/s (0.35 Hz) the
+ * ring band sweeping across nearby orbs read as flicker.
+ */
+export const DAMAGE_RING_BREATH_PERIOD_SEC = 4.5;
+export const DAMAGE_RING_BREATH_RATE = (2 * Math.PI) / DAMAGE_RING_BREATH_PERIOD_SEC;
+/** The explorer's focus marker keeps its shipped breath (outside story damage). */
+export const FOCUS_RING_BREATH_RATE = 2.2;
+
 const MAX = 480; // one ring per standard: the whole graph, in one instanced draw
 const HOP_SEC = 0.2; // wave spacing: ~200 ms per hop so the spread reads as spread
 const FADE_SEC = 0.22; // how long each ring eases in once its hop arrives
@@ -85,6 +96,7 @@ const FRAG = /* glsl */ `
   uniform float uMul;   // >1 in the Galaxy so the ring grazes the bloom
   uniform float uAlpha;
   uniform float uFadeSec;
+  uniform float uBreathRate; // radians per second of the radius breath
   varying vec2 vP;
   varying float vPhase;
   varying float vIntensity;
@@ -100,7 +112,7 @@ const FRAG = /* glsl */ `
     // (downstream) rings breathe less and sit thinner: intensity 1 reproduces
     // the original full ring exactly.
     float amp = 0.06 * mix(0.35, 1.0, vIntensity);
-    float breath = 0.74 + amp * sin(uTime * 2.2 + vPhase);
+    float breath = 0.74 + amp * sin(uTime * uBreathRate + vPhase);
     float w = mix(0.42, 1.0, vIntensity); // band half-width scale (thinner when faint)
     float ring = smoothstep(breath - 0.12 * w, breath - 0.045 * w, r)
                * (1.0 - smoothstep(breath + 0.045 * w, breath + 0.12 * w, r));
@@ -217,6 +229,7 @@ export function createBeacons(
     uFadeSec: { value: FADE_SEC },
     uViewH: { value: 0 },
     uMinPx: { value: MIN_RING_PX },
+    uBreathRate: { value: DAMAGE_RING_BREATH_RATE },
   };
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,
@@ -263,6 +276,7 @@ export function createBeacons(
     // The exploration marker keeps its exact shipped geometry (uMinPx 0 = no
     // screen-space growth). The minimum-radius rule is a DAMAGE-ring fix.
     uMinPx: { value: 0 },
+    uBreathRate: { value: FOCUS_RING_BREATH_RATE },
   };
   const fMaterial = new THREE.ShaderMaterial({
     vertexShader: VERT,
