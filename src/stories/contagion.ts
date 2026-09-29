@@ -151,6 +151,19 @@ export function displayDamage(
 }
 
 /**
+ * Gate one per-node damage channel through the scene's lit amount:
+ * out[i] = values[i] · lit[i]. The story player runs BOTH channels through it,
+ * the floored display copy and the raw engine copy that drives the struggle
+ * flicker, so neither can ever show on a ghost (the damage lit-mask law). The
+ * gate is fractional, so during a directional reveal a node's damage arrives
+ * exactly as it lights. Writes into `out` and returns it. Pure.
+ */
+export function maskByLit(values: Float32Array, lit: Float32Array, out: Float32Array): Float32Array {
+  for (let i = 0; i < out.length; i++) out[i] = values[i] * lit[i];
+  return out;
+}
+
+/**
  * The ring floor for one scene, RELATIVE to that scene's own damage
  * distribution: the value at the (1 − share) quantile of `values`, so the top
  * `share` of them ring. An absolute floor cannot work across stories whose

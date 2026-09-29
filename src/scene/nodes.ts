@@ -36,6 +36,48 @@ const glslTable = (key: "mul" | "scale" | "dim"): string =>
   STATE_TABLE.map((s) => s[key].toFixed(4)).join(", ");
 
 // ---------------------------------------------------------------------------
+// Struggle flicker amplitude (galaxy orbs, stories).
+//
+// The flicker reads the RAW engine damage, not the display value. Stories floor
+// the display copy (contagion.ts displayDamage: 0.35 + 0.65·raw; lose-a-year
+// clamps anything under 0.35 up to 0.35) so a lightly-exposed standard is
+// unmistakably dimmer. Fed that floored value, 4·d·(1−d) sat at 91% of its peak
+// for every touched standard, and the whole lit set wavered. The dimming,
+// desaturation, and husk mix keep the floored value. Only the amplitude moves
+// to the raw channel, so a raw 0.02 standard barely trembles (STORIES.md).
+// A steady husk (display ≥ HUSK_STEADY_AT) never flickers. The flicker's MEAN
+// dip still follows the display value, so each node's time-averaged brightness
+// is unchanged. Only the wobble around that mean moves to the raw channel. The
+// GLSL below is generated from these constants, and tests/struggle.test.ts pins
+// the mirrors.
+export const HUSK_STEADY_AT = 0.95;
+/** Full brightness dip of the struggle flicker at amplitude 1 (peak to peak). */
+export const STRUGGLE_DEPTH = 0.16;
+
+const struggleCurve = (x: number): number => {
+  const c = x < 0 ? 0 : x > 1 ? 1 : x;
+  return 4 * c * (1 - c);
+};
+
+/** Struggle amplitude 0..1 for a node: 4·r·(1−r) of the raw damage, 0 for a steady husk. */
+export function struggleAmplitude(raw: number, display: number): number {
+  return display >= HUSK_STEADY_AT ? 0 : struggleCurve(raw);
+}
+
+/**
+ * The struggle brightness multiplier at flicker phase `flick` ∈ [−1, 1] (TS
+ * mirror of the orb shader). Mean over time: 1 − DEPTH/2 · 4d(1−d), the same as
+ * before the raw channel. Swing: DEPTH · struggleAmplitude(raw, display).
+ */
+export function struggleFlickMul(raw: number, display: number, flick: number): number {
+  const half = STRUGGLE_DEPTH / 2;
+  const dip = display >= HUSK_STEADY_AT ? 0 : struggleCurve(display);
+  return 1 - half * dip - half * struggleAmplitude(raw, display) * flick;
+}
+
+const glf = (x: number): string => x.toFixed(4);
+
+// ---------------------------------------------------------------------------
 // Art-style node materials (Ringers pegs / outline, Fidenza pipes).
 //
 // All three share the galaxy's MeshBasicMaterial + onBeforeCompile skeleton but
@@ -220,6 +262,12 @@ export interface NodesHandle {
   visibleAttr: THREE.InstancedBufferAttribute;
   /** Per-node structural damage 0..1 (stories); write via setDamage only. */
   damageAttr: THREE.InstancedBufferAttribute;
+  /**
+   * Per-node RAW engine damage 0..1 (stories), the un-floored twin of
+   * damageAttr. It drives only the struggle flicker amplitude. Write via
+   * setDamage only.
+   */
+  damageRawAttr: THREE.InstancedBufferAttribute;
   /** True unless this instance is filtered out (picking consults this). */
   isVisible(index: number): boolean;
   /**
@@ -227,8 +275,11 @@ export interface NodesHandle {
    * Damage composes AFTER emphasis in the shader (a chain-lit but damaged node
    * keeps its emphasis SIZE and takes the damage COLOR), and stays sub-1.0 HDR
    * so the ember/flicker never blooms — bloom is reserved for healthy emphasis.
+   * `values` is the DISPLAY damage (dimming, desaturation, husk mix). `raw` is
+   * the engine damage before any display floor, and it drives the struggle
+   * flicker amplitude only. Omit `raw` and the flicker reads `values`.
    */
-  setDamage(values: Float32Array | null): void;
+  setDamage(values: Float32Array | null, raw?: Float32Array | null): void;
   /**
    * Story-only visibility override: ghost every node NOT in the mask (fractional
    * values allowed, so callers can crossfade). null restores full visibility.
@@ -320,6 +371,8 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
   const visible = new Float32Array(count).fill(1);
   // Structural damage 0..1 (stories); 0 = untouched, 1 = ember husk.
   const damage = new Float32Array(count); // all 0 at rest
+  // The raw engine damage behind it (no display floor): struggle amplitude only.
+  const damageRaw = new Float32Array(count); // all 0 at rest
   const emphasisAttr = new THREE.InstancedBufferAttribute(emphasis, 1);
   emphasisAttr.setUsage(THREE.DynamicDrawUsage);
   const phaseAttr = new THREE.InstancedBufferAttribute(phase, 1);
@@ -327,10 +380,13 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
   visibleAttr.setUsage(THREE.DynamicDrawUsage);
   const damageAttr = new THREE.InstancedBufferAttribute(damage, 1);
   damageAttr.setUsage(THREE.DynamicDrawUsage);
+  const damageRawAttr = new THREE.InstancedBufferAttribute(damageRaw, 1);
+  damageRawAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aEmphasis", emphasisAttr);
   geometry.setAttribute("aPhase", phaseAttr);
   geometry.setAttribute("aVisible", visibleAttr);
   geometry.setAttribute("aDamage", damageAttr);
+  geometry.setAttribute("aDamageRaw", damageRawAttr);
 
   // -- art-style per-instance attributes (baked once) ----------------------
   // aArtRing — Ringers peg fill by strand (near-white for edgeless standards);
@@ -410,6 +466,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         attribute float aPhase;
         attribute float aVisible;
         attribute float aDamage;
+        attribute float aDamageRaw;
         attribute vec3 aVivid;
         uniform float uTime;
         uniform float uShimmer;
@@ -419,6 +476,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         varying float vShim;
         varying float vDim;
         varying float vDamage;
+        varying float vDamageRaw;
         varying float vPhase;
         varying vec3 vNrm;
         varying vec3 vViewPos;
@@ -461,6 +519,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           // Damage rides on top of emphasis: it recolors (fragment) but never
           // resizes, so a chain-lit-but-damaged node keeps its emphasis size.
           vDamage = clamp(aDamage, 0.0, 1.0);
+          vDamageRaw = clamp(aDamageRaw, 0.0, 1.0);
           vPhase = aPhase;
           transformed *= scl;
           // Sphere shading inputs: view-space normal + view vector. The
@@ -486,6 +545,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         varying float vShim;
         varying float vDim;
         varying float vDamage;
+        varying float vDamageRaw;
         varying float vPhase;
         varying vec3 vNrm;
         varying vec3 vViewPos;
@@ -566,12 +626,21 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           // visibly drains of strand color before it goes ember.
           float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(lum), clamp(d * 1.35, 0.0, 1.0) * 0.6);
-          // Struggle flicker: amplitude peaks at d = 0.5, zero at both ends, and
-          // hard-cut to 0 for a fully-dead ember (d >= 0.95) so it sits steady.
-          float struggle = 4.0 * d * (1.0 - d) * (1.0 - step(0.95, d));
+          // Struggle flicker: amplitude peaks at RAW damage 0.5, zero at both
+          // ends, and hard-cut to 0 for a fully-dead ember (display d >= 0.95) so
+          // it sits steady. The amplitude reads vDamageRaw, the engine value
+          // before the story display floor, so a lightly-touched standard barely
+          // trembles (struggleAmplitude and struggleFlickMul above mirror this).
+          // The flicker's MEAN dip (half its depth) stays on the display value,
+          // so every node's time-averaged brightness is exactly what it was:
+          // only the wobble around it follows the raw damage.
+          float huskCut = 1.0 - step(${HUSK_STEADY_AT.toFixed(4)}, d);
+          float r = vDamageRaw;
+          float struggle = 4.0 * r * (1.0 - r) * huskCut;
+          float struggleDip = 4.0 * d * (1.0 - d) * huskCut;
           float flick = sin(uTime * 6.7 + vPhase * 3.1) * 0.6
                       + sin(uTime * 11.3 + vPhase * 1.7) * 0.4;            // irregular
-          float flickMul = 1.0 - 0.16 * struggle * (0.5 + 0.5 * flick);
+          float flickMul = 1.0 - ${glf(STRUGGLE_DEPTH / 2)} * struggleDip - ${glf(STRUGGLE_DEPTH / 2)} * struggle * flick;
           diffuseColor.rgb = mix(diffuseColor.rgb, husk, d) * flickMul;
         }
         `,
@@ -589,6 +658,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     g.setAttribute("aPhase", phaseAttr);
     g.setAttribute("aVisible", visibleAttr);
     g.setAttribute("aDamage", damageAttr);
+    g.setAttribute("aDamageRaw", damageRawAttr);
     g.setAttribute("aArtRing", artRingAttr);
     g.setAttribute("aArtFid", artFidAttr);
     g.setAttribute("aTwist", twistAttr);
@@ -740,16 +810,20 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     emphasisAttr,
     visibleAttr,
     damageAttr,
+    damageRawAttr,
     isVisible(index) {
       return visible[index] !== 0;
     },
-    setDamage(values) {
+    setDamage(values, raw) {
       if (values === null) {
         damage.fill(0);
+        damageRaw.fill(0);
       } else {
         damage.set(values);
+        damageRaw.set(raw ?? values);
       }
       damageAttr.needsUpdate = true;
+      damageRawAttr.needsUpdate = true;
     },
     setVisibleMask(mask) {
       if (mask === null) {
