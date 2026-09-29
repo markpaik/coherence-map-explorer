@@ -5,8 +5,8 @@
 // aria-live source for the scene (the canvas is aria-hidden). The scrubber
 // (bottom-center) is one dot per scene with the active scene's year label beside
 // the active dot. It is a focus-TRAPPED dialog like the tour card: Tab cycles
-// inside, ArrowLeft/Right step (except inside the extra slot, which owns its own
-// arrows), Esc exits; scenes advance only via Back / Next /
+// inside, ArrowLeft/Right step (except inside a control group on the card, which
+// moves focus among its own members), Esc exits; scenes advance only via Back / Next /
 // dot-click (no autoplay — holdMs is ignored in v1). The player owns the
 // backdrop, the storying machine state, and all scene logic; this module is
 // pure presentation + input.
@@ -72,6 +72,32 @@ export function trapTarget<T>(
   if (shift && active === first) return last;
   if (!shift && active === last) return first;
   return null;
+}
+
+/** What arrowsStepScenes needs from the focused element and the card. */
+export interface ArrowFocus {
+  closest(selector: string): unknown;
+}
+export interface ArrowCard {
+  contains(node: never): boolean;
+}
+
+/**
+ * Whether ArrowLeft / ArrowRight should step scenes, given where focus is.
+ * False while focus sits inside a CONTROL GROUP on the card (role="group": the
+ * FORMATION segments, the lose-a-year chips). A segmented control invites the
+ * arrow keys, and each group moves focus among its own members with them, so
+ * stepping scenes from there would yank the story out from under the reader.
+ * On a one-scene story it was worse: Next reads "Done", so an arrow meant for
+ * a segment ENDED the story. Everywhere else on the card (Back, Next, the body)
+ * and on the scrubber (a group of its own, but not on the card) the arrows
+ * step scenes as before. Pure over two tiny interfaces, so it is unit-tested
+ * with stand-ins.
+ */
+export function arrowsStepScenes(active: ArrowFocus | null, card: ArrowCard): boolean {
+  if (!active) return true;
+  const group = active.closest('[role="group"]');
+  return !group || !card.contains(group as never);
 }
 
 // Everything that can take Tab focus. Filtered below to what is actually live.
@@ -205,22 +231,19 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
     return [...inCard, ...inScrubber].filter(isTabbable);
   }
 
-  // The extra slot owns its own arrow keys (the lose-a-year chips rove with
-  // them). Stepping scenes from inside it would be wrong twice over: the reader
-  // is choosing a year, and the interactive story's only Next is "Done", so an
-  // arrow meant for the chips would END the story.
-  const arrowsOwnedByExtra = (): boolean => extraSlot.contains(document.activeElement);
-
   function onKeydown(e: KeyboardEvent): void {
     if (!shown) return;
     switch (e.key) {
       case "ArrowRight":
-        if (arrowsOwnedByExtra()) return;
+        // A control group on the card owns its arrows (see arrowsStepScenes).
+        // Returning WITHOUT preventDefault lets the key reach the group's own
+        // roving handler, which runs after this capture-phase listener.
+        if (!arrowsStepScenes(document.activeElement, card)) return;
         e.preventDefault();
         onNext();
         break;
       case "ArrowLeft":
-        if (arrowsOwnedByExtra()) return;
+        if (!arrowsStepScenes(document.activeElement, card)) return;
         e.preventDefault();
         onBack();
         break;

@@ -12,11 +12,13 @@
 // Placement + accessibility: the segmented control mounts as the LAST child of
 // the story card, so it lives inside the card's focus trap and native tab order
 // (storycard.ts owns that trap and is not edited here). Tab reaches it from the
-// Exit button and leaves into the scrubber; Enter/Space select a segment, the
+// Exit button and leaves into the scrubber; ArrowLeft/Right move between the
+// segments; Enter/Space select a segment, the
 // aria-pressed pattern matches the view-toggle and the filter chips. It hides
 // automatically with the card between stories, and flex-wraps on narrow widths.
 
 import type { Formation } from "./scripts";
+import { rovingIndex } from "../ui/chipgroup";
 
 // Module state: the pinned formation survives restarts within the page session.
 // null = AUTHORED (each scene plays its own authored pose).
@@ -77,6 +79,21 @@ export function createFormationPick(deps: FormationPickDeps): FormationPickHandl
   function reflect(): void {
     for (const s of segments) s.btn.setAttribute("aria-pressed", String(pinned === s.value));
   }
+
+  // A segmented control invites the arrow keys: ArrowLeft / ArrowRight (and
+  // Home / End) move focus between the segments. Focus only — Enter / Space
+  // still choose, through the button's own click, because a change re-plays the
+  // scene in a new formation. The story card leaves arrows pressed inside this
+  // group alone (storycard.ts arrowsStepScenes), so they never step scenes or,
+  // on the one-scene lose-a-year story, end it.
+  group.addEventListener("keydown", (e) => {
+    const at = segments.findIndex((s) => s.btn === e.target);
+    if (at < 0) return;
+    const to = rovingIndex(e.key, at, segments.length);
+    if (to === null) return;
+    e.preventDefault();
+    segments[to].btn.focus();
+  });
 
   // Mount inside the story card (created + appended to <body> by the story card
   // module just before this runs). As the card's last child the control inherits
