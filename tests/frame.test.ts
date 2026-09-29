@@ -15,6 +15,7 @@ import {
   compositionBias,
   computeUsableRect,
   solveFrame,
+  solveRecompose,
   type ChromeMetrics,
   type FrameSolveInput,
 } from "../src/scene/frame";
@@ -73,8 +74,17 @@ describe("the usable rect", () => {
 
   it("never lets chrome eat the frame, however wrong the measurement", () => {
     const r = rectOf({ bottomChromeTop: 40, panelWidth: 1500, titleBottom: 800 });
-    expect(r.width).toBeGreaterThanOrEqual(1728 * 0.54);
+    expect(r.width).toBeGreaterThanOrEqual(1728 * 0.25);
     expect(r.height).toBeGreaterThanOrEqual(907 * 0.5);
+  });
+
+  it("reserves the WHOLE 480px side panel on a narrow window (780px, iPad-portrait band)", () => {
+    // The defect: a 45%-of-width cap reserved 351px of a 480px panel at 780px, so
+    // the focused standard composed at x≈390, behind a panel that starts at 300.
+    for (const W of [721, 768, 780, 820, 900, 1024, 1066]) {
+      const r = rectOf({ viewportWidth: W, viewportHeight: 900, bottomChromeTop: 900 - 114, panelWidth: 480 });
+      expect(r.width).toBe(W - 480);
+    }
   });
 
   it("a full-width story card arrives as bottom chrome (the phone lift)", () => {
@@ -180,6 +190,17 @@ describe("solveFrame", () => {
     expect(sol.subjectRect[0]).toBeGreaterThan(0);
   });
 
+  it("at 780px with the 480px panel open, the one-hop frame lands left of the panel", () => {
+    const m = chrome({ viewportWidth: 780, viewportHeight: 900, bottomChromeTop: 900 - 114, panelWidth: 480 });
+    const r = computeUsableRect(m);
+    // A one-hop neighbourhood: wide and shallow, like 6.RP.A.3's.
+    const subject = box(0, 0, 420, 160);
+    const sol = solve({ viewportWidth: 780, viewportHeight: 900, rect: r, subject });
+    expect(inside(r, sol.subjectRect)).toBe(true);
+    expect(sol.subjectRect[2]).toBeLessThanOrEqual(780 - 480); // clear of the panel
+    expect(sol.subjectRect[0]).toBeGreaterThan(0);
+  });
+
   it("biases toward the clear side without pushing the subject out", () => {
     const r = rectOf();
     const plain = solve();
@@ -215,5 +236,162 @@ describe("solveFrame", () => {
     const a = solve({ context: box(0, 0, 900, 500), maxPullback: 2.6 });
     const b = solve({ context: box(0, 0, 900, 500), maxPullback: 2.6 });
     expect(a).toEqual(b);
+  });
+});
+
+// The re-solve that runs on a resize, a tab return, a pixel-ratio step and a
+// panel close. The defect it pins: every one of those re-solved the fit from
+// scratch, so a wheel zoom at 197 came back at 917 on each tab switch and a
+// resize mid-dive cut the flight to its end in one frame.
+describe("solveRecompose", () => {
+  type View = { distance: number; offsetX: number; offsetY: number };
+  const at = (W: number, H: number, over: Partial<ChromeMetrics> = {}): ChromeMetrics =>
+    chrome({ viewportWidth: W, viewportHeight: H, bottomChromeTop: H - 114, ...over });
+  const wide = at(1600, 1000);
+  const narrow = at(1400, 900);
+  const home = box(0, 0, 1600, 700, 300);
+  const origin = new Vector3(0, 0, 0);
+  const eyeFor = (t: Vector3): Vector3 => new Vector3(t.x, t.y, t.z + 900);
+  const clamps = { minDistance: 60, maxDistance: 6000 };
+
+  const fresh = (m: ChromeMetrics, subject = home, target = origin): ReturnType<typeof solveFrame> =>
+    solveFrame({
+      fovDeg: 50,
+      viewportWidth: m.viewportWidth,
+      viewportHeight: m.viewportHeight,
+      rect: computeUsableRect(m),
+      bias: compositionBias(m),
+      eye: eyeFor(target),
+      target,
+      subject,
+      ...clamps,
+    });
+  const re = (
+    before: ChromeMetrics,
+    after: ChromeMetrics,
+    view: View,
+    subject = home,
+    target = origin,
+  ): ReturnType<typeof solveRecompose> =>
+    solveRecompose({
+      fovDeg: 50,
+      before,
+      after,
+      eye: eyeFor(target),
+      target,
+      subject,
+      ...clamps,
+      distance: view.distance,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+    });
+
+  // Head-on (+z) projection with camera-controls' focal-offset convention, the
+  // same model the solve uses: x = W/2 + k(dx − ox)/vf, y = H/2 − k(dy + oy)/vf.
+  const kOf = (m: ChromeMetrics): number => m.viewportHeight / 2 / Math.tan((50 * Math.PI) / 360);
+  const project = (P: Vector3, T: Vector3, v: View, m: ChromeMetrics): [number, number] => {
+    const k = kOf(m);
+    const vf = -(P.z - T.z) + v.distance;
+    return [
+      m.viewportWidth / 2 + (k * (P.x - T.x - v.offsetX)) / vf,
+      m.viewportHeight / 2 - (k * (P.y - T.y + v.offsetY)) / vf,
+    ];
+  };
+  // The world point on the target plane that shows at screen point s.
+  const unproject = (s: [number, number], T: Vector3, v: View, m: ChromeMetrics): Vector3 => {
+    const k = kOf(m);
+    return new Vector3(
+      T.x + v.offsetX + ((s[0] - m.viewportWidth / 2) * v.distance) / k,
+      T.y - v.offsetY - ((s[1] - m.viewportHeight / 2) * v.distance) / k,
+      T.z,
+    );
+  };
+  const centreOf = (m: ChromeMetrics): [number, number] => {
+    const r = computeUsableRect(m);
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  };
+
+  it("unchanged chrome is a no-op: a tab return or a pixel-ratio step keeps the reader's zoom", () => {
+    const fit = fresh(wide);
+    const zoomed = { distance: fit.distance * 0.2, offsetX: fit.offsetX + 12, offsetY: fit.offsetY - 7 };
+    const r = re(wide, { ...wide }, zoomed);
+    expect(r.distance).toBe(zoomed.distance);
+    expect(r.offsetX).toBe(zoomed.offsetX);
+    expect(r.offsetY).toBe(zoomed.offsetY);
+  });
+
+  it("a framing the reader never touched re-solves exactly as a fresh fit would", () => {
+    // A resize, and the panel closing on a focus frame.
+    const oneHop = box(0, 0, 420, 160);
+    const cases: [ChromeMetrics, ChromeMetrics, Box3][] = [
+      [wide, narrow, home],
+      [narrow, wide, home],
+      [at(1600, 1000, { panelWidth: 480 }), wide, oneHop],
+      [at(780, 900, { panelWidth: 480 }), at(1024, 768, { panelWidth: 480 }), oneHop],
+    ];
+    for (const [before, after, subject] of cases) {
+      const r = re(before, after, fresh(before, subject), subject);
+      const want = fresh(after, subject);
+      expect(r.distance).toBeCloseTo(want.distance, 6);
+      expect(r.offsetX).toBeCloseTo(want.offsetX, 6);
+      expect(r.offsetY).toBeCloseTo(want.offsetY, 6);
+    }
+  });
+
+  it("a wheel-zoomed reader keeps their zoom across a resize, scaled only as the fit changes", () => {
+    // The home fit targets the box centre. The wheel then zooms toward the
+    // cursor: the distance drops, the target slides toward the node under it,
+    // and the focal offset stays as the fit left it.
+    const P = new Vector3(420, 160, 0);
+    const T = origin.clone().lerp(P, 0.8);
+    const home0 = fresh(wide);
+    const view = { distance: home0.distance * 0.2, offsetX: home0.offsetX, offsetY: home0.offsetY };
+    const r = re(wide, narrow, view, home, T);
+    // The re-solve runs at the reader's pose (the moved target).
+    const fit = fresh(wide, home, T);
+    const refit = fresh(narrow, home, T);
+    // Nowhere near the fresh fit it used to snap back to...
+    expect(r.distance).toBeLessThan(refit.distance * 0.3);
+    // ...and scaled by exactly the fit's own change.
+    expect(r.distance / view.distance).toBeCloseTo(refit.distance / fit.distance, 6);
+    // The node the reader zoomed to stays on screen, where they put it relative
+    // to the composition (height-normalised, as the vertical FOV scales).
+    const rel = (p: [number, number], m: ChromeMetrics): [number, number] => {
+      const c = centreOf(m);
+      return [(p[0] - c[0]) / m.viewportHeight, (p[1] - c[1]) / m.viewportHeight];
+    };
+    const a = rel(project(P, T, view, wide), wide);
+    const b = rel(project(P, T, r, narrow), narrow);
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeLessThan(0.03);
+    const p = project(P, T, r, narrow);
+    expect(p[0]).toBeGreaterThan(0);
+    expect(p[0]).toBeLessThan(narrow.viewportWidth);
+    expect(p[1]).toBeGreaterThan(0);
+    expect(p[1]).toBeLessThan(narrow.viewportHeight);
+  });
+
+  it("moves a zoomed, panned view only as far as the composition moves (the panel closes)", () => {
+    // Flat subject, so the target plane is the whole story and the rule is exact:
+    // the world point under the old rect's centre lands under the new rect's.
+    const flat = box(0, 0, 900, 400, 0);
+    const T = new Vector3(120, -40, 0);
+    const withPanel = at(1600, 1000, { panelWidth: 480 });
+    const fit = fresh(withPanel, flat, T);
+    const view = { distance: fit.distance * 0.35, offsetX: fit.offsetX + 25, offsetY: fit.offsetY + 10 };
+    const Q = unproject(centreOf(withPanel), T, view, withPanel);
+    const r = re(withPanel, wide, view, flat, T);
+    const q = project(Q, T, r, wide);
+    expect(Math.abs(q[0] - centreOf(wide)[0])).toBeLessThan(0.5);
+    expect(Math.abs(q[1] - centreOf(wide)[1])).toBeLessThan(0.5);
+    // The zoom relative to the fit is the reader's, not the fit's.
+    expect(r.distance / fresh(wide, flat, T).distance).toBeCloseTo(0.35, 6);
+  });
+
+  it("honours the dolly clamps", () => {
+    const fit = fresh(wide);
+    const r = re(wide, at(600, 1000), { distance: 5900, offsetX: fit.offsetX, offsetY: fit.offsetY });
+    expect(r.distance).toBeLessThanOrEqual(6000);
+    const s = re(wide, at(2600, 1000), { distance: 61, offsetX: fit.offsetX, offsetY: fit.offsetY });
+    expect(s.distance).toBeGreaterThanOrEqual(60);
   });
 });

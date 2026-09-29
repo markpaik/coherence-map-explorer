@@ -19,6 +19,8 @@ import {
   computeUsableRect,
   measureChrome,
   solveFrame,
+  solveRecompose,
+  type ChromeMetrics,
   type FrameSolution,
 } from "./frame";
 
@@ -75,8 +77,12 @@ export interface CameraRig {
   frameHomeFrontOn(transition?: boolean): void;
   /**
    * Re-solve the CURRENT framing against the chrome as it is now — the panel
-   * closed, the window resized, a story card appeared. Distance and subject are
-   * unchanged; only the composition moves.
+   * closed, the window resized, a story card appeared. The subject is unchanged
+   * and so is what the reader did to the view (see frame.ts solveRecompose): the
+   * distance scales only as much as the fit changed, the offset moves only as
+   * much as the composition moved, and unchanged chrome changes nothing. A
+   * camera still in flight keeps flying toward the re-solved end, whatever
+   * `transition` says; only a camera at rest may cut.
    */
   recompose(transition?: boolean): void;
   /**
@@ -155,20 +161,78 @@ export function createCameraRig(
   // the chrome changes (panel closes, window resizes) without refitting.
   let current: { subject: THREE.Box3; context: THREE.Box3 | null; pullback: number } | null = null;
   let lastSolution: FrameSolution | null = null;
+  // The chrome the framing on screen was composed against, so a re-solve can
+  // tell what changed since (see recomposeView).
+  let lastChrome: ChromeMetrics | null = null;
 
-  // Compose the CURRENT framing into the usable rect. Runs off the fit's END
+  function apply(solution: FrameSolution, transition: boolean): void {
+    lastSolution = solution;
+    void controls.dollyTo(solution.distance, transition);
+    void controls.setFocalOffset(solution.offsetX, solution.offsetY, 0, transition);
+  }
+
+  // Compose a FRESH framing into the usable rect. Runs off the fit's END
   // values, so it composes with an in-flight transition rather than cutting it.
   function compose(transition: boolean): void {
     if (!current) return;
     controls.getPosition(_pos, true);
     controls.getTarget(_tgt, true);
     const chrome = measureChrome();
-    lastSolution = solveFrame({
+    lastChrome = chrome;
+    apply(
+      solveFrame({
+        fovDeg: camera.fov,
+        viewportWidth: chrome.viewportWidth,
+        viewportHeight: chrome.viewportHeight,
+        rect: computeUsableRect(chrome),
+        bias: compositionBias(chrome),
+        eye: _pos,
+        target: _tgt,
+        subject: current.subject,
+        context: current.context,
+        maxPullback: current.pullback,
+        minDistance: controls.minDistance,
+        maxDistance: controls.maxDistance,
+      }),
+      transition,
+    );
+  }
+
+  // Still moving toward its end values: a transition, the dive, a damped wheel
+  // zoom. A cut now would skip the rest of the move in one frame.
+  const _sphNow = new THREE.Spherical();
+  const _sphEnd = new THREE.Spherical();
+  const _vNow = new THREE.Vector3();
+  const _vEnd = new THREE.Vector3();
+  function inFlight(): boolean {
+    const eps = 0.05;
+    controls.getSpherical(_sphNow, false);
+    controls.getSpherical(_sphEnd, true);
+    if (Math.abs(_sphNow.radius - _sphEnd.radius) > eps) return true;
+    if (Math.abs(_sphNow.theta - _sphEnd.theta) > 1e-4) return true;
+    if (Math.abs(_sphNow.phi - _sphEnd.phi) > 1e-4) return true;
+    if (controls.getTarget(_vNow, false).distanceTo(controls.getTarget(_vEnd, true)) > eps) return true;
+    return controls.getFocalOffset(_vNow, false).distanceTo(controls.getFocalOffset(_vEnd, true)) > eps;
+  }
+
+  // Re-solve the framing ON SCREEN against the chrome now, keeping the reader's
+  // zoom and pan (frame.ts solveRecompose). A camera in flight is re-targeted,
+  // never cut: the re-solved values become the end the move is heading for.
+  function recomposeView(transition: boolean): void {
+    if (!current) return;
+    if (!lastChrome) {
+      compose(transition);
+      return;
+    }
+    const chrome = measureChrome();
+    controls.getPosition(_pos, true);
+    controls.getTarget(_tgt, true);
+    controls.getSpherical(_sphEnd, true);
+    controls.getFocalOffset(_vEnd, true);
+    const solution = solveRecompose({
       fovDeg: camera.fov,
-      viewportWidth: chrome.viewportWidth,
-      viewportHeight: chrome.viewportHeight,
-      rect: computeUsableRect(chrome),
-      bias: compositionBias(chrome),
+      before: lastChrome,
+      after: chrome,
       eye: _pos,
       target: _tgt,
       subject: current.subject,
@@ -176,9 +240,12 @@ export function createCameraRig(
       maxPullback: current.pullback,
       minDistance: controls.minDistance,
       maxDistance: controls.maxDistance,
+      distance: _sphEnd.radius,
+      offsetX: _vEnd.x,
+      offsetY: _vEnd.y,
     });
-    void controls.dollyTo(lastSolution.distance, transition);
-    void controls.setFocalOffset(lastSolution.offsetX, lastSolution.offsetY, 0, transition);
+    lastChrome = chrome;
+    apply(solution, transition || inFlight());
   }
 
   async function frameSubject(subject: THREE.Box3, o: FrameOpts = {}): Promise<void> {
@@ -259,7 +326,7 @@ export function createCameraRig(
       frameHomeFrontOn(transition);
     },
     recompose(transition = true) {
-      compose(transition);
+      recomposeView(transition);
     },
     setHomeBounds(box, sphere) {
       homeBox = box.clone();
