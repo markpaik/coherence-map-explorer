@@ -20,7 +20,7 @@ export interface StoryCardDeps {
   onBack: () => void;
   onExit: () => void;
   onJump: (index: number) => void;
-  /** Toggle auto-advance pause/resume (owned by the player). */
+  /** Pause / play the story: auto-advance and map motion (owned by the player). */
   onTogglePause: () => void;
 }
 
@@ -31,7 +31,7 @@ export interface StoryCardHandle {
   render(scene: StoryScene, index: number, total: number): void;
   /** Drive the active dot's countdown fill (0..1). No-op when auto-advance off. */
   setProgress(fraction: number): void;
-  /** Reflect the paused state on the pause/resume control. */
+  /** Reflect the paused state on the pause / play control (icon + accessible name). */
   setPaused(paused: boolean): void;
   /** Show/hide the auto-advance affordances (pause control + progress fill). */
   setAutoAdvanceEnabled(on: boolean): void;
@@ -98,6 +98,18 @@ export function arrowsStepScenes(active: ArrowFocus | null, card: ArrowCard): bo
   if (!active) return true;
   const group = active.closest('[role="group"]');
   return !group || !card.contains(group as never);
+}
+
+/**
+ * The pause control's accessible name for a paused / playing story. Pause now
+ * freezes the whole map as well as the auto-advance (stories/storyclock.ts), so
+ * the name states the action on the story, not on the countdown. The name
+ * carries the state, so the button is a plain action button with no
+ * aria-pressed: "Play the story, toggle button, pressed" would say two opposite
+ * things at once. Pure, so it is unit-tested without a DOM.
+ */
+export function pauseControlLabel(paused: boolean): string {
+  return paused ? "Play the story" : "Pause the story";
 }
 
 // Everything that can take Tab focus. Filtered below to what is actually live.
@@ -180,11 +192,12 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
   year.className = "story-year";
   year.setAttribute("aria-hidden", "true");
 
-  // Pause / resume auto-advance (glass button; keyboard reachable in the trap).
+  // Pause / play the story: stops the auto-advance AND holds the map still
+  // (glass button; keyboard reachable in the trap).
   const pauseBtn = document.createElement("button");
   pauseBtn.type = "button";
   pauseBtn.className = "story-pause";
-  pauseBtn.setAttribute("aria-label", "Pause auto-advance");
+  pauseBtn.setAttribute("aria-label", pauseControlLabel(false));
   pauseBtn.textContent = "⏸";
   pauseBtn.addEventListener("click", onTogglePause);
 
@@ -332,8 +345,7 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
     },
     setPaused(paused) {
       pauseBtn.textContent = paused ? "▶" : "⏸";
-      pauseBtn.setAttribute("aria-label", paused ? "Resume auto-advance" : "Pause auto-advance");
-      pauseBtn.setAttribute("aria-pressed", String(paused));
+      pauseBtn.setAttribute("aria-label", pauseControlLabel(paused));
     },
     setAutoAdvanceEnabled(on) {
       autoAdvance = on;

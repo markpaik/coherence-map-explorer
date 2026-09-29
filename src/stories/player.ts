@@ -171,7 +171,7 @@ export interface StoryPlayerHandle {
   next(): void;
   back(): void;
   jump(index: number): void;
-  /** Toggle auto-advance pause/resume (scrubber control + keyboard). */
+  /** Pause / play the story: stops the auto-advance and holds the map still (scrubber control + keyboard). */
   togglePause(): void;
   /** Ease the lapse crossfade + drive settle/auto-advance; true while active. */
   tick(dt: number): boolean;

@@ -201,6 +201,14 @@ per-node phase so the lit set never pulses in unison. Its swing is 3% peak to
 peak at raw damage 0.5, scaled by 4r(1−r). It replaced two summed fast sines
 (about 1.1 and 1.8 Hz, up to 16% deep) that read as flicker.
 
+The husk ember's slow pulse (2.5 s) belongs to true husks only. A partial
+standard mixes toward the ember at weight d, and it used to inherit the pulse
+(a 4-7% swing at 0.4 Hz, over both bounds of the breath rule). Now the pulse
+fades in only across the steady-husk band (display damage 0.95 to 0.99), and
+a partial standard mixes toward the ember's time-mean color, the midpoint of
+the pulse. A missed standard pulses exactly as before, and every node keeps
+its time-mean brightness.
+
 The swing reads the engine's raw damage (the `aDamageRaw` channel), never
 the floored display copy (`displayDamage`, or lose-a-year's 0.35 clamp). The
 floor still sets the dimming, the desaturation, the husk mix, and the cue's

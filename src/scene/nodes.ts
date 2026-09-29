@@ -68,6 +68,31 @@ export const STRUGGLE_PERIOD_SEC = 4.5;
 /** Per-node phase scatter (times aPhase), so neighbours never breathe together. */
 const STRUGGLE_PHASE_MUL = 3.1;
 
+// Ember pulse (true husks only). The husk ember pulses slowly (2.5 s, 0.4 Hz)
+// so the eye can find a fully-missed standard on a dark field. A partly-damaged
+// standard mixes toward the ember too (weight d), and it used to inherit that
+// pulse: a 4-7% swing at 0.4 Hz, over both bounds of the breath rule (under
+// 0.3 Hz, near 3%). The pulse now fades in only across the steady-husk band,
+// from HUSK_STEADY_AT to EMBER_PULSE_FULL display damage (smooth, so a lapse
+// crossfade never steps). Below it the ember sits at its time-mean color, the
+// midpoint of the pulse, so the time-mean brightness is unchanged. A missed
+// standard (display 1) pulses exactly as before.
+/** Display damage at which the husk ember pulse reaches full strength. */
+export const EMBER_PULSE_FULL = 0.99;
+const EMBER_PULSE_RAD_PER_SEC = 2.5132741; // 2π / 2.5 s, the shipped husk pulse
+
+/** How much of the ember pulse a node shows, 0..1 (TS mirror of the orb shader). */
+export function emberPulseGate(display: number): number {
+  const x = (display - HUSK_STEADY_AT) / (EMBER_PULSE_FULL - HUSK_STEADY_AT);
+  const c = x < 0 ? 0 : x > 1 ? 1 : x;
+  return c * c * (3 - 2 * c);
+}
+
+/** The ember mix position 0..1 (0 = emberLo, 1 = emberHi) at scene time `t`. */
+export function emberPulse(t: number, phase: number, display: number): number {
+  return 0.5 + 0.5 * emberPulseGate(display) * Math.sin(t * EMBER_PULSE_RAD_PER_SEC + phase);
+}
+
 const struggleCurve = (x: number): number => {
   const c = x < 0 ? 0 : x > 1 ? 1 : x;
   return 4 * c * (1 - c);
@@ -633,7 +658,10 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           // first touch, so a d≈0.2 standard is unmistakably dimmer than a
           // healthy one and the wound stays visible across every later scene.
           diffuseColor.rgb *= 1.0 - 0.5 * smoothstep(0.03, 0.7, d);
-          float pulse = 0.5 + 0.5 * sin(uTime * 2.5132741 + vPhase);       // ~2.5s
+          // ~2.5s ember pulse, TRUE husks only (emberPulse above is the TS
+          // mirror). A partial standard holds the pulse midpoint, its time mean.
+          float pulseGate = smoothstep(${glf(HUSK_STEADY_AT)}, ${glf(EMBER_PULSE_FULL)}, d);
+          float pulse = 0.5 + 0.5 * pulseGate * sin(uTime * ${EMBER_PULSE_RAD_PER_SEC.toFixed(7)} + vPhase);
           // Near-black embers: a fully-missed standard reads as OFF — a dark
           // body holding its place — not as a glowing coal. The faint warm
           // pulse is only there so the eye can find the wound on a dark field.

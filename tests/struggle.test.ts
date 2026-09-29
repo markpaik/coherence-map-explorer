@@ -19,6 +19,9 @@ import { fileURLToPath } from "node:url";
 import type { GraphCore } from "../src/data";
 import {
   createNodes,
+  emberPulse,
+  emberPulseGate,
+  EMBER_PULSE_FULL,
   struggleAmplitude,
   struggleBreath,
   struggleFlickMul,
@@ -123,6 +126,51 @@ describe("struggle amplitude (TS mirror of the orb shader)", () => {
   });
 });
 
+describe("ember pulse: true husks only", () => {
+  // The shipped pulse, on every damaged node: 0.5 + 0.5·sin(2.5132741·t + phase).
+  const shipped = (t: number, phase: number): number => 0.5 + 0.5 * Math.sin(t * 2.5132741 + phase);
+
+  it("a partial standard holds the pulse midpoint (no 0.4 Hz pulse at all)", () => {
+    for (const raw of [0.02, 0.1, 0.3, 0.5, 0.7, 0.9]) {
+      const d = displayDamage(new Float32Array([raw]))[0];
+      expect(d).toBeLessThan(HUSK_STEADY_AT);
+      expect(emberPulseGate(d)).toBe(0);
+      for (const t of [0, 0.6, 1.25, 2.2]) expect(emberPulse(t, 1.7, d)).toBe(0.5);
+    }
+    // lose-a-year's clamp value too.
+    expect(emberPulseGate(0.35)).toBe(0);
+  });
+
+  it("a missed standard (display 1) pulses exactly as shipped", () => {
+    expect(emberPulseGate(1)).toBe(1);
+    expect(emberPulseGate(EMBER_PULSE_FULL)).toBe(1);
+    for (const t of [0, 0.3, 1.1, 2.4, 7.9]) {
+      for (const phase of [0, 2.4, 4.8]) expect(emberPulse(t, phase, 1)).toBeCloseTo(shipped(t, phase), 12);
+    }
+  });
+
+  it("keeps the time mean at the shipped midpoint for every node", () => {
+    // Over whole pulses (2.5 s) the shipped mean is 0.5, the midpoint.
+    for (const d of [0.36, 0.6, 0.94, 0.95, 0.97, 0.99, 1]) {
+      let sum = 0;
+      const n = 2500;
+      for (let k = 0; k < n; k++) sum += emberPulse((k / n) * 2.5, 0.8, d);
+      expect(sum / n).toBeCloseTo(0.5, 6);
+    }
+  });
+
+  it("fades in smoothly across the husk band, so a lapse crossfade never steps", () => {
+    let prev = emberPulseGate(0.9);
+    let maxStep = 0;
+    for (let d = 0.9; d <= 1.0; d += 0.0005) {
+      const g = emberPulseGate(d);
+      maxStep = Math.max(maxStep, Math.abs(g - prev));
+      prev = g;
+    }
+    expect(maxStep).toBeLessThan(0.02);
+  });
+});
+
 describe("raw damage channel through the lit mask", () => {
   it("masks both channels by the lit amount, so no ghost shows damage or flicker", () => {
     const display = new Float32Array([0.35, 0.6, 1, 0.5]);
@@ -189,6 +237,14 @@ describe("nodes handle: the aDamageRaw attribute", () => {
     // One slow sine only: the old fast pair (6.7 and 11.3 rad/s) is gone.
     expect(shader.fragmentShader).not.toContain("uTime * 6.7");
     expect(shader.fragmentShader).not.toContain("uTime * 11.3");
+    // The ember pulse is gated to true husks: a partial standard holds its midpoint.
+    expect(shader.fragmentShader).toContain(
+      `float pulseGate = smoothstep(${HUSK_STEADY_AT.toFixed(4)}, ${EMBER_PULSE_FULL.toFixed(4)}, d);`,
+    );
+    expect(shader.fragmentShader).toContain(
+      "float pulse = 0.5 + 0.5 * pulseGate * sin(uTime * 2.5132741 + vPhase);",
+    );
+    expect(shader.fragmentShader).not.toContain("float pulse = 0.5 + 0.5 * sin(");
     // The dimming, desaturation, and husk mix still read the display value d.
     expect(shader.fragmentShader).toContain("diffuseColor.rgb *= 1.0 - 0.5 * smoothstep(0.03, 0.7, d);");
     expect(shader.fragmentShader).toContain("diffuseColor.rgb = mix(diffuseColor.rgb, husk, d) * flickMul;");
