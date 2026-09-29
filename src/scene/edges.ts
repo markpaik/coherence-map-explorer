@@ -34,6 +34,76 @@ import { RINGERS, FIDENZA, artHash } from "./artstyle";
 
 const SEGMENTS = 24;
 
+// ---------------------------------------------------------------------------
+// Flow comets (Galaxy prereq ribbons): the pulse shape and the orb end-fade.
+//
+// Ribbons start and end at node CENTRES and draw additively, so each comet used
+// to paint over the orb it left or entered. With a hard sawtooth head
+// (pow(fract, 3)) that read as a flash: about 28% of lit story orbs jumped
+// 3–25% brighter in 0.16 s, every 2.0 s. Three fixes, all comet-only:
+//   1. End-fade in 3D: the comet term is 0 inside each endpoint orb and ramps
+//      to full between COMET_ORB_IN and COMET_ORB_OUT endpoint radii
+//      (aArtScalars.z/w) from the centre, measured as a fraction of the chord.
+//      The bezier's endpoint tangent is ≥ 0.76 × chord on every edge (pos and
+//      pos2), so 1.6 radii clears the orb at chain scale (×1.15).
+//   2. End-fade on screen: a ribbon that leaves its orb toward the camera stays
+//      over the orb's disc long after it clears the orb in 3D. So the comet is
+//      also 0 while the ribbon's centreline projects within COMET_DISC_IN
+//      projected radii of either endpoint centre, and full from COMET_DISC_OUT.
+//   3. Smooth head: the old tail, compressed into the first 1 − COMET_HEAD of
+//      the period, then a smoothstep fall to 0 at the wrap. Same peak (1), same
+//      speed, same spacing, and no value jump anywhere.
+// The GLSL is generated from these constants. tests/comet.test.ts pins the
+// TS mirrors below.
+export const COMET_ORB_IN = 1.6;
+export const COMET_ORB_OUT = 4.0;
+export const COMET_DISC_IN = 1.3;
+export const COMET_DISC_OUT = 3.0;
+export const COMET_HEAD = 0.2;
+
+const smooth01 = (x: number): number => {
+  const t = x < 0 ? 0 : x > 1 ? 1 : x;
+  return t * t * (3 - 2 * t);
+};
+
+/** Comet brightness 0..1 at phase fr ∈ [0,1) (TS mirror of the fragment pulse). */
+export function cometPulse(fr: number): number {
+  const tail = Math.pow(Math.min(fr / (1 - COMET_HEAD), 1), 3);
+  const head = smooth01((1 - fr) / COMET_HEAD);
+  return tail * head;
+}
+
+/**
+ * One end's fade zone [inner, outer] in t units from that end (TS mirror of the
+ * vertex shader). k = endpoint radius / chord. The comet is 0 up to `inner` and
+ * full from `outer`. Both stop at the ribbon's midpoint, and outer stays above
+ * inner, so a very short edge (almost all orb) simply carries no comet.
+ */
+export function cometEndZone(radius: number, chord: number): [number, number] {
+  const k = radius / Math.max(chord, 1e-3);
+  const inner = Math.min(k * COMET_ORB_IN, 0.49);
+  const outer = Math.max(Math.min(k * COMET_ORB_OUT, 0.5), inner + 0.01);
+  return [inner, outer];
+}
+
+/** Comet end-fade 0..1 at ribbon parameter t (TS mirror of the fragment). */
+export function cometEndFade(t: number, zoneA: [number, number], zoneB: [number, number]): number {
+  const ss = (e0: number, e1: number, x: number): number => smooth01((x - e0) / (e1 - e0));
+  return ss(zoneA[0], zoneA[1], t) * ss(zoneB[0], zoneB[1], 1 - t);
+}
+
+/**
+ * Comet screen-disc fade 0..1 (TS mirror of the fragment). gapA / gapB are the
+ * centreline's screen distance from each endpoint centre, in units of that
+ * orb's projected radius (1 = the disc edge).
+ */
+export function cometDiscFade(gapA: number, gapB: number): number {
+  const w = COMET_DISC_OUT - COMET_DISC_IN;
+  return smooth01((gapA - COMET_DISC_IN) / w) * smooth01((gapB - COMET_DISC_IN) / w);
+}
+
+const glf = (x: number): string => x.toFixed(4);
+
 // Edge emphasis is the full 6-state scale (fractional values blend adjacent
 // states, which lets the state machine ease hover in/out on the CPU):
 //   0 dimmed | 1 rest | 2 hover | 3 focus | 4 chain | 5 related
@@ -104,6 +174,15 @@ const VERT = /* glsl */ `
   // metro trunk WIDTH below, exported so the fragment can ghost non-trunk lines in
   // the unfocused Transit overview. Inert everywhere but Galaxy-Transit.
   out float vTrunk;
+  // Flow-comet orb end-fade zones (Galaxy), in t units from each end: xy = the
+  // source end [inner, outer], zw = the target end. Constant across the
+  // instance. The fragment fades the comet to 0 inside each endpoint orb. The
+  // paper skins write a fixed value and never read it.
+  out vec4 vEndZone;
+  // Flow-comet screen-disc gaps (Galaxy): the centreline's screen distance from
+  // the source (x) and target (y) centres, in projected orb radii. Interpolated
+  // along the ribbon. The paper skins write a large value and never read it.
+  out vec2 vOrbGap;
 
   vec3 bezier(float s) {
     float u = 1.0 - s;
@@ -170,6 +249,8 @@ const VERT = /* glsl */ `
     // (clamp((radA-1.6)*2,0,4)); wide ⇔ trunk. Written for every style so the varying
     // is always defined; only the Galaxy-Transit fragment path reads it.
     vTrunk = clamp((aArtScalars.z - 1.6) * 2.0, 0.0, 4.0) * 0.25;
+    vEndZone = vec4(0.0, 0.01, 0.0, 0.01);
+    vOrbGap = vec2(1e3);
     if (uArtStyle < 0.5) {
       // ===================== GALAXY (shipped, byte-identical) ===============
       // At m3 == 0 curveAt returns the exact shipped bezier point + analytic
@@ -183,6 +264,25 @@ const VERT = /* glsl */ `
 
       vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + tdir, 1.0);
+
+      // Comet screen-disc gaps (cometDiscFade in TS): this centreline point's
+      // screen distance from each endpoint centre, over that orb's projected
+      // radius (rest radius aArtScalars.z/w). Taken before the width offset, so
+      // both sides of the strip share it. An endpoint at or behind the camera
+      // plane cannot cover anything, so its gap stays large.
+      {
+        vec4 cA = projectionMatrix * modelViewMatrix * vec4(aStart, 1.0);
+        vec4 cB = projectionMatrix * modelViewMatrix * vec4(aEnd, 1.0);
+        vec2 hv = 0.5 * uViewport;
+        vec2 sp = clip.xy / clip.w * hv;
+        float pxPerUnit = projectionMatrix[1][1] * hv.y;
+        vOrbGap.x = cA.w > 1e-3
+          ? length(sp - cA.xy / cA.w * hv) / max(aArtScalars.z * pxPerUnit / cA.w, 0.5)
+          : 1e3;
+        vOrbGap.y = cB.w > 1e-3
+          ? length(sp - cB.xy / cB.w * hv) / max(aArtScalars.w * pxPerUnit / cB.w, 0.5)
+          : 1e3;
+      }
 
       // Screen-space direction (device px), then its normal.
       vec2 dir = (clipT.xy / clipT.w - clip.xy / clip.w) * uViewport;
@@ -256,6 +356,12 @@ const VERT = /* glsl */ `
       // Filtered-out edges (either endpoint hidden) fade toward a 0.06 ghost.
       vVisible = mix(0.06, 1.0, aVisible);
       vDamage = clamp(aDamage, 0.0, 1.0);
+      // Comet end-fade zones (cometEndZone in TS): k = endpoint rest radius over
+      // the live chord. Both zones stop at the midpoint, and outer > inner.
+      vec2 endK = aArtScalars.zw / max(length(aEnd - aStart), 1e-3);
+      vec2 zIn = min(endK * ${glf(COMET_ORB_IN)}, vec2(0.49));
+      vec2 zOut = max(min(endK * ${glf(COMET_ORB_OUT)}, vec2(0.5)), zIn + 0.01);
+      vEndZone = vec4(zIn.x, zOut.x, zIn.y, zOut.y);
     } else if (uArtStyle < 1.5) {
       // ===================== RINGERS: taut string ===========================
       // A straight string leaving the source peg's outer edge and landing on
@@ -370,8 +476,33 @@ const FRAG = /* glsl */ `
   in float vSide; // Fidenza pipe cross-position (-1..+1); round-tube shading
   in float vHalfPx; // Galaxy ribbon half-width (device px) — silhouette AA at Transit/Blueprint
   in float vTrunk; // Transit trunk metric 0..1 (reach) — unfocused-overview ghost
+  in vec4 vEndZone; // comet orb end-fade zones [inner, outer] per end, Galaxy only
+  in vec2 vOrbGap; // comet screen-disc gaps in projected orb radii, Galaxy only
 
   out vec4 fragColor;
+
+  // Flow-comet pulse (cometPulse in TS): the old cubic tail compressed into the
+  // first 1 − HEAD of the period, times a smoothstep fall to 0 at the wrap. Peak
+  // 1, continuous everywhere, so no orb or ribbon pixel ever jumps in one frame.
+  float cometPulse(float fr) {
+    float tail = pow(min(fr / ${glf(1 - COMET_HEAD)}, 1.0), 3.0);
+    float head = smoothstep(0.0, 1.0, (1.0 - fr) / ${glf(COMET_HEAD)});
+    return tail * head;
+  }
+
+  // Comet end-fade (cometEndFade in TS): 0 inside each endpoint orb, full from
+  // COMET_ORB_OUT radii out. Edges stay in ascending order (GLSL leaves
+  // smoothstep undefined when edge0 >= edge1), so the target end runs on 1 − t.
+  float cometEndFade(float t) {
+    return smoothstep(vEndZone.x, vEndZone.y, t) * smoothstep(vEndZone.z, vEndZone.w, 1.0 - t);
+  }
+
+  // Comet screen-disc fade (cometDiscFade in TS): 0 while the ribbon still
+  // projects over either endpoint's disc, full from DISC_OUT projected radii.
+  float cometDiscFade() {
+    return smoothstep(${glf(COMET_DISC_IN)}, ${glf(COMET_DISC_OUT)}, vOrbGap.x)
+         * smoothstep(${glf(COMET_DISC_IN)}, ${glf(COMET_DISC_OUT)}, vOrbGap.y);
+  }
 
   // Per-edge opener reveal 0..1. Before this edge's appear-time it is 0 (the
   // ribbon is absent — its nodes are still drifting in); then a SOFT two-stage
@@ -463,7 +594,10 @@ const FRAG = /* glsl */ `
         col *= max(mix(mulP[i0], mulP[i1], f), 1.0 + 0.8 * story);
         float flow = max(mix(flowP[i0], flowP[i1], f), story);
         float fr = fract(vT * 6.0 - uTime * 0.5 * uFlow);
-        float comet = pow(fr, 3.0);
+        // Smooth pulse, faded to 0 inside the endpoint orbs and over their
+        // screen discs, so a comet never flashes the orb it leaves or enters
+        // (the ribbon starts at the centre).
+        float comet = cometPulse(fr) * cometEndFade(vT) * cometDiscFade();
         col += vColor * comet * 2.0 * flow;
       } else {
         // Related (undirected): in-shader dash, slow shimmer, NEVER a flow comet.

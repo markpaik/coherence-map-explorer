@@ -186,6 +186,13 @@ a steady dark ember with a slow pulse; a half-damaged node visibly wavers
 (flicker amplitude peaks at damage 0.5 and vanishes at both ends); a
 lightly-touched node barely trembles.
 
+The flicker amplitude reads the engine's raw damage (the `aDamageRaw`
+channel), never the floored display copy (`displayDamage`, or lose-a-year's
+0.35 clamp). The floor still sets the dimming, the desaturation, the husk
+mix, and the flicker's mean dip, so each node's average brightness matches
+the floored value. Fed the floored value, every touched standard wavered at
+91% or more of peak amplitude.
+
 ## The stories
 
 Numbers below are computed from the graph (this repo, seed 1337 build).

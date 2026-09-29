@@ -42,6 +42,7 @@ import {
   bfsHops,
   contagionTargets,
   displayDamage,
+  maskByLit,
   sceneRingTargets,
   type BeaconTarget,
 } from "./contagion";
@@ -304,6 +305,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   const damageCur = new Float32Array(N);
   let damageFrom: Float32Array = new Float32Array(N);
   let damageTo: Float32Array = new Float32Array(N);
+  // The RAW twin of the display buffers: the engine's damage before any display
+  // floor. It rides the same per-node crossfade and the same lit mask, and it
+  // drives only the orb shader's struggle flicker amplitude (nodes.setDamage).
+  const rawCur = new Float32Array(N);
+  let rawFrom: Float32Array = new Float32Array(N);
+  let rawTo: Float32Array = new Float32Array(N);
   let easing = false;
   let easeElapsed = 0;
   // Staggered damage crossfade (the healing codas): per-node start offsets so
@@ -353,11 +360,15 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   // 271 unlit standards — including the whole of grade 4, whose own card says
   // those grades "have not happened yet".) The gate is the node's fractional lit
   // amount, so during a directional reveal a standard's damage arrives exactly as
-  // it lights, never before. Edges inherit it through edgeDamage.
+  // it lights, never before. Edges inherit it through edgeDamage. The raw
+  // channel passes through the SAME mask, so the struggle flicker can never
+  // show on a ghost either.
   const damageOut = new Float32Array(N);
+  const rawOut = new Float32Array(N);
   function pushDamage(): void {
-    for (let i = 0; i < N; i++) damageOut[i] = damageCur[i] * litCur[i];
-    nodes.setDamage(damageOut);
+    maskByLit(damageCur, litCur, damageOut);
+    maskByLit(rawCur, litCur, rawOut);
+    nodes.setDamage(damageOut, rawOut);
     edges.setDamage(damage.edgeDamage(damageOut));
   }
 
@@ -400,15 +411,24 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   }
 
   // Returns the crossfade duration so goto() can size the settle window.
-  function applyDamage(scene: StoryScene, target: Float32Array, ease: boolean): number {
+  // `target` is the floored display damage; `raw` is the engine damage behind it.
+  function applyDamage(
+    scene: StoryScene,
+    target: Float32Array,
+    raw: Float32Array,
+    ease: boolean,
+  ): number {
     damageTo = target;
+    rawTo = raw;
     if (!ease) {
       damageCur.set(target);
+      rawCur.set(raw);
       easing = false;
       pushDamage();
       return 0;
     }
     damageFrom = new Float32Array(damageCur);
+    rawFrom = new Float32Array(rawCur);
     const heal = scene.heal;
     if (heal) {
       setDamageDelays(heal.order);
@@ -539,14 +559,19 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       `the work depends on, never what a child can or cannot do.`;
     card.render(sc, 0, 1);
 
+    // The struggle flicker reads the raw engine damage (ringDamage, captured
+    // before the floor above). The floored `target` keeps the dimming.
     damageTo = target;
+    rawTo = ringDamage;
     if (!ease) {
       damageCur.set(target);
+      rawCur.set(ringDamage);
       easing = false;
       pushDamage();
       return 0;
     }
     damageFrom = new Float32Array(damageCur);
+    rawFrom = new Float32Array(rawCur);
     setDamageDelays("scatter");
     damageDuration = LOSE_YEAR_MS;
     easeElapsed = 0;
@@ -823,7 +848,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     const damageMs =
       currentStory.interactive === "lose-a-year"
         ? armYearDamage(loseYearSel ?? "3", !cut)
-        : applyDamage(scene, displayDamage(rawDamage), !cut);
+        : applyDamage(scene, displayDamage(rawDamage), rawDamage, !cut);
     // Contagion: rings spread from the missed set out along the leads-to
     // direction, faint with distance, staged as a wave. The interactive story
     // arms its own beacons inside armYearDamage.
@@ -856,6 +881,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   const surfaces: StorySurfaces = {
     clearNodeDamage: () => {
       damageCur.fill(0);
+      rawCur.fill(0);
       nodes.setDamage(null);
     },
     clearNodeStoryLift: () => nodes.setStoryLift(1),
@@ -1052,12 +1078,14 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
           const startAt = damageDelay[i] * (1 - REVEAL_WINDOW);
           const k = smoothstep((T - startAt) / REVEAL_WINDOW);
           damageCur[i] = damageFrom[i] + (damageTo[i] - damageFrom[i]) * k;
+          rawCur[i] = rawFrom[i] + (rawTo[i] - rawFrom[i]) * k; // same node, same k
         }
         // A lit transition in the same frame pushes damage itself (through the
         // moving gate), so don't pay for the pass twice.
         if (!litAnimating) pushDamage();
         if (easeElapsed >= damageDuration) {
           damageCur.set(damageTo);
+          rawCur.set(rawTo);
           easing = false;
           pushDamage();
         }
