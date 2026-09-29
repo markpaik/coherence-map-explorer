@@ -182,6 +182,15 @@ export interface StoryPlayerHandle {
    * holding.
    */
   isHolding(): boolean;
+  /**
+   * True while the current scene has fully settled: no transition, no damage
+   * crossfade (a lose-a-year year switch runs one inside a hold), and no lit
+   * reveal in flight. main.ts stops the scene clock only when a PAUSED story is
+   * settled (stories/storyclock.ts), so a scene's own motion always plays out.
+   */
+  isSettled(): boolean;
+  /** True while the reader has paused the story (Pause holds the map still). */
+  readonly paused: boolean;
   readonly running: boolean;
   readonly sceneIndex: number;
   dispose(): void;
@@ -1061,6 +1070,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     togglePause,
     isHolding() {
       return running && !transitioning;
+    },
+    isSettled() {
+      return running && !transitioning && !easing && !litAnimating;
+    },
+    get paused() {
+      return running && paused;
     },
     tick(dt) {
       if (!running) return false;

@@ -97,6 +97,15 @@ skips ahead instantly, Back returns, pause stops the clock. The tour uses the
 same mechanism (8s per stop). Reduced motion: each scene is a cut and the
 countdown still runs; the motion is cut, never the timing.
 
+Pause holds the map still (round 14, Mark; src/stories/storyclock.ts). Once
+a paused scene has settled, the scene clock stops: the struggle breath, the
+flow comets, the beacon ring breathing, the node shimmer, the star twinkle,
+and the evolving sky all hold their phase, and Resume continues from it with
+no jump. A scene the reader moves to while paused still plays its whole
+transition (reveal, ring wave, damage crossfade), then holds still. Any ring
+still waiting on its wave when the hold begins lands at once. Camera drift is
+a separate control and is not part of the pause.
+
 Atmosphere: during a scene hold the idle ethereal drift breathes (the same
 ±18° oscillation as the untouched landing); it pauses during transitions and
 resumes on settle, so the map never feels frozen mid-story.
@@ -122,7 +131,7 @@ Off, dim, and on are the whole vocabulary; contrast carries the story.
 | lit / learned | story lift: chain-level brightness (×1.9 floor under the shimmer, `max()` so emphasis never stacks); bright strand tones cross the bloom threshold and halo; prereq edges between lit nodes glow with directional flow comets |
 | unlit (outside the scene's `lit` set) | ghost: dark speck, 0.06-alpha edge filament, no glow, no comets |
 | missed (damage = 1) | OFF: a near-black body holding its place (`#1c0b07` -> `#38180e` slow pulse, only bright enough to find the wound), full size, never blooms |
-| challenged (0 < damage < 1) | dims toward the husk by damage, with a faint irregular flicker (per-node phase, peaks at damage 0.5) that reads as "struggling, not dead"; the story lift dies by damage ≈ 0.7 |
+| challenged (0 < damage < 1) | dims toward the husk by damage, with a slow breath (one sine per node, 4.5 s per cycle, per-node phase, a 3% swing that peaks at raw damage 0.5) that reads as "struggling, not dead"; the story lift dies by damage ≈ 0.7 |
 
 Damage composes WITHIN the lit set: a scene lights the years that happened,
 and the missed standards inside them go dark against that light. Both the
@@ -130,7 +139,7 @@ node lift and the edge glow are gated by the lit mask, so nothing outside
 the story's frame competes for the eye.
 
 Damage never uses the strand hues for the ember (colorblind-safe: ember is a
-luminance+shape change, not only a hue change; flicker is the secondary
+luminance+shape change, not only a hue change; the breath is the secondary
 encoding).
 
 ### Three display laws (round 13, after the visual audit)
@@ -182,16 +191,22 @@ and was removed in July 2026: the stories carry the same argument with
 narration and evidence, and the standalone tool diluted them.)
 
 Damage look distinguishes outage from struggle: a dead node (damage ≈ 1) is
-a steady dark ember with a slow pulse; a half-damaged node visibly wavers
-(flicker amplitude peaks at damage 0.5 and vanishes at both ends); a
-lightly-touched node barely trembles.
+a steady dark ember with a slow pulse; a half-damaged node breathes slowly
+(the swing peaks at raw damage 0.5 and vanishes at both ends); a
+lightly-touched node barely moves.
 
-The flicker amplitude reads the engine's raw damage (the `aDamageRaw`
-channel), never the floored display copy (`displayDamage`, or lose-a-year's
-0.35 clamp). The floor still sets the dimming, the desaturation, the husk
-mix, and the flicker's mean dip, so each node's average brightness matches
-the floored value. Fed the floored value, every touched standard wavered at
-91% or more of peak amplitude.
+The struggle cue is a breath, not a flicker (round 14, Mark): one sine per
+node, a full cycle every 4.5 s (0.22 Hz, under a 0.3 Hz ceiling), with a
+per-node phase so the lit set never pulses in unison. Its swing is 3% peak to
+peak at raw damage 0.5, scaled by 4r(1−r). It replaced two summed fast sines
+(about 1.1 and 1.8 Hz, up to 16% deep) that read as flicker.
+
+The swing reads the engine's raw damage (the `aDamageRaw` channel), never
+the floored display copy (`displayDamage`, or lose-a-year's 0.35 clamp). The
+floor still sets the dimming, the desaturation, the husk mix, and the cue's
+mean dip, so each node's average brightness matches the floored value. Fed
+the floored value, every touched standard wavered at 91% or more of peak
+amplitude.
 
 ## The stories
 
@@ -207,7 +222,7 @@ Timeline 2019 -> 2025. A third grader in fall 2019.
 2. "2020 · The interruption" — grade 3 band goes to husks (37 standards,
    including all 9 fraction foundations). Card: schools closed in March.
    What was missed did not announce itself. [cite NWEA math loss]
-3. "2021 · Grade 4" — damage propagates: 4.NF flickers hard (its ancestry
+3. "2021 · Grade 4" — damage propagates: 4.NF dims and breathes (its ancestry
    runs through 3.NF), while grade-4 geometry and measurement stay bright.
    Card: the cruel asymmetry — new content lands fine where it starts
    fresh, and struggles exactly where it depends on last year.

@@ -36,23 +36,37 @@ const glslTable = (key: "mul" | "scale" | "dim"): string =>
   STATE_TABLE.map((s) => s[key].toFixed(4)).join(", ");
 
 // ---------------------------------------------------------------------------
-// Struggle flicker amplitude (galaxy orbs, stories).
+// Struggle breath (galaxy orbs, stories).
 //
-// The flicker reads the RAW engine damage, not the display value. Stories floor
-// the display copy (contagion.ts displayDamage: 0.35 + 0.65·raw; lose-a-year
-// clamps anything under 0.35 up to 0.35) so a lightly-exposed standard is
-// unmistakably dimmer. Fed that floored value, 4·d·(1−d) sat at 91% of its peak
-// for every touched standard, and the whole lit set wavered. The dimming,
-// desaturation, and husk mix keep the floored value. Only the amplitude moves
-// to the raw channel, so a raw 0.02 standard barely trembles (STORIES.md).
-// A steady husk (display ≥ HUSK_STEADY_AT) never flickers. The flicker's MEAN
-// dip still follows the display value, so each node's time-averaged brightness
-// is unchanged. Only the wobble around that mean moves to the raw channel. The
-// GLSL below is generated from these constants, and tests/struggle.test.ts pins
-// the mirrors.
+// A partly-damaged standard breathes: one slow sine per node, a full cycle every
+// STRUGGLE_PERIOD_SEC (below 0.3 Hz), with a per-node phase so the lit set never
+// pulses in unison. Mark (round 14): a slow breath, not a flicker. The old cue
+// summed two fast sines (1.07 Hz + 1.8 Hz) into an "irregular" waver of up to
+// 16%, which read as the flicker he objected to.
+//
+// The breath SWING reads the RAW engine damage, not the display value. Stories
+// floor the display copy (contagion.ts displayDamage: 0.35 + 0.65·raw;
+// lose-a-year clamps anything under 0.35 up to 0.35) so a lightly-exposed
+// standard is unmistakably dimmer. Fed that floored value, 4·d·(1−d) sat at 91%
+// of its peak for every touched standard. The swing is STRUGGLE_SWING peak to
+// peak (relative to the node's mean) at raw 0.5, scaled by 4·r·(1−r), so a raw
+// 0.02 standard barely moves.
+//
+// The time-mean brightness is the shipped value exactly: the mean dip
+// (STRUGGLE_DEPTH/2 · 4·d·(1−d), on the display value) is kept, and the breath
+// multiplies it by a zero-mean sine. The dimming, desaturation, and husk mix
+// keep the floored value. A steady husk (display ≥ HUSK_STEADY_AT) never
+// breathes. The GLSL below is generated from these constants, and
+// tests/struggle.test.ts pins the mirrors.
 export const HUSK_STEADY_AT = 0.95;
-/** Full brightness dip of the struggle flicker at amplitude 1 (peak to peak). */
+/** The shipped flicker depth. Its half is the mean dip every node keeps. */
 export const STRUGGLE_DEPTH = 0.16;
+/** Breath swing, peak to peak relative to the node's mean, at raw damage 0.5. */
+export const STRUGGLE_SWING = 0.03;
+/** One breath, in seconds (4.5 s = 0.22 Hz, under the 0.3 Hz ceiling). */
+export const STRUGGLE_PERIOD_SEC = 4.5;
+/** Per-node phase scatter (times aPhase), so neighbours never breathe together. */
+const STRUGGLE_PHASE_MUL = 3.1;
 
 const struggleCurve = (x: number): number => {
   const c = x < 0 ? 0 : x > 1 ? 1 : x;
@@ -64,15 +78,20 @@ export function struggleAmplitude(raw: number, display: number): number {
   return display >= HUSK_STEADY_AT ? 0 : struggleCurve(raw);
 }
 
+/** The breath sine (−1..1) at scene time `t` for a node with shimmer phase `phase`. */
+export function struggleBreath(t: number, phase: number): number {
+  return Math.sin((t * 2 * Math.PI) / STRUGGLE_PERIOD_SEC + phase * STRUGGLE_PHASE_MUL);
+}
+
 /**
- * The struggle brightness multiplier at flicker phase `flick` ∈ [−1, 1] (TS
- * mirror of the orb shader). Mean over time: 1 − DEPTH/2 · 4d(1−d), the same as
- * before the raw channel. Swing: DEPTH · struggleAmplitude(raw, display).
+ * The struggle brightness multiplier at breath value `breath` ∈ [−1, 1] (TS
+ * mirror of the orb shader). Mean over a breath: 1 − DEPTH/2 · 4d(1−d), the
+ * shipped mean. Swing, peak to peak over the mean: SWING · struggleAmplitude.
  */
-export function struggleFlickMul(raw: number, display: number, flick: number): number {
-  const half = STRUGGLE_DEPTH / 2;
+export function struggleFlickMul(raw: number, display: number, breath: number): number {
   const dip = display >= HUSK_STEADY_AT ? 0 : struggleCurve(display);
-  return 1 - half * dip - half * struggleAmplitude(raw, display) * flick;
+  const mean = 1 - (STRUGGLE_DEPTH / 2) * dip;
+  return mean * (1 - (STRUGGLE_SWING / 2) * struggleAmplitude(raw, display) * breath);
 }
 
 const glf = (x: number): string => x.toFixed(4);
@@ -599,10 +618,11 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
         // --- structural damage (composited AFTER emphasis) --------------------
         // 0 = untouched; 1 = ember husk. Damage distinguishes OUTAGE from
         // STRUGGLE: a fully-dead node (d >= 0.95) is a steady dark ember with
-        // only the slow ~2.5s pulse — no flicker; a half-damaged node visibly
-        // wavers; a lightly-touched one barely trembles. The flicker amplitude
-        // follows a struggle curve 4·d·(1−d) that peaks at d = 0.5 and vanishes
-        // at both ends. Brightness AND saturation lerp toward a deep red-amber
+        // only the slow ~2.5s pulse — no breath; a half-damaged node breathes
+        // slowly (a 3% swing over 4.5 s); a lightly-touched one barely moves. The
+        // breath swing follows a struggle curve 4·r·(1−r) of the RAW damage that
+        // peaks at r = 0.5 and vanishes at both ends (see the struggle constants
+        // at the top of this file). Brightness AND saturation lerp toward a deep red-amber
         // ember, with a mid-range-boosted desaturation so struggle reads even at
         // d ≈ 0.3. The husk tops out near #7a3520 (< 1.0 in every channel), so
         // damage NEVER crosses the bloom threshold — glow stays for healthy
@@ -626,21 +646,20 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
           // visibly drains of strand color before it goes ember.
           float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(lum), clamp(d * 1.35, 0.0, 1.0) * 0.6);
-          // Struggle flicker: amplitude peaks at RAW damage 0.5, zero at both
-          // ends, and hard-cut to 0 for a fully-dead ember (display d >= 0.95) so
-          // it sits steady. The amplitude reads vDamageRaw, the engine value
-          // before the story display floor, so a lightly-touched standard barely
-          // trembles (struggleAmplitude and struggleFlickMul above mirror this).
-          // The flicker's MEAN dip (half its depth) stays on the display value,
-          // so every node's time-averaged brightness is exactly what it was:
-          // only the wobble around it follows the raw damage.
+          // Struggle breath (struggleFlickMul above is the TS mirror): one slow
+          // sine per node, STRUGGLE_PERIOD_SEC per cycle with a per-node phase.
+          // Its swing reads the RAW damage (vDamageRaw, before the story display
+          // floor), peaks at raw 0.5, and vanishes at both ends. A fully-dead
+          // ember (display d >= HUSK_STEADY_AT) sits steady. The mean dip stays
+          // on the display value, so each node's time-averaged brightness is
+          // exactly the shipped one; the breath only moves around that mean.
           float huskCut = 1.0 - step(${HUSK_STEADY_AT.toFixed(4)}, d);
           float r = vDamageRaw;
           float struggle = 4.0 * r * (1.0 - r) * huskCut;
           float struggleDip = 4.0 * d * (1.0 - d) * huskCut;
-          float flick = sin(uTime * 6.7 + vPhase * 3.1) * 0.6
-                      + sin(uTime * 11.3 + vPhase * 1.7) * 0.4;            // irregular
-          float flickMul = 1.0 - ${glf(STRUGGLE_DEPTH / 2)} * struggleDip - ${glf(STRUGGLE_DEPTH / 2)} * struggle * flick;
+          float breath = sin(uTime * ${glf((2 * Math.PI) / STRUGGLE_PERIOD_SEC)} + vPhase * ${glf(STRUGGLE_PHASE_MUL)});
+          float flickMul = (1.0 - ${glf(STRUGGLE_DEPTH / 2)} * struggleDip)
+                         * (1.0 - ${glf(STRUGGLE_SWING / 2)} * struggle * breath);
           diffuseColor.rgb = mix(diffuseColor.rgb, husk, d) * flickMul;
         }
         `,

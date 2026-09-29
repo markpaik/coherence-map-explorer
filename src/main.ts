@@ -67,6 +67,7 @@ import { createDamageEngine } from "./stories/damage";
 import { createSelectorResolver } from "./stories/selectors";
 import { createStoryPlayer, createStoryPicker } from "./stories/player";
 import { findStory } from "./stories/scripts";
+import { createSceneClock, storyPauseFreezes, type StoryClockState } from "./stories/storyclock";
 
 const MAX_PIXEL_RATIO = 2;
 // Adaptive floor for the pixel-ratio cap: on a weak GPU the full-res HalfFloat
@@ -483,6 +484,19 @@ function start(graph: GraphCore): void {
   }
   setReducedMotion(reducedMotion); // sync all subsystems to the initial value
 
+  // -- Story Pause holds the map still (stories/storyclock.ts) -------------
+  // While a paused story's scene has settled, advance() stops the scene clock:
+  // the struggle breath, the flow comets, the ring breathing, the node shimmer,
+  // the star twinkle, and the evolving sky all hold their phase, and Resume
+  // continues from it. A scene the reader moves to while paused still plays its
+  // transition (the clock runs until it settles). Camera drift is separate.
+  const storyClockState = (): StoryClockState => ({
+    running: storyPlayer.running,
+    paused: storyPlayer.paused,
+    settled: storyPlayer.isSettled(),
+  });
+  let storyClockHeld = false;
+
   // -- deep-link routing (#/s/<CODE>) -------------------------------------
   // The machine PUSHES the hash on a user open and REPLACEs on a programmatic
   // refocus, so hashchange fires for genuine back/forward and manual edits. The
@@ -550,7 +564,7 @@ function start(graph: GraphCore): void {
     return t * t * (3 - 2 * t);
   };
 
-  let sceneTime = 0;
+  const sceneClock = createSceneClock();
   let last = performance.now();
   let revealed = false;
   let wasStoryHolding = false; // rising-edge detector for story-hold drift resume
@@ -562,9 +576,18 @@ function start(graph: GraphCore): void {
   function advance(delta: number): void {
     let render = needsRender;
 
+    // Story Pause: on the frame the clock stops, land any ring still waiting on
+    // its wave (a staged ring never arrives on a stopped clock). A ring set
+    // staged later always comes with a transition or crossfade, which unsettles
+    // the scene and restarts the clock, so its wave plays.
+    const holdStory = storyPauseFreezes(storyClockState());
+    if (holdStory && !storyClockHeld) beacons.landStaged();
+    storyClockHeld = holdStory;
     if (!reducedMotion) {
-      // Shimmer / twinkle / flow are continuous while the tab is visible.
-      sceneTime += delta;
+      // Shimmer / twinkle / flow are continuous while the tab is visible, except
+      // while a paused story's settled scene holds still. A held frame re-sends
+      // the same time, so every layer holds its phase.
+      const sceneTime = sceneClock.advance(delta, holdStory);
       nodes.setTime(sceneTime);
       edges.setTime(sceneTime);
       stars.setTime(sceneTime);

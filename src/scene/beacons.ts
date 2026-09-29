@@ -157,6 +157,13 @@ export interface BeaconsHandle {
    */
   setClockFrozen(frozen: boolean): void;
   /**
+   * Land every ring still waiting on its wave (fully shown now), and leave the
+   * clock flag alone. Story Pause calls it on the frame the scene clock stops
+   * (stories/storyclock.ts): the clock restarts with the next transition, so
+   * later waves must still stage normally, which setClockFrozen would prevent.
+   */
+  landStaged(): void;
+  /**
    * Viewport height in CSS px — the ring shader needs it to know its own
    * on-screen size, which is what keeps a hollow readable at a wide framing
    * (MIN_RING_PX). Call on resize; 0 (the default) disables the growth.
@@ -293,6 +300,20 @@ export function createBeacons(
     fCenterAttr.needsUpdate = true;
   }
 
+  // Land every ring that has not fully appeared yet (a stopped clock would
+  // hold it invisible for good). See setClockFrozen and landStaged.
+  function landStaged(): void {
+    let snapped = false;
+    for (let k = 0; k < targetIdx.length; k++) {
+      if (appears[k] > time - FADE_SEC) {
+        appears[k] = APPEARED;
+        appearByIndex.set(targetIdx[k], APPEARED);
+        snapped = true;
+      }
+    }
+    if (snapped) appearAttr.needsUpdate = true;
+  }
+
   function update(): void {
     for (let k = 0; k < targetIdx.length; k++) {
       nodes.getPosition(targetIdx[k], v);
@@ -376,16 +397,9 @@ export function createBeacons(
       if (!frozen) return;
       // A wave caught mid-flight by the freeze would hold its unreached rings
       // invisible: land every ring that has not fully appeared yet.
-      let snapped = false;
-      for (let k = 0; k < targetIdx.length; k++) {
-        if (appears[k] > time - FADE_SEC) {
-          appears[k] = APPEARED;
-          appearByIndex.set(targetIdx[k], APPEARED);
-          snapped = true;
-        }
-      }
-      if (snapped) appearAttr.needsUpdate = true;
+      landStaged();
     },
+    landStaged,
     setViewportHeight(cssHeight) {
       uniforms.uViewH.value = cssHeight;
       fUniforms.uViewH.value = cssHeight;

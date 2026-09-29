@@ -1,5 +1,5 @@
-// The story struggle flicker reads the RAW engine damage, never the floored
-// display copy.
+// The story struggle cue reads the RAW engine damage, never the floored
+// display copy, and it is a slow breath, not a flicker.
 //
 // The bug class this guards: stories floor the display damage (0.35 + 0.65·raw
 // on authored scenes, a clamp to 0.35 on lose-a-year) so a lightly-exposed
@@ -8,6 +8,9 @@
 // amplitude, and the whole lit set flickered (red-team finding 10). The fix
 // gives the shader a second channel (aDamageRaw) that the player writes through
 // the same lit mask. The dimming keeps the floored value.
+//
+// Round 14 (Mark): the cue is one slow sine per node (under 0.3 Hz), capped at
+// a 3% swing at raw 0.5, with the shipped time-mean brightness.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -17,9 +20,12 @@ import type { GraphCore } from "../src/data";
 import {
   createNodes,
   struggleAmplitude,
+  struggleBreath,
   struggleFlickMul,
   HUSK_STEADY_AT,
   STRUGGLE_DEPTH,
+  STRUGGLE_PERIOD_SEC,
+  STRUGGLE_SWING,
 } from "../src/scene/nodes";
 import { DAMAGE_DISPLAY_FLOOR, displayDamage, expandFamilies, maskByLit } from "../src/stories/contagion";
 import { createSelectorResolver } from "../src/stories/selectors";
@@ -56,27 +62,64 @@ describe("struggle amplitude (TS mirror of the orb shader)", () => {
     expect(struggleAmplitude(0.35, 0.35)).toBeCloseTo(0.91, 6);
   });
 
-  it("keeps every node's time-averaged brightness and shrinks only the swing", () => {
-    // The shipped multiplier, fed the display value alone.
-    const shipped = (d: number, flick: number): number =>
-      1 - STRUGGLE_DEPTH * struggleAmplitude(d, d) * (0.5 + 0.5 * flick);
+  // The shipped multiplier (before the raw channel and the breath), fed the
+  // display value alone: two fast sines, 0.16 deep. Its time mean is
+  // 1 − 0.08 · 4d(1−d), because the two sines are zero-mean.
+  const shippedMean = (d: number): number => 1 - (STRUGGLE_DEPTH / 2) * struggleAmplitude(d, d);
+
+  // Time series of the new multiplier over whole breaths, for one node.
+  const series = (raw: number, d: number, phase: number, seconds: number, dt = 1 / 120): number[] => {
+    const out: number[] = [];
+    for (let t = 0; t < seconds; t += dt) out.push(struggleFlickMul(raw, d, struggleBreath(t, phase)));
+    return out;
+  };
+  const mean = (a: number[]): number => a.reduce((x, y) => x + y, 0) / a.length;
+
+  it("caps the swing at 3% peak to peak at raw 0.5, scaled by 4r(1−r)", () => {
+    expect(STRUGGLE_SWING).toBeCloseTo(0.03, 6);
+    for (const raw of [0.02, 0.1, 0.3, 0.5, 0.7, 0.93]) {
+      const d = displayDamage(new Float32Array([raw]))[0];
+      const ys = series(raw, d, 1.234, STRUGGLE_PERIOD_SEC * 2);
+      const p2p = (Math.max(...ys) - Math.min(...ys)) / mean(ys);
+      expect(p2p).toBeCloseTo(STRUGGLE_SWING * struggleAmplitude(raw, d), 3);
+      expect(p2p).toBeLessThanOrEqual(STRUGGLE_SWING + 1e-6);
+    }
+    // A raw 0.02 standard: a swing of 0.24% (it barely moves).
+    const light = displayDamage(new Float32Array([0.02]))[0];
+    expect(STRUGGLE_SWING * struggleAmplitude(0.02, light)).toBeLessThan(0.003);
+  });
+
+  it("is one slow sine below 0.3 Hz, with a per-node phase", () => {
+    expect(1 / STRUGGLE_PERIOD_SEC).toBeLessThan(0.3);
+    // Exactly periodic at STRUGGLE_PERIOD_SEC, and never faster: a zero
+    // crossing count over 10 breaths is 20 (one sine, no second component).
+    for (const t of [0, 0.7, 3.3]) {
+      expect(struggleBreath(t + STRUGGLE_PERIOD_SEC, 0.4)).toBeCloseTo(struggleBreath(t, 0.4), 9);
+    }
+    let crossings = 0;
+    let prev = struggleBreath(0.001, 0.4);
+    for (let t = 0.001; t < STRUGGLE_PERIOD_SEC * 10; t += 0.01) {
+      const v = struggleBreath(t, 0.4);
+      if ((v < 0) !== (prev < 0)) crossings++;
+      prev = v;
+    }
+    expect(crossings).toBe(20);
+    // Different nodes sit at different points of the breath.
+    const phases = [0, 1, 2, 3].map((i) => (i * 2.399963) % (Math.PI * 2));
+    const now = phases.map((ph) => struggleBreath(1, ph).toFixed(3));
+    expect(new Set(now).size).toBe(4);
+  });
+
+  it("keeps every node's time-averaged brightness at the shipped value", () => {
     for (const raw of [0.005, 0.02, 0.1, 0.3, 0.5, 0.8, 0.93, 1]) {
       const d = displayDamage(new Float32Array([raw]))[0];
-      for (const flick of [0.2, 0.7, 1]) {
-        // flick is zero-mean over time, so a ±flick pair is its mean.
-        const meanNew = (struggleFlickMul(raw, d, flick) + struggleFlickMul(raw, d, -flick)) / 2;
-        const meanOld = (shipped(d, flick) + shipped(d, -flick)) / 2;
-        expect(meanNew).toBeCloseTo(meanOld, 6);
-      }
-      const swing = struggleFlickMul(raw, d, -1) - struggleFlickMul(raw, d, 1);
-      expect(swing).toBeCloseTo(STRUGGLE_DEPTH * struggleAmplitude(raw, d), 6);
-    }
-    // With no floor (raw === display) the new law IS the shipped one.
-    for (const d of [0.1, 0.5, 0.8]) {
-      for (const flick of [-1, -0.3, 0.4, 1]) {
-        expect(struggleFlickMul(d, d, flick)).toBeCloseTo(shipped(d, flick), 6);
+      for (const phase of [0, 2.4, 4.8]) {
+        const ys = series(raw, d, phase, STRUGGLE_PERIOD_SEC * 4);
+        expect(mean(ys)).toBeCloseTo(shippedMean(d), 4);
       }
     }
+    // A steady husk holds exactly still at its mean.
+    for (const b of [-1, 0, 1]) expect(struggleFlickMul(1, 1, b)).toBe(1);
   });
 });
 
@@ -137,9 +180,15 @@ describe("nodes handle: the aDamageRaw attribute", () => {
     );
     expect(shader.fragmentShader).toContain("float struggle = 4.0 * r * (1.0 - r) * huskCut;");
     const half = (STRUGGLE_DEPTH / 2).toFixed(4);
+    const halfSwing = (STRUGGLE_SWING / 2).toFixed(4);
+    const omega = ((2 * Math.PI) / STRUGGLE_PERIOD_SEC).toFixed(4);
+    expect(shader.fragmentShader).toContain(`float breath = sin(uTime * ${omega} + vPhase * 3.1000);`);
     expect(shader.fragmentShader).toContain(
-      `float flickMul = 1.0 - ${half} * struggleDip - ${half} * struggle * flick;`,
+      `float flickMul = (1.0 - ${half} * struggleDip)\n                         * (1.0 - ${halfSwing} * struggle * breath);`,
     );
+    // One slow sine only: the old fast pair (6.7 and 11.3 rad/s) is gone.
+    expect(shader.fragmentShader).not.toContain("uTime * 6.7");
+    expect(shader.fragmentShader).not.toContain("uTime * 11.3");
     // The dimming, desaturation, and husk mix still read the display value d.
     expect(shader.fragmentShader).toContain("diffuseColor.rgb *= 1.0 - 0.5 * smoothstep(0.03, 0.7, d);");
     expect(shader.fragmentShader).toContain("diffuseColor.rgb = mix(diffuseColor.rgb, husk, d) * flickMul;");
