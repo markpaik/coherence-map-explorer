@@ -435,8 +435,18 @@ const sanitizeOpts: sanitizeHtml.IOptions = {
 // untokenized and the amount later lost its escape. Bare `$` stays excluded so
 // a span can still never reach across an amount, and the sentinel char stays
 // excluded so a span can never swallow an already-inserted token.
+//
+// The last branch is a BARE environment: `\begin{env}…\end{env}` with no
+// delimiter around it. The snapshot has 78 of them in worked examples (44
+// align, 27 eqnarray*, 4 aligned, 2 eqnarray, 1 array). MathJax rendered them
+// as display math. Left in prose, only the client's align wrapper caught some,
+// so 34 shipped as raw LaTeX text, and none of them got the math decode or the
+// KaTeX rewrites below. Protected here, they re-delimit to `\[…\]` like any
+// other display span. The backreference ends each span at the matching
+// `\end`, and an environment inside a `$$…$$` span stays part of that span
+// (the leftmost match wins).
 const MATH_SPAN =
-  /(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)\$(?:\\\$|[^$\n⁣])*?(?<!\\)\$/g;
+  /(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)\$(?:\\\$|[^$\n⁣])*?(?<!\\)\$|\\begin\{([a-zA-Z]+\*?)\}[\s\S]*?\\end\{\1\}/g;
 
 /**
  * Is a `$…$` candidate real math, or prose money?
@@ -472,8 +482,106 @@ export function isMathSpan(span: string): boolean {
  */
 function redelimitMath(span: string): string {
   if (span.startsWith("$$")) return `\\[${span.slice(2, -2)}\\]`;
-  if (span.startsWith("$")) return `\\(${span.slice(1, -1)}\\)`;
-  return span; // already \(…\) or \[…\]
+  if (span.startsWith("\\begin")) return `\\[${span}\\]`; // bare environment
+  const inline = span.startsWith("$")
+    ? span.slice(1, -1)
+    : span.startsWith("\\(")
+      ? span.slice(2, -2)
+      : undefined;
+  if (inline === undefined) return span; // already \[…\]
+  // An inline span that holds nothing but a display-only environment is a
+  // display equation (F-IF.C.9 writes `<p>$\begin{align}…\end{align}$</p>`,
+  // alone in its paragraph). KaTeX refuses align in inline mode.
+  if (DISPLAY_ONLY_ENV.test(inline)) return `\\[${inline}\\]`;
+  return `\\(${inline}\\)`;
+}
+
+// Environments KaTeX renders only in display mode, when one fills a span.
+const DISPLAY_ONLY_ENV =
+  /^\s*\\begin\{(align|alignat|gather|equation|multline|eqnarray)(\*?)\}[\s\S]*\\end\{\1\2\}\s*$/;
+
+/**
+ * Rewrite the snapshot's MathJax-era LaTeX into the KaTeX equivalent with the
+ * same meaning. Every rewrite is one the shipped corpus needed (the KaTeX
+ * corpus test renders every span the way the client does and fails on any red
+ * error text):
+ * - `\mbox{…}` → `\text{…}`. Both set upright text inside math. KaTeX 0.17
+ *   has no `\mbox` and prints the command name in red (28 formulas).
+ * - `eqnarray` / `eqnarray*` → `darray` with an `rcl` column spec. eqnarray is
+ *   exactly a right/centre/left three-column display alignment, and KaTeX has
+ *   no eqnarray. darray keeps display-style cells, as eqnarray had (29 spans).
+ * - An `array` with no `{…}` column spec → `matrix`. In TeX the next token IS
+ *   the spec argument, so it never showed as content. It holds no column
+ *   letter, so no column had an alignment of its own. `matrix` needs no spec
+ *   and centres every column. The swallowed token is dropped.
+ *   S-CP.B.9 writes the binomial coefficient as
+ *   `\left( \begin{array} &6 \\ 3 \end{array} \right)` (the `&` was the spec),
+ *   and G-MG.A.1 writes `\begin{array} \mbox{\rm Area}(\Delta AFM) &= …`
+ *   (`\mbox` was the spec, and `{\rm Area}` still sets "Area" upright).
+ * - An unescaped `$` before a digit, in math mode, → `\$`. It is a dollar
+ *   amount the source forgot to escape (N-Q.A.2: `$$\$235,000r = $10,000$$`),
+ *   and KaTeX cannot set a bare `$` in math mode. Inside `\text{…}` a `$`
+ *   switches back to math and stays as written (F-IF.B.5:
+ *   `\text{ and $r$ is an integer multiple of $30$}`).
+ */
+function katexCompatible(tex: string): string {
+  const out = tex
+    .replace(/\\mbox(?![a-zA-Z])/g, "\\text")
+    .replace(/\\(begin|end)\{eqnarray\*?\}/g, (_m, edge) =>
+      edge === "begin" ? "\\begin{darray}{rcl}" : "\\end{darray}",
+    );
+  return outsideTextGroups(specLessArrayToMatrix(out), (s) =>
+    s.replace(/(?<!\\)\$(?=\d)/g, () => "\\$"),
+  );
+}
+
+/** Rewrite each `\begin{array}` that has no `{…}` column spec to `matrix`. */
+function specLessArrayToMatrix(tex: string): string {
+  const edits: { from: number; to: number; text: string }[] = [];
+  const open: boolean[] = []; // one entry per unclosed array: is it spec-less?
+  for (const m of tex.matchAll(/\\(begin|end)\{array\}/g)) {
+    const at = m.index;
+    const end = at + m[0].length;
+    if (m[1] === "end") {
+      if (open.pop()) edits.push({ from: at, to: end, text: "\\end{matrix}" });
+      continue;
+    }
+    // The spec is the next TeX token: a group, a control word, or one char.
+    const spec = /^\s*(?:\{|(\\[a-zA-Z]+|\\.|\S))/.exec(tex.slice(end));
+    const specLess = spec?.[1] !== undefined;
+    if (specLess) edits.push({ from: at, to: end + spec![0].length, text: "\\begin{matrix}" });
+    open.push(specLess);
+  }
+  let out = tex;
+  for (const e of edits.sort((a, b) => b.from - a.from)) {
+    out = out.slice(0, e.from) + e.text + out.slice(e.to);
+  }
+  return out;
+}
+
+/**
+ * Apply `fn` to the parts of `tex` that are in math mode, leaving every
+ * `\text{…}`-style group (text mode) exactly as written.
+ */
+function outsideTextGroups(tex: string, fn: (s: string) => string): string {
+  const OPEN = /\\(?:text[a-z]*|hbox)\s*\{/g;
+  let out = "";
+  let from = 0;
+  for (let m = OPEN.exec(tex); m; m = OPEN.exec(tex)) {
+    let depth = 1;
+    let j = m.index + m[0].length;
+    while (j < tex.length && depth > 0) {
+      const c = tex[j];
+      if (c === "\\") j++; // an escaped brace does not count
+      else if (c === "{") depth++;
+      else if (c === "}") depth--;
+      j++;
+    }
+    out += fn(tex.slice(from, m.index)) + tex.slice(m.index, j);
+    from = j;
+    OPEN.lastIndex = j;
+  }
+  return out + fn(tex.slice(from));
 }
 
 // Sentinel wrapping each protected math span. U+2063 (INVISIBLE SEPARATOR) has
@@ -581,7 +689,8 @@ export function sanitizeField(html: string | undefined): string {
   let clean = sanitizeHtml(work, sanitizeOpts);
   // Restore each math span: re-delimit it to `\(…\)` / `\[…\]`, entity-decode
   // the raw source (so the client's one innerHTML decode hands KaTeX true
-  // LaTeX), then HTML-ESCAPE it. Without the escape, any markup inside the span
+  // LaTeX), rewrite MathJax-only LaTeX to its KaTeX equivalent
+  // (katexCompatible), then HTML-ESCAPE it. Without the escape, any markup inside the span
   // (e.g. `$<img onerror=…>$`) would bypass sanitizeHtml and reach panel.ts's
   // innerHTML as live HTML. A missing index restores to nothing. Restoration
   // LOOPS until no token remains (a restored span can legally contain another
@@ -591,7 +700,9 @@ export function sanitizeField(html: string | undefined): string {
     MATH_TOKEN_RE.lastIndex = 0;
     clean = clean.replace(MATH_TOKEN_RE, (_m, i) => {
       const src = store[Number(i)];
-      return src === undefined ? "" : escapeHtml(decodeEntitiesForMath(redelimitMath(src)));
+      return src === undefined
+        ? ""
+        : escapeHtml(katexCompatible(decodeEntitiesForMath(redelimitMath(src))));
     });
   }
   MATH_TOKEN_RE.lastIndex = 0;
