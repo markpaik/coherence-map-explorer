@@ -411,28 +411,32 @@ describe("glossary popover and search dropdown paint where they can be seen", ()
 describe("story card focus trap follows DOM order", () => {
   const src = read("src/ui/storycard.ts");
 
-  it("the citation link precedes the controls row in BOTH the DOM and the trap", () => {
+  it("the citation link precedes the controls row in the DOM, and the trap reads the DOM", () => {
     const domOrder = src.indexOf("card.append(kicker, title, bodyEl, cite, extraSlot, controls)");
     expect(domOrder, "card DOM order is unchanged").toBeGreaterThan(-1);
+    // The trap is no longer a hand-kept list (that list skipped the citation
+    // once, and never knew about the lose-a-year chips in the extra slot or the
+    // formation segments): it queries the card, then the scrubber, live.
     const trap = src.slice(src.indexOf("function focusables()"));
     const body = trap.slice(0, trap.indexOf("\n  }"));
-    const citeAt = body.indexOf("citeLink");
-    const backAt = body.indexOf("backBtn");
-    expect(citeAt).toBeGreaterThan(-1);
-    expect(citeAt, "citeLink is pushed BEFORE the controls").toBeLessThan(backAt);
+    const cardAt = body.indexOf("card.querySelectorAll");
+    const scrubberAt = body.indexOf("scrubber.querySelectorAll");
+    expect(cardAt, "the trap reads the card's live DOM").toBeGreaterThan(-1);
+    expect(scrubberAt, "then the scrubber's").toBeGreaterThan(cardAt);
+    expect(body).toContain("filter(isTabbable)");
+    expect(body, "no hand-listed controls").not.toContain("backBtn");
   });
 
-  it("wraps in both directions through the citation", () => {
-    // The trap array, as focusables() now builds it for a cited scene with
+  it("wraps in both directions through the citation", async () => {
+    const { trapTarget } = await import("../src/ui/storycard");
+    // The trap array, as focusables() reads it for a cited scene with
     // auto-advance on and 5 scenes.
     const dots = ["dot0", "dot1", "dot2", "dot3", "dot4"];
     const order = ["citeLink", "back", "next", "exit", "pause", ...dots];
-    const first = order[0];
-    const last = order[order.length - 1];
     // Tab from the last element wraps to the first — which is the citation.
-    expect(first).toBe("citeLink");
+    expect(trapTarget(order, "dot4", false, true)).toBe("citeLink");
     // Shift+Tab from the first wraps to the last.
-    expect(last).toBe("dot4");
+    expect(trapTarget(order, "citeLink", true, true)).toBe("dot4");
   });
 });
 

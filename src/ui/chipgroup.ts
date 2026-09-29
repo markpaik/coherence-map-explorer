@@ -44,3 +44,28 @@ export function toggleChip(
     next.size === total ? "all" : next.size === 1 ? "solo" : "subset";
   return { active: all.filter((id) => next.has(id)), mode };
 }
+
+/**
+ * Roving focus for a row of chips: the index an arrow key (or Home / End) moves
+ * focus to, or null for any other key. The ends wrap, matching the panel's
+ * direction chip. Focus only — choosing stays on Enter / Space, because a
+ * lose-a-year choice recomputes the whole map and must not fire on every step.
+ */
+export function rovingIndex(key: string, index: number, count: number): number | null {
+  if (count <= 0) return null;
+  const i = Math.min(Math.max(index, 0), count - 1);
+  switch (key) {
+    case "ArrowRight":
+    case "ArrowDown":
+      return (i + 1) % count;
+    case "ArrowLeft":
+    case "ArrowUp":
+      return (i - 1 + count) % count;
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+}

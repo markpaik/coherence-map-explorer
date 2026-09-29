@@ -5,7 +5,8 @@
 // aria-live source for the scene (the canvas is aria-hidden). The scrubber
 // (bottom-center) is one dot per scene with the active scene's year label beside
 // the active dot. It is a focus-TRAPPED dialog like the tour card: Tab cycles
-// inside, ArrowLeft/Right step, Esc exits; scenes advance only via Back / Next /
+// inside, ArrowLeft/Right step (except inside the extra slot, which owns its own
+// arrows), Esc exits; scenes advance only via Back / Next /
 // dot-click (no autoplay — holdMs is ignored in v1). The player owns the
 // backdrop, the storying machine state, and all scene logic; this module is
 // pure presentation + input.
@@ -40,10 +41,47 @@ export interface StoryCardHandle {
    * the caller wires all behavior.
    */
   setExtra(el: HTMLElement | null): void;
+  /**
+   * The card's on-screen rectangle in CSS px, or null while it is hidden. The
+   * interactive story frames its chosen year clear of it.
+   */
+  bounds(): { x: number; y: number; width: number; height: number } | null;
   /** Hide the card + scrubber. */
   end(): void;
   readonly shown: boolean;
   dispose(): void;
+}
+
+/**
+ * Where a Tab press should land inside the trap, or null to let the browser
+ * move focus itself. `cycle` is the trap's tab order (live DOM order, so the
+ * browser's native step between two members already matches it): only the two
+ * ends wrap, and focus that has escaped the trap is pulled back to the start.
+ * Pure over the list, so it is unit-tested without a DOM.
+ */
+export function trapTarget<T>(
+  cycle: readonly T[],
+  active: T | null,
+  shift: boolean,
+  inside: boolean,
+): T | null {
+  if (cycle.length === 0) return null;
+  const first = cycle[0];
+  const last = cycle[cycle.length - 1];
+  if (!inside) return first;
+  if (shift && active === first) return last;
+  if (!shift && active === last) return first;
+  return null;
+}
+
+// Everything that can take Tab focus. Filtered below to what is actually live.
+const TABBABLE = "button, a[href], input, select, textarea, [tabindex]";
+
+function isTabbable(el: HTMLElement): boolean {
+  if (el.tabIndex < 0) return false; // roving groups park their other members at -1
+  if ((el as HTMLButtonElement).disabled) return false;
+  if (el.closest("[hidden]")) return false; // a hidden cite, a hidden pause control
+  return el.getClientRects().length > 0; // display:none by CSS
 }
 
 export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
@@ -154,28 +192,35 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
     scrubber.replaceChildren(...kids);
   }
 
-  // Everything focusable inside the trap, in DOM ORDER — which is the tab order
-  // the browser actually uses. The citation link sits ABOVE the controls row in
-  // the card (kicker → title → body → cite → extra → controls, then the
-  // scrubber), so listing it after Exit made the wrap skip it: Tab from the last
-  // dot jumped to Back and Shift+Tab from Back jumped to the last dot, and a
-  // cited scene's source link was unreachable from either end.
+  // Everything focusable inside the trap, read from the LIVE DOM in document
+  // order — the tab order the browser actually uses. A hand-kept list drifts
+  // from the DOM: it once skipped the citation link (which sits above the
+  // controls row), and it never knew about the extra slot (the lose-a-year
+  // chips, mounted before Back) or the formation segments (appended to the
+  // card by formationpick), so Shift+Tab from Back wrapped past the chips and
+  // no keyboard user could choose a year. Card first, then the scrubber.
   function focusables(): HTMLElement[] {
-    const els: HTMLElement[] = [];
-    if (!cite.hidden && !citeLink.hidden) els.push(citeLink);
-    els.push(backBtn, nextBtn, exitBtn);
-    if (autoAdvance) els.push(pauseBtn);
-    return els.concat(dotEls);
+    const inCard = [...card.querySelectorAll<HTMLElement>(TABBABLE)];
+    const inScrubber = [...scrubber.querySelectorAll<HTMLElement>(TABBABLE)];
+    return [...inCard, ...inScrubber].filter(isTabbable);
   }
+
+  // The extra slot owns its own arrow keys (the lose-a-year chips rove with
+  // them). Stepping scenes from inside it would be wrong twice over: the reader
+  // is choosing a year, and the interactive story's only Next is "Done", so an
+  // arrow meant for the chips would END the story.
+  const arrowsOwnedByExtra = (): boolean => extraSlot.contains(document.activeElement);
 
   function onKeydown(e: KeyboardEvent): void {
     if (!shown) return;
     switch (e.key) {
       case "ArrowRight":
+        if (arrowsOwnedByExtra()) return;
         e.preventDefault();
         onNext();
         break;
       case "ArrowLeft":
+        if (arrowsOwnedByExtra()) return;
         e.preventDefault();
         onBack();
         break;
@@ -185,20 +230,12 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
         onExit();
         break;
       case "Tab": {
-        const f = focusables();
-        if (f.length === 0) return;
-        const first = f[0];
-        const last = f[f.length - 1];
-        const active = document.activeElement;
-        if (e.shiftKey && active === first) {
+        const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const inside = !!active && (card.contains(active) || scrubber.contains(active));
+        const to = trapTarget(focusables(), active, e.shiftKey, inside);
+        if (to) {
           e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && active === last) {
-          e.preventDefault();
-          first.focus();
-        } else if (!card.contains(active) && !scrubber.contains(active)) {
-          e.preventDefault();
-          first.focus();
+          to.focus();
         }
         break;
       }
@@ -212,6 +249,11 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
     },
     setExtra(el) {
       extraSlot.replaceChildren(...(el ? [el] : []));
+    },
+    bounds() {
+      if (!shown || card.hidden) return null;
+      const r = card.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
     },
     begin(story) {
       kicker.textContent = story.kicker;

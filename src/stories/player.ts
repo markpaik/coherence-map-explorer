@@ -20,7 +20,7 @@
 // player asks for a *silent* focus that lights the closure without opening the
 // panel or touching the hash) and it restores every borrowed surface on exit.
 
-import type { Box3 } from "three";
+import { Vector3, type Box3 } from "three";
 import type { GraphCore } from "../data";
 import type { Machine } from "../state/machine";
 import { MIN_FIT_EXTENT, nodeBoundingBox } from "../state/machine";
@@ -30,6 +30,8 @@ import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
 import type { BeaconsHandle } from "../scene/beacons";
 import type { CameraRig } from "../scene/camera";
+import { compositionBias, computeUsableRect, measureChrome } from "../scene/frame";
+import { rovingIndex } from "../ui/chipgroup";
 import type { FiltersHandle } from "../ui/filters";
 import type { PanelHandle } from "../ui/panel";
 import type { SearchHandle } from "../ui/search";
@@ -56,6 +58,7 @@ import {
 } from "./scripts";
 import { createStoryCard, type StoryCardHandle } from "../ui/storycard";
 import { createFormationPick, type FormationPickHandle } from "./formationpick";
+import { planClearFrame } from "./yearframe";
 
 const LAPSE_MS = 2000; // "lapse" transition length (damage crossfade)
 // The interactive story's ring floor: absolute, because a lost YEAR always puts
@@ -124,6 +127,19 @@ export const STORY_SURFACE_KEYS = [
  */
 export function resetStorySurfaces(surfaces: StorySurfaces): void {
   for (const key of STORY_SURFACE_KEYS) surfaces[key]();
+}
+
+/**
+ * Whether a lose-a-year chip switch EASES (the scatter crossfade plus a fresh
+ * ring wave through the newly touched standards) or cuts straight to the
+ * settled year. It follows reduced motion, exactly as a scene transition does:
+ * under reduced motion the switch is a cut, and every ring shows at once.
+ * Reduced motion cuts the motion, never the information. (A chip that always
+ * eased left the new rings staged on a clock that never runs: grade K showed
+ * none of its 25 hole rings.)
+ */
+export function yearSwitchEases(reducedMotion: boolean): boolean {
+  return !reducedMotion;
 }
 
 export interface StoryPlayerDeps {
@@ -468,6 +484,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
   // for the chosen year, computed from the same engine the stories use.
   let loseYearSel: string | null = null;
   const LOSE_YEAR_MS = 2200;
+  // What the camera frames for the chosen year (see frameYear): the missed
+  // grade itself, and its downstream band — every standard the loss reaches.
+  let yearFrame: { missed: number[]; reach: number[] } | null = null;
 
   function armYearDamage(g: string, ease: boolean): number {
     const missedIdx = expandFamilies(resolve(`grade:${g}`), childrenOf);
@@ -475,6 +494,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     // Ring intensities read the TRUE engine damage, captured before the
     // near-binary display floor below rewrites the node-dimming values.
     const ringDamage = new Float32Array(target);
+    const reach: number[] = [];
+    for (let i = 0; i < N; i++) if (!missedIdx.has(i) && target[i] > 0.0001) reach.push(i);
+    yearFrame = { missed: [...missedIdx], reach };
     const gRank = gradeRank.get(g) ?? 0;
     let missedCount = 0;
     let ahead = 0;
@@ -533,18 +555,74 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     return LOSE_YEAR_MS;
   }
 
+  // Frame the chosen year and its downstream band CLEAR of the story card. The
+  // whole-map framing left the card over the year the reader had just removed
+  // (the Ascent puts kindergarten lowest and leftmost, exactly where the card
+  // sits): K, 1 and 2 were entirely under it at 1440x900, and most of grade 3
+  // at 1280x720. planClearFrame plans against the same chrome-aware usable rect
+  // and solve the rig composes with, and pads the subject toward the card so
+  // the padding lands under it. The rig then frames that box as any scene.
+  const YEAR_REACH_TRIM = 0.05; // the band may shed its strays; the year never
+  /** The idle drift's sway (camera.ts DRIFT_AMPLITUDE_RAD): the year stays
+   *  clear while the camera breathes, not only on the frame it lands. */
+  const YEAR_FRAME_SWAY = (18 * Math.PI) / 180;
+  /** Wider than this share of the viewport, the card is bottom chrome
+   *  (measureChrome's own phone rule), which the usable rect already excludes. */
+  const CARD_FULL_WIDTH = 0.7;
+  function frameYear(animate: boolean): void {
+    if (!yearFrame) return;
+    const { missed, reach } = yearFrame;
+    const subject = storyFitBox(missed, 0); // the chosen year: every standard frames
+    if (reach.length) subject.union(storyFitBox(reach, reach.length > TRIM_ABOVE ? YEAR_REACH_TRIM : 0));
+    const chrome = measureChrome();
+    // Only the bottom-LEFT desktop card is an occluder to plan around. Read its
+    // box directly: on the story's first frame under reduced motion the card's
+    // entry animation still sits at opacity 0, and measureChrome skips it.
+    const box = card.bounds();
+    const occluder = box && box.width <= chrome.viewportWidth * CARD_FULL_WIDTH ? box : null;
+    const eye = new Vector3();
+    const target = new Vector3();
+    rig.controls.getPosition(eye, true);
+    rig.controls.getTarget(target, true);
+    const plan = planClearFrame({
+      fovDeg: rig.camera.fov,
+      viewportWidth: chrome.viewportWidth,
+      viewportHeight: chrome.viewportHeight,
+      rect: computeUsableRect(chrome),
+      bias: compositionBias(chrome),
+      view: target.sub(eye),
+      subject,
+      keep: missed.map((i) => nodes.getPosition(i, new Vector3())),
+      occluder,
+      swayRad: reducedMotion() ? 0 : YEAR_FRAME_SWAY, // no drift under reduced motion
+      minDistance: rig.controls.minDistance,
+      maxDistance: rig.controls.maxDistance,
+    });
+    void rig.frameSubject(plan.box, { transition: animate });
+  }
+
   function mountLoseAYear(): void {
     const wrap = document.createElement("div");
     wrap.className = "lose-year";
     wrap.setAttribute("role", "group");
     wrap.setAttribute("aria-label", "Choose the missing grade");
+    const order = ["K", "1", "2", "3", "4", "5", "6", "7", "8"];
     const chips = new Map<string, HTMLButtonElement>();
+    // Roving tab stop: the group is ONE Tab stop (the chosen year), and the
+    // arrow keys move between years. The story card's focus trap reads the live
+    // DOM, so it follows whichever chip holds the stop.
+    const setTabStop = (g: string): void => {
+      for (const [k, b] of chips) b.tabIndex = k === g ? 0 : -1;
+    };
     const select = (g: string): void => {
       loseYearSel = g;
       for (const [k, b] of chips) b.setAttribute("aria-pressed", String(k === g));
-      armYearDamage(g, true);
+      setTabStop(g);
+      const ease = yearSwitchEases(reducedMotion());
+      armYearDamage(g, ease);
+      frameYear(ease);
     };
-    for (const g of ["K", "1", "2", "3", "4", "5", "6", "7", "8"]) {
+    for (const g of order) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "lose-year-chip";
@@ -554,9 +632,32 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       chips.set(g, b);
       wrap.appendChild(b);
     }
+    // Arrows move focus only; Enter / Space chooses (a choice recomputes the
+    // map, so it must not fire on every step). The card leaves arrow keys
+    // inside this group alone, so an arrow never steps or ends the story here.
+    wrap.addEventListener("keydown", (e) => {
+      const at = order.findIndex((g) => chips.get(g) === e.target);
+      if (at < 0) return;
+      const to = rovingIndex(e.key, at, order.length);
+      if (to === null) return;
+      e.preventDefault();
+      setTabStop(order[to]);
+      chips.get(order[to])!.focus();
+    });
+    // Leaving the group hands the tab stop back to the chosen year, so Tab
+    // always re-enters on the year the map is showing.
+    wrap.addEventListener("focusout", (e) => {
+      if (!(e.relatedTarget instanceof Node && wrap.contains(e.relatedTarget))) {
+        setTabStop(loseYearSel ?? "3");
+      }
+    });
     loseYearSel = "3"; // the pandemic story's anchor year, preselected
     chips.get("3")!.setAttribute("aria-pressed", "true");
+    setTabStop("3");
     card.setExtra(wrap);
+    // Start on the chosen year, not on Next: this story's only Next is "Done",
+    // and the chips are what the reader came to use.
+    chips.get("3")!.focus();
   }
 
   // Arm the lit-set transition for a scene. Everything outside scene.state.lit
@@ -729,7 +830,12 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     if (currentStory.interactive !== "lose-a-year") {
       armBeacons(scene, missedIdx, rawDamage, cut);
     }
-    applyCamera(scene, !cut);
+    // The interactive story frames the chosen year clear of the card from its
+    // very first frame (armYearDamage above set the year and rendered the card
+    // copy, so the card is measured at its real height). Authored scenes keep
+    // their authored camera.
+    if (currentStory.interactive === "lose-a-year") frameYear(!cut);
+    else applyCamera(scene, !cut);
     renderScene(scene, index, activePose);
 
     // Arm the settle window: the scene holds only after the damage crossfade
@@ -761,6 +867,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     clearCardExtra: () => {
       card.setExtra(null);
       loseYearSel = null;
+      yearFrame = null;
     },
     clearFocalOffset: () => rig.clearFocalOffset(false),
     recomputeFilters: () => filters.recompute(), // reclaim the visibility buffers

@@ -473,6 +473,9 @@ function start(graph: GraphCore): void {
     nodes.setShimmerEnabled(!on);
     stars.setTwinkleEnabled(!on);
     rig.setDriftEnabled(!on);
+    // advance() stops pumping beacons.setTime under reduced motion, so a staged
+    // ring wave could never arrive: the rings show their full set instead.
+    beacons.setClockFrozen(on);
     // Mirror to a root class so DOM transitions (panel/dropdown/tour) also honor
     // the runtime toggle, not just the OS-level prefers-reduced-motion media.
     document.documentElement.classList.toggle("rm", on);

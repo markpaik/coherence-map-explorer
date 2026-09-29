@@ -148,6 +148,15 @@ export interface BeaconsHandle {
   update(): void;
   setTime(t: number): void;
   /**
+   * Tell the rings their clock is FROZEN (reduced motion: main.ts stops calling
+   * setTime, so uTime never moves). A staged ring appears only once uTime passes
+   * its appear time, so on a frozen clock every staged ring would stay invisible
+   * for good. While frozen, setTargets therefore treats every call as `instant`,
+   * and freezing snaps any ring still waiting on its wave to fully shown.
+   * Reduced motion cuts the motion, never the information.
+   */
+  setClockFrozen(frozen: boolean): void;
+  /**
    * Viewport height in CSS px — the ring shader needs it to know its own
    * on-screen size, which is what keeps a hollow readable at a wide framing
    * (MIN_RING_PX). Call on resize; 0 (the default) disables the growth.
@@ -267,6 +276,9 @@ export function createBeacons(
 
   let targetIdx: number[] = [];
   let time = 0;
+  // True while the scene clock is not advancing (reduced motion). See
+  // setClockFrozen: a staged appear time can never arrive on a frozen clock.
+  let clockFrozen = false;
   // Per-node appear time from the LAST setTargets, so a `delta` update can keep a
   // still-showing ring from re-popping while newly-added rings stage from scratch.
   let appearByIndex = new Map<number, number>();
@@ -316,7 +328,9 @@ export function createBeacons(
       updateFocus();
     },
     setTargets(targets, opts) {
-      const instant = opts?.instant === true;
+      // A frozen clock never reaches a staged appear time, so a wave asked for
+      // under reduced motion would leave its rings invisible. Show them all.
+      const instant = opts?.instant === true || clockFrozen;
       const delta = opts?.delta === true;
       const list = targets ? targets.slice(0, MAX) : [];
       const nextAppear = new Map<number, number>();
@@ -356,6 +370,21 @@ export function createBeacons(
       time = t;
       uniforms.uTime.value = t;
       fUniforms.uTime.value = t; // the focus ring breathes on the same clock
+    },
+    setClockFrozen(frozen) {
+      clockFrozen = frozen;
+      if (!frozen) return;
+      // A wave caught mid-flight by the freeze would hold its unreached rings
+      // invisible: land every ring that has not fully appeared yet.
+      let snapped = false;
+      for (let k = 0; k < targetIdx.length; k++) {
+        if (appears[k] > time - FADE_SEC) {
+          appears[k] = APPEARED;
+          appearByIndex.set(targetIdx[k], APPEARED);
+          snapped = true;
+        }
+      }
+      if (snapped) appearAttr.needsUpdate = true;
     },
     setViewportHeight(cssHeight) {
       uniforms.uViewH.value = cssHeight;
