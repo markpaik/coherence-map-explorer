@@ -41,11 +41,6 @@ export interface StoryCardHandle {
    * the caller wires all behavior.
    */
   setExtra(el: HTMLElement | null): void;
-  /**
-   * The card's on-screen rectangle in CSS px, or null while it is hidden. The
-   * interactive story frames its chosen year clear of it.
-   */
-  bounds(): { x: number; y: number; width: number; height: number } | null;
   /** Hide the card + scrubber. */
   end(): void;
   readonly shown: boolean;
@@ -285,11 +280,6 @@ export function createStoryCard(deps: StoryCardDeps): StoryCardHandle {
     },
     setExtra(el) {
       extraSlot.replaceChildren(...(el ? [el] : []));
-    },
-    bounds() {
-      if (!shown || card.hidden) return null;
-      const r = card.getBoundingClientRect();
-      return r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
     },
     begin(story) {
       kicker.textContent = story.kicker;

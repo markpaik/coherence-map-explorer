@@ -64,12 +64,15 @@ Exceptions are declared by name, with a reason, in
 `tests/story-framing.test.ts` (the monotone-lit law is enforced there, and
 the pandemic story needs no exception at all).
 
-The story card is a known occluder, so playback biases the framed subject
-into the region it leaves clear: on desktop the card sits bottom-left, so the
-subject rides RIGHT by half the card's right edge (`rig.setFrameShiftPx`, the
-exact mirror of the panel-aware offset the machine already applies for the
-right-side panel) and up by a quarter of the card's vertical footprint. On
-phones the card is bottom-full-width, so the bias is upward only.
+The story card, the masthead, and the scrubber are keep-out zones, and the
+designer chose a smaller frame over any occlusion (2026-09-30). On desktop,
+`computeUsableRect` (src/scene/frame.ts) removes the card's whole column: the
+usable rect starts one gutter right of the card, and one gutter below the title
+block where the title block reaches into that column. The scrubber stays bottom
+chrome. Every narrated standard therefore renders in clear view, at every
+viewport down to 900x700 (tests/story-keepout.test.ts). On phones the card is
+bottom-full-width, so it keeps out the bottom band only. Lose a year plans its
+per-year frame against the same rect (src/stories/yearframe.ts).
 
 ## Entering and leaving a story
 
