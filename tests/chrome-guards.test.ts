@@ -378,28 +378,153 @@ describe("glossary popover and search dropdown paint where they can be seen", ()
     expect(popZ).toBeLessThan(55);
   });
 
-  it("with the panel open, the docked dropdown ends short of the panel's left edge", () => {
+  it("with the panel open, the docked rail and its dropdown live left of the panel (R2)", () => {
     const panelW = px(rule("\n.panel"), "width");
-    const railInset = px(rule("\n.search-rail.search-docked"), "right");
-    const open = rule(
-      "@media (min-width: 721px) {\n  body:has(.panel.panel-open) .search-rail.search-docked .search-results",
+    // --panel-inset is the panel's own width while it is open on desktop…
+    const inset = css.match(
+      /@media \(min-width: 721px\) \{\n {2}body:has\(\.panel\.panel-open\) \{\n {4}--panel-inset: (\d+)px;/,
     );
-    expect(open).toContain("left: 0;");
-    expect(open).toContain("right: auto;");
-    const m = open.match(/width: min\(420px, calc\(100% - \((\d+)px - (\d+)px \+ (\d+)px\)\)\);/);
-    expect(m, "width is read off the rail").not.toBeNull();
-    const [cPanel, cInset, gap] = m!.slice(1).map(Number);
-    expect(cPanel, "calc uses the real panel width").toBe(panelW);
-    expect(cInset, "calc uses the real docked-rail inset").toBe(railInset);
-    // Rail right edge = W - inset. The dropdown starts at the rail's left edge and
-    // spans railW - (panelW - inset + gap), so it ends at W - panelW - gap: left
-    // of the panel (W - panelW) at every width W and every rail width.
-    for (const W of [1280, 1440, 1920]) {
-      for (const railW of [700, 847, 1000]) {
-        const left = W - railInset - railW;
-        const right = left + Math.min(420, railW - (cPanel - cInset + gap));
-        expect(right, `W=${W} railW=${railW}`).toBeLessThanOrEqual(W - panelW - gap);
-      }
+    expect(inset, "--panel-inset is set on body while the side panel is open").not.toBeNull();
+    expect(Number(inset![1])).toBe(panelW);
+    // …and the docked rail anchors inside that region, so the dropdown it
+    // drops (from either edge of the bar) can only land left of the panel.
+    const docked = rule("\n.search-rail.search-docked");
+    expect(docked).toContain("right: calc(var(--panel-inset) + 18px);");
+    expect(rule("\n.search-rail.search-docked.search-dock-under")).toContain(
+      "right: calc(var(--panel-inset) + var(--gutter));",
+    );
+    expect(rule("\n.search-results")).toContain("max-width: calc(100vw - var(--panel-inset) - 2 * var(--gutter));");
+    // The old right-hung-then-rehung dropdown rule is gone with the problem.
+    expect(css).not.toContain("width: min(420px, calc(100% - (480px - 18px + 12px)));");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chrome layout: no two chrome surfaces overlap (DESIGN rules R1-R9).
+// ---------------------------------------------------------------------------
+
+describe("every chrome surface anchors to the region left of the open panel (R2)", () => {
+  const css = read("src/style.css");
+  const rule = (selectorLine: string): string => {
+    const at = css.indexOf(selectorLine + " {\n");
+    expect(at, `rule "${selectorLine}" exists`).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf("}", at));
+  };
+
+  it("right-anchored surfaces add --panel-inset to their inset", () => {
+    for (const sel of ["\n.view-toggle", "\n.nav-hints"]) {
+      expect(rule(sel), sel).toContain("right: calc(var(--panel-inset) + var(--gutter));");
+    }
+  });
+
+  it("centred surfaces centre in the region, not the viewport", () => {
+    // The rails: both insets + fit-content + auto margins (left:50% capped the
+    // box at 50vw, so the rail could neither wrap nor stay on screen).
+    for (const sel of ["\n.search-rail", "\n.filters-rail"]) {
+      const r = rule(sel);
+      expect(r, sel).toMatch(/right: calc\(var\(--panel-inset\) \+ (12px|var\(--gutter\))\);/);
+      expect(r, sel).toContain("margin-inline: auto;");
+      expect(r, sel).toContain("width: fit-content;");
+      expect(r, sel).not.toContain("left: 50%;");
+    }
+    expect(rule("\n.tour-card")).toContain("left: calc((100vw - var(--panel-inset)) / 2);");
+  });
+
+  it("the old sibling rule that moved only the bottom-right cluster is gone", () => {
+    expect(css).not.toContain(".panel.panel-open ~ .view-toggle");
+  });
+
+  it("the filter rail wraps grades / strands + lenses instead of hiding (R2)", () => {
+    expect(rule("\n.filters-rail.filters-wrapped .filters-groups > .filter-group:first-child")).toContain(
+      "flex: 0 0 100%;",
+    );
+    const layout = read("src/ui/chromelayout.ts");
+    expect(layout).toContain('rail.classList.toggle("filters-wrapped", wrapped);');
+  });
+
+  it("the bottom band stacks through measured lifts, and the rail installs the pass", () => {
+    expect(rule("\n.view-toggle")).toContain("bottom: calc(clamp(46px, 7vh, 62px) + var(--lift-toggle));");
+    expect(rule("\n.nav-hints")).toContain("bottom: calc(clamp(46px, 7vh, 62px) + 62px + var(--lift-hints));");
+    expect(rule("\n.search-rail")).toContain("bottom: calc(28vh + var(--lift-rail));");
+    expect(read("src/ui/search.ts")).toContain("const disposeLayout = installChromeLayout();");
+  });
+});
+
+describe("phones: the short side decides, portrait and landscape alike (R5)", () => {
+  const css = read("src/style.css");
+  const layout = read("src/ui/chromelayout.ts");
+  const main = read("src/main.ts");
+
+  it("PHONE_QUERY is a coarse pointer whose width OR height is 500px or less", () => {
+    const m = layout.match(/export const PHONE_QUERY =\n\s+"([^"]+)";/);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe("(pointer: coarse) and (max-width: 500px), (pointer: coarse) and (max-height: 500px)");
+  });
+
+  it("main.ts takes the Browse default from PHONE_QUERY, not from width alone", () => {
+    expect(main).toContain("const isPhoneDefault = window.matchMedia(PHONE_QUERY).matches;");
+    expect(main).not.toMatch(/matchMedia\("\(max-width: 720px\)"\)\.matches &&/);
+  });
+
+  it("style.css repeats the same list for the phone chrome (title, tour button)", () => {
+    const at = css.indexOf("@media (pointer: coarse) and (max-width: 500px), (pointer: coarse) and (max-height: 500px) {");
+    expect(at, "phone media block").toBeGreaterThan(-1);
+    const block = css.slice(at, at + 600);
+    expect(block).toContain("#tour-btn {\n    display: none;");
+    expect(block).toContain(".title-block {\n    display: none;");
+  });
+
+  it("touch never shows the mouse-only nav hints, at any width", () => {
+    expect(css).toMatch(/@media \(pointer: coarse\) \{\n {2}\.nav-hints \{\n {4}display: none;/);
+  });
+
+  it("a phone keeps a compact masthead during a story (R7): the wordmark and aside only", () => {
+    expect(css).toContain("body.storying .title-block {\n    display: block;");
+    expect(css).toContain("body.storying .title-block > :not(.headline) {\n    display: none;");
+  });
+
+  it("the Browse search pill focuses its field on a tap anywhere inside it (R6)", () => {
+    const browse = read("src/ui/browse.ts");
+    expect(browse).toMatch(/searchWrap\.addEventListener\("click", \(e\) => \{\n\s+if \(e\.target !== searchInput\) searchInput\.focus\(\);/);
+    expect(css).toContain("align-self: stretch; /* the whole pill height is the field (R6) */");
+  });
+});
+
+describe("tooltip placement clamps after its flip (R8)", () => {
+  it("tooltip.ts places through placeTooltip inside the canvas region, off the chrome", () => {
+    const src = read("src/ui/tooltip.ts");
+    expect(src).toContain("const c = canvasRegion();");
+    expect(src).toContain("placeTooltip(x, y, w, h, region, chromeBoxes(), OFFSET)");
+    // The old single flip with no re-clamp must not come back.
+    expect(src).not.toContain("left = x - OFFSET - w;");
+  });
+});
+
+describe("CCSS license notice on every surface that shows standards text (R9)", () => {
+  const NOTICE =
+    "© Copyright 2010. National Governors Association Center for Best Practices and Council of Chief State School Officers. All rights reserved.";
+
+  it("the shared constant carries the license's notice verbatim, with no em dash", async () => {
+    const { CCSS_NOTICE } = await import("../src/ui/license");
+    expect(CCSS_NOTICE).toContain(NOTICE);
+    expect(CCSS_NOTICE).not.toContain("—");
+  });
+
+  it("the map's title block carries the same line, under the credit line", () => {
+    const html = read("index.html");
+    const at = html.indexOf('<p class="provline">');
+    const lic = html.indexOf('<p class="licline license-notice">');
+    expect(lic, "licline follows the provline").toBeGreaterThan(at);
+    const text = html.slice(lic, html.indexOf("</p>", lic)).replace(/<[^>]+>/g, "").replace("&copy;", "©");
+    expect(text).toContain(NOTICE);
+  });
+
+  it("Browse (every view) and the no-WebGL list carry it as a footer", () => {
+    for (const f of ["src/ui/browse.ts", "src/ui/fallback.ts"]) {
+      const src = read(f);
+      expect(src, f).toContain('import { CCSS_NOTICE } from "./license";');
+      expect(src, f).toMatch(/className = "(browse|fallback)-license license-notice";/);
+      expect(src, f).toContain("license.textContent = CCSS_NOTICE;");
     }
   });
 });
