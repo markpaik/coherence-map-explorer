@@ -58,6 +58,7 @@ import { createViewToggle } from "./ui/viewtoggle";
 import { FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
+import { PHONE_QUERY } from "./ui/chromelayout";
 import { decideRoute, storyIdFromHash, codeFromHash } from "./state/routing";
 import { claimChunkReload } from "./state/chunkreload";
 import { hasFloatColorBuffer } from "./scene/glcaps";
@@ -437,14 +438,14 @@ function start(graph: GraphCore): void {
   void storyPicker;
 
   // -- Browse mode (phone-first drill-down; default on phones) -------------
-  // A full-screen DOM overlay above the still-booting scene. Active when the
-  // device is a small coarse-pointer screen, or forced via ?browse=1 (any
-  // device — desktop testing); ?nobrowse=1 forces it off. Browse reads the
-  // boot hash itself (opens at a #/s/<CODE> deep link, stays closed for a
-  // #/story/<id> one). onEnterMap just pokes the render loop after hand-off.
-  const isPhoneDefault =
-    window.matchMedia("(max-width: 720px)").matches &&
-    window.matchMedia("(pointer: coarse)").matches;
+  // A full-screen DOM overlay above the still-booting scene. Active on a phone
+  // (a coarse pointer whose SHORT side is 500px or less, held portrait OR
+  // landscape: width alone let a landscape phone fall through to the desktop
+  // chrome), or forced via ?browse=1 (any device — desktop testing);
+  // ?nobrowse=1 forces it off. Browse reads the boot hash itself (opens at a
+  // #/s/<CODE> deep link, stays closed for a #/story/<id> one). onEnterMap just
+  // pokes the render loop after hand-off.
+  const isPhoneDefault = window.matchMedia(PHONE_QUERY).matches;
   const browseActive = params.has("nobrowse")
     ? false
     : params.has("browse") || isPhoneDefault;

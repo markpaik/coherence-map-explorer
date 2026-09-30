@@ -4,8 +4,11 @@
 // The text line comes from the prefetched search docs; before they land the
 // card simply renders without it.
 
+import { canvasRegion, chromeBoxes, placeTooltip } from "./chromelayout";
+
 const SHOW_DELAY_MS = 120;
 const OFFSET = 14; // px from cursor
+const EDGE = 8; // px of air kept from the region's edges
 
 export interface TooltipContent {
   code: string;
@@ -48,14 +51,16 @@ export function createTooltip(container: HTMLElement): TooltipHandle {
   let showTimer: number | null = null;
 
   function place(x: number, y: number): void {
-    // Keep the card inside the viewport; flip sides near the right/bottom edge.
+    // R8: the card stays wholly inside the canvas region (the viewport, left of
+    // an open side panel) and off every chrome surface. placeTooltip flips to
+    // the corner that fits and clamps AFTER the flip, so a narrow window can
+    // never push it past the left edge (the old single flip had no re-clamp).
     const rect = el.getBoundingClientRect();
     const w = rect.width || 260;
     const h = rect.height || 72;
-    let left = x + OFFSET;
-    let top = y + OFFSET;
-    if (left + w > window.innerWidth - 8) left = x - OFFSET - w;
-    if (top + h > window.innerHeight - 8) top = y - OFFSET - h;
+    const c = canvasRegion();
+    const region = { l: c.l + EDGE, t: c.t + EDGE, r: c.r - EDGE, b: c.b - EDGE };
+    const { left, top } = placeTooltip(x, y, w, h, region, chromeBoxes(), OFFSET);
     el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }
 

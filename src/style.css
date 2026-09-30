@@ -56,6 +56,39 @@
   --fs-chip-touch: 13px;
   --fs-label: 10px;
   --fs-caption: 12px;
+
+  /* -- chrome layout (no two chrome surfaces overlap: DESIGN rules R1-R4) ----
+     --gutter        the right-hand edge gap the bottom-right cluster keeps
+     --title-l       the title block's left inset (the docked rail aligns to it)
+     --panel-inset   the width the open desktop side panel takes from the right;
+                     every other surface lives left of it (set on body below)
+     The rest are written by ui/chromelayout.ts, which measures what CSS laid
+     out and lifts or shifts a surface only where two would collide:
+     --lift-*        how far a bottom-band surface rises to clear what is below
+     --title-b       the title block's bottom edge (the docked rail hangs there)
+     --scrub-shift   how far the story scrubber slides right of the story card
+     --title-shift   how far the story masthead slides right of the story card
+     --depth-top/-bottom  the free column the Ascent depth scale may use
+     --dd-max        the search dropdown's height before it would meet chrome */
+  --gutter: clamp(16px, 2.5vw, 28px);
+  --title-l: clamp(16px, 3vw, 36px);
+  --panel-inset: 0px;
+  --lift-toggle: 0px;
+  --lift-hints: 0px;
+  --lift-tour: 0px;
+  --lift-rail: 0px;
+  --title-b: 0px;
+  --scrub-shift: 0px;
+  --title-shift: 0px;
+}
+
+/* The open desktop side panel (panel.ts: a bottom sheet at 720px and below)
+   takes 480px from the right edge. The panel is a body child, so the property
+   is set on body and every chrome surface inherits it. */
+@media (min-width: 721px) {
+  body:has(.panel.panel-open) {
+    --panel-inset: 480px;
+  }
 }
 
 * {
@@ -116,11 +149,20 @@ body {
 .title-block {
   position: fixed;
   top: clamp(16px, 3vh, 32px);
-  left: clamp(16px, 3vw, 36px);
-  max-width: min(660px, 70vw);
+  left: var(--title-l);
+  /* Never wider than the region left of the open panel (R2): at narrow desktop
+     widths the lines wrap instead of running under it. */
+  max-width: min(660px, 70vw, calc(100vw - var(--panel-inset) - var(--title-l) - var(--gutter)));
   z-index: 10;
   pointer-events: none;
   user-select: none;
+  /* Story masthead only: slides right of the story card when a short window
+     leaves no room above it (chromelayout.ts). 0 everywhere else. */
+  transform: translateX(var(--title-shift));
+}
+/* No room for the masthead anywhere clear of the story card: it steps aside. */
+.title-block.title-cramped {
+  visibility: hidden;
 }
 .headline {
   margin: 0 0 6px;
@@ -198,25 +240,64 @@ body.art-fidenza .headline-art {
   text-underline-offset: 2px;
   pointer-events: auto; /* the title block itself is pointer-events: none */
 }
+/* CCSS public license notice: the caption style of the credit line above it.
+   Browse and the no-WebGL list carry the same notice as a footer. */
+.licline {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  max-width: 52ch;
+}
 
 /* -- search rail, bottom third (placeholder — Phase 3 wires it) ----------- */
 
+/* Centred in the region left of any open panel (R2): both insets set, width
+   fit-content, auto margins. (The old left:50% + translate centring capped the
+   rail's box at 50vw, so it could never wrap on its own and ran off-screen or
+   under the panel instead.) One row when it fits; otherwise the launcher group
+   drops under the search bar as a unit. --lift-rail raises it clear of the
+   bottom band when that band grows (a wrapped filter rail, the tour card). */
 .search-rail {
   position: fixed;
-  left: 50%;
-  bottom: 28vh;
-  transform: translateX(-50%);
+  left: var(--gutter);
+  right: calc(var(--panel-inset) + var(--gutter));
+  margin-inline: auto;
+  width: fit-content;
+  bottom: calc(28vh + var(--lift-rail));
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 12px;
   z-index: 10;
   pointer-events: none; /* inert until Phase 3 */
+}
+.search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+/* Live (search.ts): the bar, the launchers, and the dropdown take the pointer;
+   the gaps between them stay the canvas's. */
+.search-rail.search-live #search-bar,
+.search-rail.search-live .ghost-btn,
+.search-rail.search-live .search-results {
+  pointer-events: auto;
+}
+/* The tour holds the frame and no row is left for the rail under the title
+   (a short window with the panel open): it steps aside rather than overlap. */
+.search-rail.rail-cramped {
+  visibility: hidden;
 }
 .search-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   width: min(420px, 72vw);
+  max-width: calc(100vw - var(--panel-inset) - 2 * var(--gutter));
   padding: 0 14px;
   height: 46px;
   background: var(--surface);
@@ -278,8 +359,8 @@ body.art-fidenza .headline-art {
 
 .nav-hints {
   position: fixed;
-  right: clamp(16px, 2.5vw, 28px);
-  bottom: calc(clamp(46px, 7vh, 62px) + 62px);
+  right: calc(var(--panel-inset) + var(--gutter));
+  bottom: calc(clamp(46px, 7vh, 62px) + 62px + var(--lift-hints));
   margin: 0;
   z-index: 10;
   font-size: 12px;
@@ -287,7 +368,21 @@ body.art-fidenza .headline-art {
   color: var(--ink-3);
   pointer-events: none;
   user-select: none;
-  transition: opacity 600ms ease;
+  transition:
+    opacity 600ms ease,
+    right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* A short window with the panel open during the tour: the tour card needs the
+   hints' row (chromelayout.ts), and the tour's backdrop blocks the gestures they
+   describe anyway. */
+body.tour-cramped .nav-hints {
+  opacity: 0;
+}
+/* Touch-only devices never see the mouse-only gestures (R5), at any width. */
+@media (pointer: coarse) {
+  .nav-hints {
+    display: none;
+  }
 }
 .nav-hints span {
   color: var(--ink-2);
@@ -300,8 +395,8 @@ body.art-fidenza .headline-art {
 
 .view-toggle {
   position: fixed;
-  right: clamp(16px, 2.5vw, 28px);
-  bottom: clamp(46px, 7vh, 62px);
+  right: calc(var(--panel-inset) + var(--gutter));
+  bottom: calc(clamp(46px, 7vh, 62px) + var(--lift-toggle));
   z-index: 11;
   display: inline-flex;
   gap: 3px;
@@ -311,7 +406,7 @@ body.art-fidenza .headline-art {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 13px;
-  /* Glides aside when the desktop panel opens (see the panel-open shift below). */
+  /* Glides left of the desktop panel when it opens (--panel-inset). */
   transition: right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .view-seg {
@@ -345,7 +440,7 @@ body.art-fidenza .headline-art {
    carries the same orientation to assistive tech. */
 .view-caption {
   position: fixed;
-  left: 50%;
+  left: calc((100vw - var(--panel-inset)) / 2);
   bottom: clamp(96px, 14vh, 120px);
   transform: translateX(-50%) translateY(6px);
   z-index: 12;
@@ -377,7 +472,7 @@ body.art-fidenza .headline-art {
 /* -- Transit metro key (legend line, pose 3 only) --------------------------- */
 .transit-key {
   position: fixed;
-  left: 50%;
+  left: calc((100vw - var(--panel-inset)) / 2);
   bottom: clamp(64px, 9vh, 78px);
   transform: translateX(-50%);
   z-index: 11;
@@ -413,7 +508,7 @@ body.browsing .transit-key {
 /* Discovery tab: the labeled pill that unfolds the segmented control. */
 .art-tab {
   position: fixed;
-  right: clamp(16px, 2.5vw, 28px);
+  right: calc(var(--panel-inset) + var(--gutter));
   bottom: clamp(46px, 7vh, 62px);
   transform: translateY(-59px); /* above the 51px pose toggle + 8px gap */
   z-index: 11;
@@ -437,7 +532,7 @@ body.browsing .transit-key {
 }
 .art-toggle {
   position: fixed;
-  right: clamp(16px, 2.5vw, 28px);
+  right: calc(var(--panel-inset) + var(--gutter));
   bottom: clamp(46px, 7vh, 62px);
   transform: translateY(-107px); /* above the tab when unfolded */
   z-index: 11;
@@ -456,7 +551,7 @@ body.browsing .transit-key {
 }
 .art-credit {
   position: fixed;
-  right: clamp(16px, 2.5vw, 28px);
+  right: calc(var(--panel-inset) + var(--gutter));
   bottom: clamp(46px, 7vh, 62px);
   /* Sit above the stack: pose toggle (51) + gap + Art-styles tab (40) + gap.
      When the tab is unfolded (body.art-open) the segmented row (51 + gap)
@@ -482,35 +577,22 @@ body.art-open .art-credit {
   transform: translateY(-166px); /* clears the unfolded segmented row too */
 }
 
-/* Detail panel ↔ bottom-right cluster (desktop): the panel slides in over the
-   right edge (480px wide, z 18) and would bury the pose toggle + the
-   Style-overrides tab / segments / credit (z 11), which live in the same corner
-   — elementFromPoint lands on the panel, so they can't be clicked. While the
-   panel is open, slide the whole cluster left of the panel's edge (panel width
-   + the cluster's own edge gap) so both stay usable; it glides back on close
-   (the base rules above carry the right-transition). The panel is an earlier
-   body sibling of every cluster element, so the general-sibling combinator
-   reaches them with no JS state flag. Desktop only — on phones the panel is a
-   bottom sheet and the cluster is repositioned to clear it (see the 720px
-   block). Verified no overlap at 1280px and 1456px (28px clearance each). */
-@media (min-width: 721px) {
-  .panel.panel-open ~ .view-toggle,
-  .panel.panel-open ~ .art-tab,
-  .panel.panel-open ~ .art-toggle,
-  .panel.panel-open ~ .art-credit {
-    right: calc(480px + clamp(16px, 2.5vw, 28px));
-  }
-}
+/* Detail panel ↔ every other surface (desktop, R2): the panel slides in over
+   the right edge (480px wide, z 18). Every chrome surface anchors to the region
+   left of it through --panel-inset (set on body while it is open, see :root),
+   so the bottom-right cluster, the rails, the nav hints, and the captions all
+   glide left of its edge and back on close. On phones the panel is a bottom
+   sheet instead (see the 720px blocks). */
 
 /* -- depth scale hint (left edge; visible in the Ascent) -------------------- */
 
 .depth-scale {
   position: fixed;
   left: clamp(14px, 2vw, 26px);
-  /* Clear of the title block (which reaches ~34vh on short viewports) and of
-     the filter rail below — the scale annotates the massif, not the chrome. */
-  top: max(36vh, 300px);
-  bottom: 22vh;
+  /* Clear of the title block and of the chrome below: chromelayout.ts measures
+     the free column (the defaults are the shipped max(36vh, 300px) / 22vh). */
+  top: var(--depth-top, max(36vh, 300px));
+  bottom: var(--depth-bottom, 22vh);
   z-index: 9;
   display: flex;
   flex-direction: column;
@@ -526,6 +608,12 @@ body.art-open .art-credit {
 }
 .depth-scale-mark {
   white-space: nowrap;
+}
+/* Too little free column for the scale (a story card or a tall band fills
+   the left edge): hide it rather than cramp it or lay it over chrome. It stays
+   laid out so the layout pass can bring it back. */
+.depth-scale.depth-scale-cramped {
+  visibility: hidden;
 }
 .depth-scale-axis {
   writing-mode: vertical-rl;
@@ -577,7 +665,8 @@ body.art-ringers .subline {
 body.art-ringers .statline {
   color: rgb(26 23 18 / 0.66);
 }
-body.art-ringers .provline {
+body.art-ringers .provline,
+body.art-ringers .licline {
   color: rgb(26 23 18 / 0.55);
 }
 body.art-ringers .nav-hints {
@@ -614,7 +703,8 @@ body.art-fidenza .statline {
   color: rgb(232 224 205 / 0.86);
   text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
 }
-body.art-fidenza .provline {
+body.art-fidenza .provline,
+body.art-fidenza .licline {
   color: rgb(232 224 205 / 0.72);
   text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
 }
@@ -660,7 +750,8 @@ body.env-light .subline {
 body.env-light .statline {
   color: #4a4a55;
 }
-body.env-light .provline {
+body.env-light .provline,
+body.env-light .licline {
   color: #4a4a55;
 }
 body.env-light .provline a {
@@ -794,20 +885,26 @@ body.art-fidenza .ghost-btn:hover {
 
 /* -- search rail: docked state + results dropdown ------------------------- */
 
+/* No transition on `bottom`: the layout pass reads the undocked rail's resting
+   place off its rect, and a glide would hand it a half-way value. (Docking
+   swaps bottom for top, which never interpolated anyway.) */
 .search-rail {
   transition:
     top 0.5s cubic-bezier(0.2, 0.8, 0.2, 1),
-    bottom 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+    right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-/* Docked, the rail lives top-RIGHT so it never covers the title block
-   (round 11: top-center sat on "Coherence (is …)" at common widths). The
-   title owns the top-left; actions own the top-right. */
+/* Docked top-RIGHT (inside the region left of any open panel) only when the
+   rail's left edge clears the headline and its aside by 24px, and the dropdown
+   it drops clears the rest of the title block (R3). chromelayout.ts measures
+   that per aside deal and per width; when it fails the rail docks under the
+   title block instead (.search-dock-under, below). */
 .search-rail.search-docked {
   bottom: auto;
   top: 18px;
   left: auto;
-  right: 18px;
-  transform: none;
+  right: calc(var(--panel-inset) + 18px);
+  margin: 0;
+  justify-content: flex-end;
 }
 /* Right-aligned rail: the results dropdown hangs from the search bar's right
    edge so it cannot run off-screen. */
@@ -815,21 +912,27 @@ body.art-fidenza .ghost-btn:hover {
   left: auto;
   right: 0;
 }
-/* Detail panel open (desktop): hung from the right, the dropdown lands wholly
-   under the panel (z 18 over the rail's z 10), and no result row can be seen
-   or clicked. Hang it from the search bar's LEFT edge instead and stop it 12px
-   short of the panel. The rail and the panel are both right-anchored, so the
-   panel's left edge sits a fixed 480px - 18px (panel width minus the docked
-   rail's right inset) in from the rail's right edge at every viewport width,
-   and 100% here is the rail's width. The panel is a later body child than the
-   rail, so this needs :has(), not the ~ rule the view toggle uses. Panel
-   closed, the rule above still applies unchanged. */
-@media (min-width: 721px) {
-  body:has(.panel.panel-open) .search-rail.search-docked .search-results {
-    left: 0;
-    right: auto;
-    width: min(420px, calc(100% - (480px - 18px + 12px)));
-  }
+/* Docked directly under the title block, aligned to its left edge. The rail
+   wraps (launchers under the bar) when the region cannot hold one row, and the
+   dropdown hangs from the bar's left edge. */
+.search-rail.search-docked.search-dock-under {
+  top: calc(var(--title-b) + 14px);
+  left: var(--title-l);
+  right: calc(var(--panel-inset) + var(--gutter));
+  justify-content: flex-start;
+}
+.search-rail.search-dock-under .search-actions {
+  justify-content: flex-start;
+}
+.search-rail.search-docked.search-dock-under .search-results {
+  left: 0;
+  right: auto;
+}
+/* While the dropdown is open, the mouse-gesture hints and the decorative depth
+   scale step aside: the list needs the column more than they do (R1). */
+body:has(#search-results:not([hidden])) .nav-hints,
+body:has(#search-results:not([hidden])) .depth-scale {
+  visibility: hidden;
 }
 .ghost-btn.soon {
   color: var(--ink);
@@ -841,6 +944,7 @@ body.art-fidenza .ghost-btn:hover {
   top: calc(100% + 8px);
   left: 0;
   width: min(420px, 72vw);
+  max-width: calc(100vw - var(--panel-inset) - 2 * var(--gutter));
   margin: 0;
   padding: 6px;
   list-style: none;
@@ -850,7 +954,8 @@ body.art-fidenza .ghost-btn:hover {
   border: 1px solid var(--line);
   border-radius: 12px;
   z-index: 12;
-  max-height: 56vh;
+  /* Stops short of whatever chrome lies below it (chromelayout.ts, R1). */
+  max-height: min(56vh, var(--dd-max, 56vh));
   overflow-y: auto;
 }
 .search-results[hidden] {
@@ -1474,22 +1579,28 @@ body.art-fidenza .ghost-btn:hover {
 
 /* -- filters rail (bottom) ------------------------------------------------- */
 
+/* Centred in the region left of any open panel (R2), same device as the search
+   rail: both insets, fit-content, auto margins. One row whenever that row fits
+   (the lens toggles joining a second line read as "expanded", Mark round 8);
+   otherwise the WRAPPED form below. */
 .filters-rail {
   position: fixed;
-  left: 50%;
+  left: 12px;
+  right: calc(var(--panel-inset) + 12px);
+  margin-inline: auto;
+  width: fit-content;
   bottom: 16px;
-  transform: translateX(-50%);
   z-index: 10;
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: calc(100vw - 24px);
   padding: 6px 10px;
   background: var(--surface);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 14px;
+  transition: right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .filters-groups {
   display: flex;
@@ -1497,19 +1608,29 @@ body.art-fidenza .ghost-btn:hover {
   gap: 5px 9px;
   flex-wrap: wrap;
 }
-/* Wide viewports keep the rail ONE row tall — the lens toggles joining a
-   second line doubled the rail's height and read as "expanded" (Mark, round
-   8). Below this width the groups wrap as before. */
-@media (min-width: 1180px) {
-  /* .filters-rail prefix outranks the later base rules (same specificity
-     would lose on source order — the intra-group wrap bug). */
-  .filters-rail .filters-groups,
-  .filters-rail .filter-group {
-    flex-wrap: nowrap;
-  }
-  .filters-rail .filter-chip {
-    white-space: nowrap;
-  }
+/* Wrapped (chromelayout.ts measures the one-row width against the region):
+   grades on one row, strands and lenses on the next (R2), a third row only when
+   those two cannot share one. The rail hugs its widest row (--filters-w), and a
+   group that opens a row drops its separator rule. */
+.filters-rail.filters-wrapped {
+  width: var(--filters-w, fit-content);
+}
+.filters-rail.filters-wrapped .filters-groups > .filter-group:first-child {
+  flex: 0 0 100%;
+}
+.filters-rail.filters-wrapped .filters-groups > .filter-group:nth-child(2),
+.filters-rail.filters-wrapped.filters-rows-3 .filters-groups > .filter-group:nth-child(3) {
+  padding-left: 0;
+  border-left: none;
+}
+/* Measuring probe: the rail as one unwrapped row (never painted; the pass adds
+   and removes it within one frame). */
+.filters-rail.filters-probe {
+  width: max-content;
+}
+.filters-rail.filters-probe .filters-groups,
+.filters-rail.filters-probe .filter-group {
+  flex-wrap: nowrap;
 }
 .filter-group {
   display: flex;
@@ -1536,6 +1657,7 @@ body.art-fidenza .ghost-btn:hover {
   padding: 3px 9px;
   font: inherit;
   font-size: var(--fs-chip);
+  white-space: nowrap; /* a chip label never breaks; the rail wraps whole chips */
   border-radius: 20px;
   cursor: pointer;
   display: inline-flex;
@@ -1592,36 +1714,11 @@ body.art-fidenza .ghost-btn:hover {
 /* -- responsive: bottom sheet + collapsed filters ------------------------- */
 
 @media (max-width: 720px) {
-  .search-rail.search-docked {
-    top: 12px;
-  }
   .panel {
     width: 100%;
     height: 100%;
     border-left: none;
     border-top: 1px solid var(--line);
-  }
-  .filters-rail {
-    left: 12px;
-    right: 12px;
-    transform: none;
-    max-width: none;
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .filters-toggle {
-    display: block;
-  }
-  .filters-groups {
-    display: none;
-    margin-top: 6px;
-  }
-  .filters-rail.filters-open .filters-groups {
-    display: flex;
-  }
-  .filter-group + .filter-group {
-    padding-left: 0;
-    border-left: none;
   }
 }
 
@@ -1723,10 +1820,35 @@ body.art-fidenza .ghost-btn:hover {
     padding-top: 6px;
   }
 
-  /* Filters: a compact "Filters" pill (closed) that opens a glass sheet. */
+  /* While the sheet is up it covers the bottom band: the Filters pill and the
+     view toggle stand down (as the Browse pill does) and the search rail docks
+     to the top, clear of the sheet, so nothing floats half-buried on it (R1). */
+  body:has(.panel.panel-open) .filters-rail,
+  body:has(.panel.panel-open) .view-toggle {
+    display: none;
+  }
+  /* The decorative depth scale runs down the left edge, into the sheet. */
+  body:has(.panel.panel-open) .depth-scale {
+    visibility: hidden;
+  }
+  body:has(.panel.panel-open) .search-rail {
+    top: calc(var(--title-b) + 12px);
+    bottom: auto;
+  }
+}
+
+/* -- compact chrome: windows 720px wide or less, and phones held landscape --
+   (a phone is a coarse pointer whose short side is 500px or less, R5; the
+   landscape half keeps the desktop side panel, which panel.ts owns, so only the
+   chrome around it changes here). */
+@media (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
+  /* Filters: a compact "Filters" pill (closed) that opens a glass sheet,
+     centred in the region left of any open side panel. */
   .filters-rail {
-    left: 50%;
+    left: calc((100vw - var(--panel-inset)) / 2);
     right: auto;
+    margin-inline: 0;
+    width: auto;
     transform: translateX(-50%);
     flex-direction: column;
     align-items: stretch;
@@ -1736,7 +1858,8 @@ body.art-fidenza .ghost-btn:hover {
     background: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - var(--panel-inset) - 24px);
+    transition: none;
   }
   .filters-toggle {
     display: inline-flex;
@@ -1750,9 +1873,13 @@ body.art-fidenza .ghost-btn:hover {
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
   }
+  .filters-groups {
+    display: none;
+    margin-top: 6px;
+  }
   .filters-rail.filters-open {
     left: 12px;
-    right: 12px;
+    right: calc(var(--panel-inset) + 12px);
     transform: none;
     padding: 10px;
     border: 1px solid var(--line);
@@ -1773,6 +1900,10 @@ body.art-fidenza .ghost-btn:hover {
   .filter-group {
     gap: 8px;
   }
+  .filter-group + .filter-group {
+    padding-left: 0;
+    border-left: none;
+  }
   /* Touch targets ≥ 44px for every chip. */
   .filter-chip {
     min-height: 44px;
@@ -1788,42 +1919,63 @@ body.art-fidenza .ghost-btn:hover {
 /* (search bar min(420px,72vw) + two ghost buttons) that overflowed a phone.     */
 /* ========================================================================== */
 
-@media (max-width: 720px) {
-  /* Search rail: span the width (12px insets). The search bar takes the whole
-     first row; "Show me around" + "Stories" drop to an equal-width second row,
-     each ≥44px tall, keeping the glass style. Docked state still pins to top. */
+@media (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
+  /* Search rail: span the region (12px insets). The bar grows to fill its row;
+     the launchers share one row of equal-width buttons, each ≥44px tall,
+     keeping the glass style. A landscape phone has room for one row; beside
+     the open side panel the launchers drop under the bar. */
   .search-rail {
     left: 12px;
-    right: 12px;
-    transform: none;
-    flex-wrap: wrap;
+    right: calc(var(--panel-inset) + 12px);
+    margin-inline: 0;
+    width: auto;
     gap: 8px;
   }
   .search-bar {
-    flex: 1 0 100%; /* full first row → forces the buttons to wrap beneath it */
+    flex: 1 1 240px;
     width: auto;
+    max-width: none;
+  }
+  .search-actions {
+    flex: none;
+    flex-wrap: nowrap;
+    gap: 8px;
   }
   .ghost-btn {
-    flex: 1 1 0;
-    min-width: 0; /* allow the two buttons to share the row and shrink */
     height: 44px;
-    padding: 0 12px;
+    padding: 0 16px;
+  }
+  /* Docked, the rail pins to the top of the region (under the title block
+     where one shows: a narrow desktop window). */
+  .search-rail.search-docked,
+  .search-rail.search-docked.search-dock-under {
+    left: 12px;
+    right: calc(var(--panel-inset) + 12px);
+  }
+  .search-rail.search-docked {
+    top: 12px;
+  }
+  .search-rail.search-docked.search-dock-under {
+    top: calc(var(--title-b) + 12px);
   }
   /* The results dropdown fills the full-width rail and stays inside the viewport
      (was width: min(420px, 72vw) anchored left, which no longer matched). */
-  .search-results {
+  .search-results,
+  .search-rail.search-docked .search-results,
+  .search-rail.search-docked.search-dock-under .search-results {
     left: 0;
     right: 0;
     width: auto;
-    max-height: 48vh;
+    max-width: none;
+    max-height: min(48vh, var(--dd-max, 48vh));
   }
 
   /* View toggle: keep all three segments reachable and legible — trim the
      padding/size (44px touch target preserved via min-height) and lift the
      control clear of the centered Filters pill at the bottom. */
   .view-toggle {
-    right: 12px;
-    bottom: clamp(72px, 12vh, 96px);
+    right: calc(var(--panel-inset) + 12px);
+    bottom: calc(clamp(72px, 12vh, 96px) + var(--lift-toggle));
   }
   .view-seg {
     padding: 0 10px;
@@ -1835,7 +1987,7 @@ body.art-fidenza .ghost-btn:hover {
   .art-tab,
   .art-toggle,
   .art-credit {
-    right: 12px;
+    right: calc(var(--panel-inset) + 12px);
     bottom: clamp(72px, 12vh, 96px);
   }
   /* The open Filters sheet expands up through the view toggle's spot, and the
@@ -1845,18 +1997,30 @@ body.art-fidenza .ghost-btn:hover {
   .filters-rail.filters-open ~ .view-toggle {
     display: none;
   }
-
-  /* Nav hints describe mouse-only gestures (drag / scroll-zoom / right-drag) that
-     don't apply to touch, and at phone widths the right-aligned hint line
-     collides with the centered Filters pill. Hide it on small screens (the
-     no-WebGL fallback already hides it for the same "not useful here" reason). */
-  .nav-hints {
-    display: none;
-  }
   /* NOTE: the story card + scrubber mobile overrides live in their own block
      AFTER the stories section below — the base .story-card/.story-scrubber rules
      are defined later in this file, and media queries add no specificity, so an
      override here would be beaten by source order. */
+}
+@media (max-width: 720px) {
+  /* Portrait: the bar takes the whole first row; the launchers share the
+     second, equal width. */
+  .search-bar {
+    flex-basis: 100%;
+  }
+  .search-actions {
+    flex: 1 1 100%;
+  }
+  .ghost-btn {
+    flex: 1 1 0;
+    min-width: 0; /* allow the two buttons to share the row and shrink */
+    padding: 0 12px;
+  }
+  /* At phone widths the right-aligned hint line collides with the centered
+     Filters pill (touch devices never show it at all, see .nav-hints). */
+  .nav-hints {
+    display: none;
+  }
 }
 
 /* -- guided tour ----------------------------------------------------------- */
@@ -1871,13 +2035,16 @@ body.art-fidenza .ghost-btn:hover {
   display: none;
 }
 
+/* Centred in the region left of any open panel; --lift-tour raises it clear of
+   the filter rail and the bottom-right cluster (the search rail then rises
+   above the card). */
 .tour-card {
   position: fixed;
-  left: 50%;
-  bottom: clamp(20px, 5vh, 48px);
+  left: calc((100vw - var(--panel-inset)) / 2);
+  bottom: calc(clamp(20px, 5vh, 48px) + var(--lift-tour));
   transform: translateX(-50%);
   z-index: 60;
-  width: min(480px, calc(100vw - 32px));
+  width: min(480px, calc(100vw - var(--panel-inset) - 32px));
   padding: 20px 22px 16px;
   background: var(--surface);
   backdrop-filter: blur(14px);
@@ -2188,7 +2355,9 @@ body.touring #scene {
   position: fixed;
   left: 50%;
   bottom: clamp(18px, 4.5vh, 36px);
-  transform: translateX(-50%);
+  /* Centred; slides right of the story card when centring would put the two
+     on top of each other (a window under ~1250px; chromelayout.ts). */
+  transform: translateX(calc(-50% + var(--scrub-shift)));
   z-index: 60;
   display: flex;
   align-items: center;
@@ -2403,6 +2572,16 @@ body.storying .search-rail {
     width: auto;
   }
 }
+/* A short window (a phone held landscape): a long scene's card ran off the top
+   of the screen. It keeps its place and scrolls within itself instead. */
+@media (max-height: 500px) {
+  .story-card {
+    max-height: calc(100vh - clamp(20px, 5vh, 48px) - 12px);
+    max-height: calc(100dvh - clamp(20px, 5vh, 48px) - 12px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
 
 /* -- no-WebGL fallback list ------------------------------------------------ */
 
@@ -2420,6 +2599,25 @@ body.nowebgl .title-block {
 }
 body.nowebgl .nav-hints {
   display: none;
+}
+/* The list page carries the CCSS notice as its footer (on phones the title
+   block is hidden), so the title block's copy of it would only repeat it. */
+body.nowebgl .licline {
+  display: none;
+}
+/* The open side panel takes the right 480px: the page reflows into the region
+   left of it rather than running under it (R2). */
+body.nowebgl {
+  padding-right: var(--panel-inset);
+}
+.fallback-license {
+  margin: 36px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
 }
 .fallback {
   max-width: 820px;
@@ -2673,16 +2871,27 @@ body {
 /* Body 16px, paddings 12-16px, 44px touch targets, --line hairline rows.      */
 /* ========================================================================== */
 
-/* The guided tour is desktop-first; hide its button on coarse-pointer phones.
-   (Stories work well on touch and stay.) Same media: the map view runs
-   FRAME-CLEAN on phones — the title block (whose identity job Browse's home
-   screen already does) collided with the top-anchored search rail, the
-   Stories button, and the pill; the map gets the whole frame instead. */
-@media (max-width: 720px) and (pointer: coarse) {
+/* The guided tour is desktop-first; hide its button on phones (R5: a coarse
+   pointer whose SHORT side is 500px or less, portrait or landscape; the same
+   list is PHONE_QUERY in ui/chromelayout.ts). Stories work well on touch and
+   stay. Same media: the map view runs FRAME-CLEAN on phones — the title block
+   (whose identity job Browse's home screen already does) collided with the
+   top-anchored search rail, the Stories button, and the pill; the map gets the
+   whole frame instead. */
+@media (pointer: coarse) and (max-width: 500px), (pointer: coarse) and (max-height: 500px) {
   #tour-btn {
     display: none;
   }
   .title-block {
+    display: none;
+  }
+  /* During a story the phone keeps a compact masthead (R7): the wordmark and
+     its aside only. chromelayout.ts slides it clear of the story card, or hides
+     it when no place is clear. */
+  body.storying .title-block {
+    display: block;
+  }
+  body.storying .title-block > :not(.headline) {
     display: none;
   }
 }
@@ -2749,6 +2958,19 @@ body {
   width: 100%;
   margin: 0 auto;
 }
+/* CCSS public license notice: the last line of every Browse view (it scrolls
+   with the page, so nothing fixed ever sits on it). */
+.browse-license {
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
 
 /* -- home ------------------------------------------------------------------ */
 .browse-kicker {
@@ -2796,6 +3018,7 @@ body {
 }
 .browse-search-input {
   flex: 1;
+  align-self: stretch; /* the whole pill height is the field (R6) */
   min-width: 0;
   background: none;
   border: none;
@@ -2803,6 +3026,9 @@ body {
   font: inherit;
   font-size: 16px; /* 16px avoids iOS zoom-on-focus */
   color: var(--ink);
+}
+.browse-search {
+  cursor: text; /* a tap anywhere in the pill focuses the field (browse.ts) */
 }
 .browse-search-input::placeholder {
   color: var(--ink-3);

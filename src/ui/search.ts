@@ -1,6 +1,7 @@
 // Search — wires the (previously inert) search rail. The MiniSearch index and
 // the search.json payload are BOTH lazy: nothing is fetched or bundled until
-// the input first receives focus, which also docks the rail to top-center.
+// the input first receives focus, which also docks the rail to the top (top-
+// right when that clears the title block, else under it: ui/chromelayout.ts).
 //
 // Query fields code/text/domainName/clusterName, prefix + fuzzy 0.2, field
 // boosts code×3 / text×1.5. Results (max 8) list a grade/strand chip + code +
@@ -12,6 +13,7 @@ import { loadSearchDocs } from "../data";
 import { STRAND_COLORS } from "../scene/palette";
 import type { Machine } from "../state/machine";
 import { rankResults, type RankItem } from "./searchrank";
+import { installChromeLayout } from "./chromelayout";
 
 const MAX_RESULTS = 8;
 
@@ -119,9 +121,11 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   const totalOptions = (): number => results.length + (hiddenCount > 0 ? 1 : 0);
 
   // Activate the rail (Phase 2 shipped it inert via aria-hidden + a CSS
-  // pointer-events:none; override the latter explicitly rather than clearing it).
+  // pointer-events:none). Only its parts take the pointer: the rail's own box
+  // can be wider than they are (wrapped beside the open panel, or spanning the
+  // compact layout), and its empty stretches must stay the canvas's to drag.
   rail.removeAttribute("aria-hidden");
-  rail.style.pointerEvents = "auto";
+  rail.classList.add("search-live");
   input.removeAttribute("readonly");
   input.removeAttribute("tabindex");
   input.setAttribute("role", "combobox");
@@ -520,6 +524,11 @@ export function createSearch(deps: SearchDeps): SearchHandle {
   };
   document.addEventListener("keydown", onGlobalKey);
 
+  // The rail's place depends on the rest of the chrome (the title block above
+  // it, the bottom band below, an open panel beside it), so the chrome layout
+  // pass is installed with it. It keeps every chrome surface off every other.
+  const disposeLayout = installChromeLayout();
+
   return {
     setFilterContext(ctx) {
       filterCtx = ctx;
@@ -546,6 +555,7 @@ export function createSearch(deps: SearchDeps): SearchHandle {
       input.removeEventListener("blur", onBlur);
       input.removeEventListener("keydown", onKeydown);
       document.removeEventListener("keydown", onGlobalKey);
+      disposeLayout();
       dropdown.remove();
     },
   };

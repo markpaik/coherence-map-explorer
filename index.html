@@ -69,6 +69,9 @@
       <p class="subline">Common Core mathematics, Kindergarten through high school, as one living structure.</p>
       <p class="statline">480 standards &middot; 899 connections &middot; K&ndash;High School</p>
       <p class="provline">Wiring after Jason Zimba&rsquo;s graph of the standards, via <a href="https://tools.achievethecore.org/coherence-map/" target="_blank" rel="noopener">Achieve the Core&rsquo;s coherence map</a>.</p>
+      <!-- CCSS public license notice (https://www.thecorestandards.org/public-license/):
+           the notice text is verbatim; Browse and the no-WebGL list carry the same line. -->
+      <p class="licline license-notice">Standards text &copy; Copyright 2010. National Governors Association Center for Best Practices and Council of Chief State School Officers. All rights reserved.</p>
     </header>
 
     <!-- Search rail, bottom third — visual placeholder; Phase 3 wires it -->
@@ -87,9 +90,14 @@
         />
         <kbd class="search-hint">/</kbd>
       </div>
-      <button id="tour-btn" class="ghost-btn" type="button" tabindex="-1">Show me around</button>
-      <button id="story-btn" class="ghost-btn" type="button" tabindex="-1">Stories</button>
-      <button id="replay-btn" class="ghost-btn" type="button" tabindex="-1">Replay the opening</button>
+      <!-- The three launchers travel as one group: when the rail cannot hold one
+           row (a narrow region beside the open panel) they drop under the bar
+           together. -->
+      <div class="search-actions">
+        <button id="tour-btn" class="ghost-btn" type="button" tabindex="-1">Show me around</button>
+        <button id="story-btn" class="ghost-btn" type="button" tabindex="-1">Stories</button>
+        <button id="replay-btn" class="ghost-btn" type="button" tabindex="-1">Replay the opening</button>
+      </div>
     </div>
 
     <!-- Polite live region: narrates focus changes (the canvas is aria-hidden;

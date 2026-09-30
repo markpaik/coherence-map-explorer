@@ -26,6 +26,7 @@ import { codeFromHash, storyIdFromHash } from "../state/routing";
 import type { StoryPickerHandle } from "../stories/player";
 import { rankResults, type RankItem } from "./searchrank";
 import { httpsUpgrade } from "./urls";
+import { CCSS_NOTICE } from "./license";
 
 export interface BrowseDeps {
   graph: GraphCore;
@@ -313,7 +314,14 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   const viewHost = document.createElement("div");
   viewHost.className = "browse-view";
 
-  overlay.append(header, viewHost);
+  // CCSS public license notice (https://www.thecorestandards.org/public-license/):
+  // every Browse view shows standards text, so the footer sits under all of
+  // them, home and standard pages included. Same notice as the map's title block.
+  const license = document.createElement("footer");
+  license.className = "browse-license license-notice";
+  license.textContent = CCSS_NOTICE;
+
+  overlay.append(header, viewHost, license);
   document.body.append(overlay, popover);
 
   // Glossary term interactions, delegated on the view host. Keyboard parity with
@@ -404,6 +412,11 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   searchInput.setAttribute("aria-label", "Search standards");
   searchInput.setAttribute("role", "searchbox");
   searchWrap.appendChild(searchInput);
+  // R6: a tap anywhere in the pill (its padding, the icon, above or below the
+  // text line) focuses the field, not only a tap on the input's own box.
+  searchWrap.addEventListener("click", (e) => {
+    if (e.target !== searchInput) searchInput.focus();
+  });
 
   const resultsEl = document.createElement("ul");
   resultsEl.className = "browse-results";

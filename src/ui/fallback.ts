@@ -15,6 +15,7 @@ import { createPanel, type Connections } from "./panel";
 import { resolveConnections } from "../state/machine";
 import { codeFromHash } from "../state/routing";
 import { STRAND_COLORS } from "../scene/palette";
+import { CCSS_NOTICE } from "./license";
 
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
 const GRADE_LABELS: Record<string, string> = {
@@ -135,6 +136,13 @@ export function createFallback(graph: GraphCore, reason: string): void {
   const listWrap = document.createElement("div");
   listWrap.className = "fallback-list";
   view.appendChild(listWrap);
+
+  // CCSS public license notice, as the page footer (the title block's copy is
+  // hidden on this page, and on phones the title block is hidden entirely).
+  const license = document.createElement("footer");
+  license.className = "fallback-license license-notice";
+  license.textContent = CCSS_NOTICE;
+  view.appendChild(license);
   document.body.appendChild(view);
 
   // Group node indices by grade (in K→HS order), sorted by code within a grade.
