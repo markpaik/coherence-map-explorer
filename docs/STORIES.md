@@ -55,10 +55,10 @@ structural, so every other story is held to it:
 
 `camera.spine` is rule 2 in one field: the camera frames the SPINE (the
 handful of standards the card names) while `camera.fit` keeps naming the lit
-context. Fits resolving to more than eight standards are sized by a
-**trimmed** bounding sphere (`trimmedBoundingSphere`, state/machine.ts) which
-drops the farthest 10% before measuring, so one isolated halo-ring standard
-on the far edge cannot double the radius and shrink the subject to dust.
+context. A scene without a spine frames its whole fit set, untrimmed, because
+every standard in it is narrated (2026-09-30: a 10% trim dropped the depth
+extremes, and at 900x700 one of them landed off screen). Only the lit context
+box and the lose-a-year downstream band keep a 5% trim.
 
 Exceptions are declared by name, with a reason, in
 `tests/story-framing.test.ts` (the monotone-lit law is enforced there, and
@@ -67,12 +67,15 @@ the pandemic story needs no exception at all).
 The story card, the masthead, and the scrubber are keep-out zones, and the
 designer chose a smaller frame over any occlusion (2026-09-30). On desktop,
 `computeUsableRect` (src/scene/frame.ts) removes the card's whole column: the
-usable rect starts one gutter right of the card, and one gutter below the title
-block where the title block reaches into that column. The scrubber stays bottom
-chrome. Every narrated standard therefore renders in clear view, at every
-viewport down to 900x700 (tests/story-keepout.test.ts). On phones the card is
-bottom-full-width, so it keeps out the bottom band only. Lose a year plans its
-per-year frame against the same rect (src/stories/yearframe.ts).
+usable rect starts one gutter right of the card. The masthead is a full-width
+band (`storyMastheadBand`) measured from its layout box, so it has the same
+height whether the chrome layout pass keeps the masthead in place, slides it
+beside the card, or hides it; the rect starts one gutter below that band. The
+scrubber stays bottom chrome. Every narrated standard therefore renders in
+clear view at every viewport down to 900x700 (tests/story-keepout.test.ts). On
+phones the card is bottom-full-width, so it keeps out the bottom band only.
+Lose a year plans its per-year frame against the same rect
+(src/stories/yearframe.ts).
 
 ## Entering and leaving a story
 
