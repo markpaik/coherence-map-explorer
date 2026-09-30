@@ -17,6 +17,7 @@ import { loadDetails, loadSearchDocs } from "../data";
 import type { JourneyDirection } from "../state/machine";
 import { STRAND_COLORS } from "../scene/palette";
 import { httpsUpgrade, sourceLinkLabel } from "./urls";
+import { CCSS_NOTICE } from "./license";
 
 // Grade order for grouping the journey closures (Foundations reads HS → K, up
 // toward the roots; Onward reads K → HS, out toward what the standard unlocks).
@@ -303,6 +304,12 @@ export function createPanel(
   aiSlot.id = "ai-slot";
   aiSlot.hidden = true;
 
+  // CCSS public license notice. The panel shows standards text on every
+  // surface, including the phone sheet, where the title block's copy is hidden.
+  const license = document.createElement("footer");
+  license.className = "panel-license license-notice";
+  license.textContent = CCSS_NOTICE;
+
   // The journey button + its direction chip sit ABOVE the connection groups so
   // they stay visible without scrolling on a connection-heavy standard (Mark's
   // 6.SP.B.5.a / 7.RP.A.2): a primary action right under the description, before
@@ -320,6 +327,7 @@ export function createPanel(
     tasks,
     progressions,
     aiSlot,
+    license,
   );
   panel.append(handle, closeBtn, body);
   container.appendChild(panel);

@@ -2958,6 +2958,17 @@ body {
   width: 100%;
   margin: 0 auto;
 }
+/* CCSS public license notice: the last line of the detail panel, desktop
+   panel and phone sheet alike (it scrolls with the panel body). */
+.panel-license {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
 /* CCSS public license notice: the last line of every Browse view (it scrolls
    with the page, so nothing fixed ever sits on it). */
 .browse-license {

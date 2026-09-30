@@ -519,13 +519,15 @@ describe("CCSS license notice on every surface that shows standards text (R9)", 
     expect(text).toContain(NOTICE);
   });
 
-  it("Browse (every view) and the no-WebGL list carry it as a footer", () => {
-    for (const f of ["src/ui/browse.ts", "src/ui/fallback.ts"]) {
+  it("Browse (every view), the detail panel and phone sheet, and the no-WebGL list carry it as a footer", () => {
+    for (const f of ["src/ui/browse.ts", "src/ui/panel.ts", "src/ui/fallback.ts"]) {
       const src = read(f);
       expect(src, f).toContain('import { CCSS_NOTICE } from "./license";');
-      expect(src, f).toMatch(/className = "(browse|fallback)-license license-notice";/);
+      expect(src, f).toMatch(/className = "(browse|panel|fallback)-license license-notice";/);
       expect(src, f).toContain("license.textContent = CCSS_NOTICE;");
     }
+    // The panel appends the footer last, so it follows every section it covers.
+    expect(read("src/ui/panel.ts")).toMatch(/aiSlot,\s*license,\s*\);/);
   });
 });
 
