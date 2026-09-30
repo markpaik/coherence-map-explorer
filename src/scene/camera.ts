@@ -15,7 +15,6 @@
 import * as THREE from "three";
 import CameraControls from "camera-controls";
 import {
-  compositionBias,
   computeUsableRect,
   measureChrome,
   solveFrame,
@@ -185,7 +184,6 @@ export function createCameraRig(
         viewportWidth: chrome.viewportWidth,
         viewportHeight: chrome.viewportHeight,
         rect: computeUsableRect(chrome),
-        bias: compositionBias(chrome),
         eye: _pos,
         target: _tgt,
         subject: current.subject,

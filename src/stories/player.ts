@@ -30,7 +30,7 @@ import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
 import type { BeaconsHandle } from "../scene/beacons";
 import type { CameraRig } from "../scene/camera";
-import { compositionBias, computeUsableRect, measureChrome } from "../scene/frame";
+import { computeUsableRect, measureChrome } from "../scene/frame";
 import { rovingIndex } from "../ui/chipgroup";
 import type { FiltersHandle } from "../ui/filters";
 import type { PanelHandle } from "../ui/panel";
@@ -589,31 +589,24 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     return LOSE_YEAR_MS;
   }
 
-  // Frame the chosen year and its downstream band CLEAR of the story card. The
-  // whole-map framing left the card over the year the reader had just removed
-  // (the Ascent puts kindergarten lowest and leftmost, exactly where the card
-  // sits): K, 1 and 2 were entirely under it at 1440x900, and most of grade 3
-  // at 1280x720. planClearFrame plans against the same chrome-aware usable rect
-  // and solve the rig composes with, and pads the subject toward the card so
-  // the padding lands under it. The rig then frames that box as any scene.
+  // Frame the chosen year and its downstream band inside the story's keep-out
+  // rect. The whole-map framing left the card over the year the reader had just
+  // removed (the Ascent puts kindergarten lowest and leftmost, exactly where
+  // the card sits). The rig's usable rect now leaves out the card's column, the
+  // masthead and the scrubber for every story (scene/frame.ts), and
+  // planClearFrame plans against that same rect and solve, padding the subject
+  // only as far as it takes to keep the year inside it while the camera
+  // breathes. The rig then frames that box as any scene.
   const YEAR_REACH_TRIM = 0.05; // the band may shed its strays; the year never
   /** The idle drift's sway (camera.ts DRIFT_AMPLITUDE_RAD): the year stays
    *  clear while the camera breathes, not only on the frame it lands. */
   const YEAR_FRAME_SWAY = (18 * Math.PI) / 180;
-  /** Wider than this share of the viewport, the card is bottom chrome
-   *  (measureChrome's own phone rule), which the usable rect already excludes. */
-  const CARD_FULL_WIDTH = 0.7;
   function frameYear(animate: boolean): void {
     if (!yearFrame) return;
     const { missed, reach } = yearFrame;
     const subject = storyFitBox(missed, 0); // the chosen year: every standard frames
     if (reach.length) subject.union(storyFitBox(reach, reach.length > TRIM_ABOVE ? YEAR_REACH_TRIM : 0));
     const chrome = measureChrome();
-    // Only the bottom-LEFT desktop card is an occluder to plan around. Read its
-    // box directly: on the story's first frame under reduced motion the card's
-    // entry animation still sits at opacity 0, and measureChrome skips it.
-    const box = card.bounds();
-    const occluder = box && box.width <= chrome.viewportWidth * CARD_FULL_WIDTH ? box : null;
     const eye = new Vector3();
     const target = new Vector3();
     rig.controls.getPosition(eye, true);
@@ -623,11 +616,9 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       viewportWidth: chrome.viewportWidth,
       viewportHeight: chrome.viewportHeight,
       rect: computeUsableRect(chrome),
-      bias: compositionBias(chrome),
       view: target.sub(eye),
       subject,
       keep: missed.map((i) => nodes.getPosition(i, new Vector3())),
-      occluder,
       swayRad: reducedMotion() ? 0 : YEAR_FRAME_SWAY, // no drift under reduced motion
       minDistance: rig.controls.minDistance,
       maxDistance: rig.controls.maxDistance,
@@ -864,13 +855,16 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     if (currentStory.interactive !== "lose-a-year") {
       armBeacons(scene, missedIdx, rawDamage, cut);
     }
-    // The interactive story frames the chosen year clear of the card from its
-    // very first frame (armYearDamage above set the year and rendered the card
-    // copy, so the card is measured at its real height). Authored scenes keep
-    // their authored camera.
+    // The card takes this scene's copy BEFORE the camera composes: the rig
+    // measures the card as live chrome, and a phone's full-width card folds
+    // its top edge into the bottom band, so it must be measured at this
+    // scene's height, not the last one's. The interactive story frames the
+    // chosen year inside the keep-out rect from its very first frame
+    // (armYearDamage above set the year). Authored scenes keep their authored
+    // camera.
+    renderScene(scene, index, activePose);
     if (currentStory.interactive === "lose-a-year") frameYear(!cut);
     else applyCamera(scene, !cut);
-    renderScene(scene, index, activePose);
 
     // Arm the settle window: the scene holds only after the damage crossfade
     // (which a healing coda stretches) AND the lit reveal have finished.
@@ -880,9 +874,10 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     requestRender();
   }
 
-  // (The story card no longer needs a framing lever of its own: the camera rig
-  // measures it as live chrome — a modest rightward bias on desktop, part of the
-  // bottom band when it goes full-width on a phone. See scene/frame.ts.)
+  // (The story card needs no framing lever of its own: the camera rig measures
+  // it as live chrome. On desktop its column, the masthead and the scrubber are
+  // keep-outs of the usable rect; a phone's full-width card is part of the
+  // bottom band. See scene/frame.ts.)
 
   // --- lifecycle ----------------------------------------------------------
   // The borrowed-surface contract (see resetStorySurfaces): ONE list, run on

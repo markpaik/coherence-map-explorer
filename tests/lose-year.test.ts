@@ -9,8 +9,12 @@
 //       the live DOM (trapTarget decides the wrap), and the chips rove on
 //       arrows (rovingIndex).
 //   12. The whole-map framing put K, 1 and 2 entirely under the card at
-//       1440x900 and most of grade 3 under it at 1280x720. planClearFrame pads
-//       the framed box toward the card so the chosen year lands clear of it.
+//       1440x900 and most of grade 3 under it at 1280x720. The story's usable
+//       rect now leaves out the card's column, the masthead and the scrubber
+//       (finding 28, rules F1 to F3), and planClearFrame pads the framed box
+//       only as far as it takes to keep the year inside that rect while the
+//       camera sways. At 900x700 the old card-only pad squeezed the year above
+//       the card and under the title (the F3 note).
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -22,7 +26,7 @@ import { yearSwitchEases } from "../src/stories/player";
 import { trapTarget } from "../src/ui/storycard";
 import { rovingIndex } from "../src/ui/chipgroup";
 import { planClearFrame, type ClearFrameInput } from "../src/stories/yearframe";
-import { solveFrame, type Rect } from "../src/scene/frame";
+import { computeUsableRect, solveFrame, type ChromeMetrics, type Rect } from "../src/scene/frame";
 import { nodeBoundingBox } from "../src/state/machine";
 import { createDamageEngine } from "../src/stories/damage";
 import { createSelectorResolver } from "../src/stories/selectors";
@@ -84,7 +88,7 @@ describe("finding 11: the grade chips rove on arrow keys", () => {
   });
 });
 
-describe("finding 12: the chosen year frames clear of the story card", () => {
+describe("finding 12: the chosen year frames inside the story's keep-out rect", () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
   const core: GraphCore = JSON.parse(
     readFileSync(resolvePath(HERE, "..", "public/data/graph-core.json"), "utf8"),
@@ -117,53 +121,75 @@ describe("finding 12: the chosen year frames clear of the story card", () => {
 
   const wholeMap = nodeBoundingBox(ascent, core.nodes.map((_n, i) => i), 0, 140);
 
-  // Measured live (desktop story chrome): the title band, the scrubber, the card.
-  const SCREENS: { name: string; W: number; H: number; rect: Rect; card: Rect; biasX: number }[] = [
+  // Measured live during lose-a-year (l2_lychrome.mjs): the story card, the
+  // title block (the masthead), and the scrubber's top edge.
+  const SCREENS: { name: string; W: number; H: number; card: Rect; masthead: Rect; scrubberTop: number }[] = [
     {
       name: "1440x900",
       W: 1440,
       H: 900,
-      rect: { x: 0, y: 99, width: 1440, height: 900 - 99 - 82 },
       card: { x: 32, y: 485, width: 420, height: 370 },
-      biasX: 86.4,
+      masthead: { x: 36, y: 27, width: 626, height: 203 },
+      scrubberTop: 814,
     },
     {
       name: "1280x720",
       W: 1280,
       H: 720,
-      rect: { x: 0, y: 79.2, width: 1280, height: 720 - 79.2 - 82 },
       card: { x: 32, y: 314, width: 420, height: 370 },
-      biasX: 76.8,
+      masthead: { x: 36, y: 22, width: 626, height: 203 },
+      scrubberTop: 638,
+    },
+    {
+      name: "900x700",
+      W: 900,
+      H: 700,
+      card: { x: 27, y: 295, width: 420, height: 370 },
+      masthead: { x: 27, y: 21, width: 626, height: 181 },
+      scrubberTop: 619,
     },
   ];
+  type Screen = (typeof SCREENS)[number];
+  const chromeOf = (s: Screen, story = true): ChromeMetrics => ({
+    viewportWidth: s.W,
+    viewportHeight: s.H,
+    titleBottom: s.masthead.y + s.masthead.height,
+    bottomChromeTop: s.scrubberTop,
+    panelWidth: 0,
+    card: story ? s.card : null,
+    masthead: story ? s.masthead : null,
+  });
   const VIEW = new Vector3(0, 0, -1); // the Ascent's head-on story view
+  const SWAY = (18 * Math.PI) / 180;
 
-  const inputFor = (s: (typeof SCREENS)[number], subject: Box3, keep: Vector3[]): ClearFrameInput => ({
+  const inputFor = (
+    s: Screen,
+    subject: Box3,
+    keep: Vector3[],
+    rect = computeUsableRect(chromeOf(s)),
+  ): ClearFrameInput => ({
     fovDeg: 50,
     viewportWidth: s.W,
     viewportHeight: s.H,
-    rect: s.rect,
-    bias: { x: s.biasX, y: 0 },
+    rect,
     view: VIEW,
     subject,
     keep,
-    occluder: s.card,
     minDistance: 80,
     maxDistance: 2200,
   });
 
   /**
-   * Independent check: solve the returned box the way rig.frameSubject does,
-   * project each keep point at every drift turn, count the ones on the card.
+   * Independent check: solve the returned box the way rig.frameSubject does and
+   * project each keep point at every drift turn. Returns the screen points.
    */
-  function coveredAfter(input: ClearFrameInput, box: Box3, turns: number[] = [0]): number {
+  function landed(input: ClearFrameInput, box: Box3, turns: number[] = [0]): [number, number][] {
     const target = box.getCenter(new Vector3());
     const sol = solveFrame({
       fovDeg: input.fovDeg,
       viewportWidth: input.viewportWidth,
       viewportHeight: input.viewportHeight,
       rect: input.rect,
-      bias: input.bias,
       eye: target.clone().sub(VIEW),
       target,
       subject: box,
@@ -172,67 +198,104 @@ describe("finding 12: the chosen year frames clear of the story card", () => {
       maxDistance: input.maxDistance,
     });
     const k = input.viewportHeight / 2 / Math.tan((input.fovDeg * Math.PI) / 360);
-    const c = input.occluder!;
-    let covered = 0;
+    const out: [number, number][] = [];
     for (const p of input.keep) {
-      const hit = turns.some((a) => {
+      for (const a of turns) {
         // Head-on view: right = +x, up = +y, forward = −z.
         const d = p.clone().sub(target).applyQuaternion(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), a));
         const vf = -d.z + sol.distance;
-        const sx = input.viewportWidth / 2 + (k * (d.x - sol.offsetX)) / vf;
-        const sy = input.viewportHeight / 2 - (k * (d.y + sol.offsetY)) / vf;
-        return sx >= c.x && sx <= c.x + c.width && sy >= c.y && sy <= c.y + c.height;
-      });
-      if (hit) covered++;
+        out.push([
+          input.viewportWidth / 2 + (k * (d.x - sol.offsetX)) / vf,
+          input.viewportHeight / 2 - (k * (d.y + sol.offsetY)) / vf,
+        ]);
+      }
     }
-    return covered;
+    return out;
   }
+  const inRect = (r: Rect, [x, y]: [number, number]): boolean =>
+    x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height;
+  const outsideAll = (s: Screen, pts: [number, number][]): number =>
+    pts.filter(
+      (p) => inRect(s.card, p) || inRect(s.masthead, p) || p[1] >= s.scrubberTop || p[0] < 0 || p[0] > s.W || p[1] < 0,
+    ).length;
 
-  it("the whole-map framing really does bury the early years under the card (the defect)", () => {
+  it("the whole-map framing really did bury the early years under the card (the defect)", () => {
+    // Composed into the pre-keep-out rect (the card only a bias), every
+    // kindergarten standard lands on the card.
     const s = SCREENS[0];
     const { keep } = yearSubject("K");
-    const input = inputFor(s, wholeMap, keep);
-    expect(coveredAfter(input, wholeMap)).toBe(keep.length); // all 25 kindergarten standards
+    const input = inputFor(s, wholeMap, keep, computeUsableRect(chromeOf(s, false)));
+    const pts = landed(input, wholeMap);
+    expect(pts.filter((p) => inRect(s.card, p)).length).toBe(keep.length); // all 25
   });
 
   for (const s of SCREENS) {
     for (const grade of ["K", "1", "2", "3", "8"]) {
-      it(`${s.name}: every grade-${grade} standard lands clear of the card`, () => {
+      it(`${s.name}: every grade-${grade} standard lands inside the keep-out rect`, () => {
         const { subject, keep } = yearSubject(grade);
         const input = inputFor(s, subject, keep);
         const plan = planClearFrame(input);
         expect(plan.covered).toBe(0);
-        expect(coveredAfter(input, plan.box)).toBe(0);
+        const pts = landed(input, plan.box);
+        expect(pts.every((p) => inRect(input.rect, p))).toBe(true);
+        expect(outsideAll(s, pts)).toBe(0); // clear of the card, the masthead, the scrubber
         // The padded box still holds the whole subject: nothing is dropped.
         expect(plan.box.containsBox(subject)).toBe(true);
       });
     }
   }
 
-  it("keeps the year clear while the idle drift sways the camera ±18°", () => {
-    const sway = (18 * Math.PI) / 180;
+  it("keeps the year inside the rect while the idle drift sways the camera ±18°", () => {
     for (const s of SCREENS) {
-      const { subject, keep } = yearSubject("3");
-      const input = { ...inputFor(s, subject, keep), swayRad: sway, gapPx: 0 };
-      const plan = planClearFrame(input);
-      expect(plan.covered, s.name).toBe(0);
-      expect(coveredAfter(input, plan.box, [-sway, -sway / 2, 0, sway / 2, sway]), s.name).toBe(0);
+      for (const grade of ["K", "3", "8"]) {
+        const { subject, keep } = yearSubject(grade);
+        const input = { ...inputFor(s, subject, keep), swayRad: SWAY };
+        const plan = planClearFrame(input);
+        expect(plan.covered, `${s.name} ${grade}`).toBe(0);
+        const pts = landed(input, plan.box, [-SWAY, -SWAY / 2, 0, SWAY / 2, SWAY]);
+        expect(outsideAll(s, pts), `${s.name} ${grade}`).toBe(0);
+      }
     }
   });
 
-  it("leaves a subject that already clears the card untouched", () => {
+  it("F3: at 900x700 the year frames beside the card and below the masthead, at full size", () => {
+    const s = SCREENS[2];
+    const rect = computeUsableRect(chromeOf(s));
+    // The rect itself: right of the card's column, below the title block.
+    expect(rect.x).toBeGreaterThan(s.card.x + s.card.width);
+    expect(rect.y).toBeGreaterThan(s.masthead.y + s.masthead.height);
+    for (const grade of ["K", "1", "2", "3", "4", "5", "6", "7", "8"]) {
+      const { subject, keep } = yearSubject(grade);
+      const input = { ...inputFor(s, subject, keep), swayRad: SWAY };
+      const plan = planClearFrame(input);
+      // Every standard of the year sits below the masthead and right of the card.
+      const pts = landed(input, plan.box);
+      expect(Math.min(...pts.map((p) => p[1])), grade).toBeGreaterThan(s.masthead.y + s.masthead.height);
+      expect(Math.min(...pts.map((p) => p[0])), grade).toBeGreaterThan(s.card.x + s.card.width);
+      // The old card-only pad shrank the frame to fit the strip above the card.
+      // Against the keep-out rect any pad is a sliver: the year frames within
+      // 5% of the plain fit of its subject.
+      const c = subject.getCenter(new Vector3());
+      const plain = solveFrame({
+        fovDeg: 50,
+        viewportWidth: s.W,
+        viewportHeight: s.H,
+        rect,
+        eye: c.clone().sub(VIEW),
+        target: c,
+        subject,
+        minDistance: 80,
+        maxDistance: 2200,
+      });
+      expect(plan.distance / plain.distance, grade).toBeLessThan(1.05);
+    }
+  });
+
+  it("leaves a subject that already stays inside untouched", () => {
     const s = SCREENS[0];
     const { keep } = yearSubject("8");
     const plan = planClearFrame(inputFor(s, wholeMap, keep));
     expect(plan.side).toBe("none");
     expect(plan.box.equals(wholeMap)).toBe(true);
-  });
-
-  it("does nothing without an occluder (a phone's full-width card is bottom chrome)", () => {
-    const s = SCREENS[1];
-    const { subject, keep } = yearSubject("K");
-    const plan = planClearFrame({ ...inputFor(s, subject, keep), occluder: null });
-    expect(plan.side).toBe("none");
-    expect(plan.box.equals(subject)).toBe(true);
   });
 });

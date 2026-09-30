@@ -18,10 +18,14 @@
 //   • the CONTEXT box (the wider lit set) is what gets CENTRED when it does not
 //     fit, so the visual weight sits in the middle even as it bleeds past the
 //     edges;
-//   • an occluder that leaves a clear region beside it (the bottom-left story
-//     card) earns a modest BIAS away from it, never an evacuation — pushing the
-//     subject entirely clear of the card is what emptied the other half of the
-//     frame.
+//   • while a story plays, its chrome is a set of KEEP-OUT zones (the designer's
+//     rule: a smaller frame over occlusion). The story card's whole column, the
+//     masthead, and the scrubber band all come out of the usable rect, so every
+//     standard a card narrates lands clear of them. This replaced a modest
+//     sideways bias away from the card, which left the lower-left of the spine
+//     behind the card at every desktop size (the card is often 70% of the
+//     viewport tall). The explorer's own framing is unchanged: without a story
+//     card there are no keep-outs.
 //
 // The solve is exact: it projects the boxes' eight corners through the real
 // perspective model at the fit's END pose, so it composes with an in-flight
@@ -52,8 +56,17 @@ export interface ChromeMetrics {
   bottomChromeTop: number;
   /** Width of an open RIGHT-SIDE detail panel (0 when closed or a bottom sheet). */
   panelWidth: number;
-  /** Width of the bottom-LEFT story card (0 when absent or full-width). */
-  cardWidth: number;
+  /**
+   * STORY KEEP-OUT: the desktop story card's layout box. Null when no story
+   * plays, and null for a phone's full-width card, which arrives as bottom
+   * chrome (bottomChromeTop) instead.
+   */
+  card: Rect | null;
+  /**
+   * STORY KEEP-OUT: the masthead (title block) while a story plays. Null
+   * outside a story, where the title keeps its modest top strip.
+   */
+  masthead: Rect | null;
 }
 
 // The title block is ~260px tall but spans only the left half, so reserving all
@@ -76,38 +89,62 @@ const TITLE_BAND_MAX = 140;
  */
 const MAX_BOTTOM_FRAC = 0.35;
 const MAX_PANEL_FRAC = 0.75;
+/**
+ * A story's keep-outs are sanity-bounded the same way: the card's column never
+ * takes more than this share of the width, the masthead never more than this
+ * share of the height. A real desktop layout stays well inside both (the card
+ * column is 47-53% of a 900-1024px window, the masthead about a third of a
+ * 700px one); they only stop a mis-measured rect from collapsing.
+ */
+const MAX_CARD_COLUMN_FRAC = 0.62;
+const MAX_MASTHEAD_FRAC = 0.42;
 
-/** The on-screen rectangle a framing targets. Pure over measured chrome. */
+/**
+ * The standard gutter between story chrome and framed content, CSS px: the
+ * clamp(16px, 3vw, 32px) the story card and the title block keep from the
+ * viewport edge (style.css), so the frame sits as far from the card as the card
+ * sits from the edge.
+ */
+export function storyGutter(viewportWidth: number): number {
+  return Math.min(Math.max(16, viewportWidth * 0.03), 32);
+}
+
+/**
+ * The on-screen rectangle a framing targets. Pure over measured chrome.
+ *
+ * Outside a story it is the viewport minus the title's modest top strip, the
+ * bottom chrome band, and an open side panel. While a story plays the story
+ * chrome is a set of keep-outs (designer rules F1 and F3, 2026-09):
+ *   • the card's COLUMN: the rect starts one gutter past the card's right edge
+ *     (its left edge, for a card on the right), whatever the card's height;
+ *   • the MASTHEAD: where the title block reaches into that column, the rect
+ *     starts one gutter below it;
+ *   • the SCRUBBER: bottom chrome, as the filter rail is outside a story.
+ */
 export function computeUsableRect(m: ChromeMetrics): Rect {
   const W = Math.max(1, m.viewportWidth);
   const H = Math.max(1, m.viewportHeight);
-  const top =
+  let top =
     m.titleBottom > 0
       ? Math.min(Math.max(Math.min(m.titleBottom, H * TITLE_BAND_FRAC), TITLE_BAND_MIN), TITLE_BAND_MAX)
       : 0;
   const bottom = Math.min(Math.max(0, H - m.bottomChromeTop), H * MAX_BOTTOM_FRAC);
-  const right = Math.min(Math.max(0, m.panelWidth), W * MAX_PANEL_FRAC);
-  return { x: 0, y: top, width: W - right, height: H - top - bottom };
-}
-
-/**
- * The composition bias, in CSS px (+x rides the subject RIGHT). The story card
- * is translucent glass over a dark scene sitting bottom-LEFT: bias the subject
- * a little clear of it so the card overlaps only its lower-left corner. A
- * quarter of the card's width, capped — an evacuation (half the viewport) is
- * what emptied the top-left.
- */
-const CARD_BIAS_FRAC = 0.25;
-const CARD_BIAS_MAX = 120;
-/** ...and never more than this share of the viewport, so the same nudge does not
- *  read as a shove on a narrower window. */
-const CARD_BIAS_MAX_FRAC = 0.06;
-export function compositionBias(m: ChromeMetrics): { x: number; y: number } {
-  if (m.cardWidth <= 0) return { x: 0, y: 0 };
-  return {
-    x: Math.min(m.cardWidth * CARD_BIAS_FRAC, CARD_BIAS_MAX, m.viewportWidth * CARD_BIAS_MAX_FRAC),
-    y: 0,
-  };
+  let left = 0;
+  let right = W - Math.min(Math.max(0, m.panelWidth), W * MAX_PANEL_FRAC);
+  const gutter = storyGutter(W);
+  const card = m.card;
+  if (card && card.width > 0 && card.height > 0) {
+    if (card.x + card.width / 2 <= W / 2) {
+      left = Math.min(Math.max(left, card.x + card.width + gutter), W * MAX_CARD_COLUMN_FRAC);
+    } else {
+      right = Math.max(Math.min(right, card.x - gutter), W * (1 - MAX_CARD_COLUMN_FRAC));
+    }
+  }
+  const mast = m.masthead;
+  if (mast && mast.width > 0 && mast.height > 0 && mast.x < right && mast.x + mast.width > left) {
+    top = Math.max(top, Math.min(mast.y + mast.height + gutter, H * MAX_MASTHEAD_FRAC));
+  }
+  return { x: left, y: top, width: right - left, height: H - top - bottom };
 }
 
 /** Read the live chrome. The only DOM-touching function in this module. */
@@ -132,13 +169,31 @@ export function measureChrome(): ChromeMetrics {
     if (!r || r.bottom < H * 0.5) continue; // not bottom chrome
     bottomChromeTop = Math.min(bottomChromeTop, r.top);
   }
-  // The story card: bottom-LEFT on desktop (a bias), full-width at the bottom on
-  // a phone (bottom chrome, which is what lifts the model above it there).
-  let cardWidth = 0;
-  const card = rectOf(".story-card");
-  if (card) {
-    if (card.width > W * 0.7) bottomChromeTop = Math.min(bottomChromeTop, card.top);
-    else cardWidth = card.width;
+  // The story card: bottom-LEFT on desktop (a keep-out column), full-width at
+  // the bottom on a phone (bottom chrome, which lifts the model above it there).
+  // Read from its LAYOUT box, like the panel below: the card enters on a 300ms
+  // fade-and-rise, and a story frames its first scene while that can still sit
+  // at opacity 0, which the rectOf test above would read as no card at all.
+  let card: Rect | null = null;
+  let masthead: Rect | null = null;
+  const cardEl = document.querySelector(".story-card");
+  if (cardEl instanceof HTMLElement && !cardEl.hidden && cardEl.offsetWidth > 0 && cardEl.offsetHeight > 0) {
+    const style = window.getComputedStyle(cardEl);
+    if (style.display !== "none" && style.visibility !== "hidden") {
+      // offsetLeft/offsetTop of a fixed box are viewport-relative and ignore
+      // the entry transform.
+      const box: Rect = {
+        x: cardEl.offsetLeft,
+        y: cardEl.offsetTop,
+        width: cardEl.offsetWidth,
+        height: cardEl.offsetHeight,
+      };
+      if (box.width > W * 0.7) bottomChromeTop = Math.min(bottomChromeTop, box.y);
+      else card = box;
+      // While a story plays the masthead is a keep-out too.
+      const t = rectOf(".title-block");
+      if (t) masthead = { x: t.left, y: t.top, width: t.width, height: t.height };
+    }
   }
   // The detail panel is a right-side panel on desktop and a bottom sheet below
   // 720px; a sheet covers the map outright, so it reserves nothing. Keyed on the
@@ -162,7 +217,8 @@ export function measureChrome(): ChromeMetrics {
     titleBottom: title ? title.bottom : 0,
     bottomChromeTop,
     panelWidth,
-    cardWidth,
+    card,
+    masthead,
   };
 }
 
@@ -174,8 +230,6 @@ export interface FrameSolveInput {
   viewportWidth: number;
   viewportHeight: number;
   rect: Rect;
-  /** Screen-space bias of the composition centre, CSS px (+x right, +y down). */
-  bias?: { x: number; y: number };
   /** The fit's END pose: the orbit position and the target it looks at. */
   eye: THREE.Vector3;
   target: THREE.Vector3;
@@ -347,13 +401,12 @@ function viewOf(input: FrameSolveInput): View {
  * Solve the framing: a distance that fits the subject inside the usable rect
  * (retreating up to `maxPullback` to take the context in with it), and the focal
  * offset that lands the composition where it belongs — the context's weight on
- * the rect's centre (plus any bias), clamped so the subject never leaves the
- * rect. Pure: no THREE side effects beyond the scratch vectors.
+ * the rect's centre, clamped so the subject never leaves the rect. Pure: no
+ * THREE side effects beyond the scratch vectors.
  */
 export function solveFrame(input: FrameSolveInput): FrameSolution {
   const rect = input.rect;
   const margin = input.margin ?? DEFAULT_MARGIN;
-  const bias = input.bias ?? { x: 0, y: 0 };
   const { W, H, k, subject, context } = viewOf(input);
 
   const availW = rect.width * (1 - 2 * margin);
@@ -369,8 +422,8 @@ export function solveFrame(input: FrameSolveInput): FrameSolution {
   if (input.maxDistance !== undefined) distance = Math.min(distance, input.maxDistance);
 
   // Where the composition's weight belongs on screen.
-  const wantX = rect.x + rect.width / 2 + bias.x;
-  const wantY = rect.y + rect.height / 2 + bias.y;
+  const wantX = rect.x + rect.width / 2;
+  const wantY = rect.y + rect.height / 2;
   const guide = context ?? subject;
   const perPx = distance / k; // world units per CSS px at the target plane
 
@@ -385,8 +438,8 @@ export function solveFrame(input: FrameSolveInput): FrameSolution {
   }
   // 2) Clamp back inside the rect. The SUBJECT must always fit (the distance
   //    above guarantees it can), and when the whole CONTEXT fits too, it is the
-  //    thing clamped — the subject is inside it, and it means a bias can never
-  //    push framed content off the edge to get clear of an occluder.
+  //    thing clamped — the subject is inside it, so centring the weight can
+  //    never push framed content out of the rect.
   const L = rect.x + rect.width * margin;
   const R = rect.x + rect.width * (1 - margin);
   const T = rect.y + rect.height * margin;
@@ -438,7 +491,7 @@ export function solveFrame(input: FrameSolveInput): FrameSolution {
 // fit against the new chrome would give, and unchanged chrome is a no-op.
 
 export interface RecomposeInput
-  extends Omit<FrameSolveInput, "viewportWidth" | "viewportHeight" | "rect" | "bias"> {
+  extends Omit<FrameSolveInput, "viewportWidth" | "viewportHeight" | "rect"> {
   /** The chrome the framing was last composed against. */
   before: ChromeMetrics;
   /** The chrome now. */
@@ -449,23 +502,29 @@ export interface RecomposeInput
   offsetY: number;
 }
 
-/** Same chrome to half a pixel: nothing the composition answers to has changed. */
+/**
+ * Same chrome to half a pixel: nothing the composition answers to has changed.
+ * It answers to the viewport and the usable rect only, so a story card that
+ * grows taller with a longer scene (its column unchanged) changes nothing.
+ */
 export function sameChrome(a: ChromeMetrics, b: ChromeMetrics): boolean {
   const near = (x: number, y: number): boolean => Math.abs(x - y) < 0.5;
+  const ra = computeUsableRect(a);
+  const rb = computeUsableRect(b);
   return (
     near(a.viewportWidth, b.viewportWidth) &&
     near(a.viewportHeight, b.viewportHeight) &&
-    near(a.titleBottom, b.titleBottom) &&
-    near(a.bottomChromeTop, b.bottomChromeTop) &&
-    near(a.panelWidth, b.panelWidth) &&
-    near(a.cardWidth, b.cardWidth)
+    near(ra.x, rb.x) &&
+    near(ra.y, rb.y) &&
+    near(ra.width, rb.width) &&
+    near(ra.height, rb.height)
   );
 }
 
 /**
  * The composition offset per unit of distance for this chrome: how far the
  * focal offset shifts, per world unit of distance, to carry the screen centre
- * onto the rect's centre (plus bias). The solve's offset at distance D is a
+ * onto the rect's centre. The solve's offset at distance D is a
  * pose-dependent constant minus slope × D, so this is what carries the offset
  * to the reader's own distance without re-projecting there (a reader zoomed
  * deep into the cloud has box corners behind the camera, where no projection
@@ -473,11 +532,10 @@ export function sameChrome(a: ChromeMetrics, b: ChromeMetrics): boolean {
  */
 function compositionSlope(m: ChromeMetrics, fovDeg: number): { x: number; y: number } {
   const rect = computeUsableRect(m);
-  const bias = compositionBias(m);
   const k = pxPerUnit(fovDeg, m.viewportHeight);
   return {
-    x: (rect.x + rect.width / 2 + bias.x - Math.max(1, m.viewportWidth) / 2) / k,
-    y: (rect.y + rect.height / 2 + bias.y - Math.max(1, m.viewportHeight) / 2) / k,
+    x: (rect.x + rect.width / 2 - Math.max(1, m.viewportWidth) / 2) / k,
+    y: (rect.y + rect.height / 2 - Math.max(1, m.viewportHeight) / 2) / k,
   };
 }
 
@@ -492,7 +550,6 @@ export function solveRecompose(input: RecomposeInput): FrameSolution {
     viewportWidth: m.viewportWidth,
     viewportHeight: m.viewportHeight,
     rect: computeUsableRect(m),
-    bias: compositionBias(m),
   });
   const now = against(after);
   const at = (d: number, ox: number, oy: number): FrameSolution => {
