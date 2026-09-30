@@ -17,6 +17,7 @@ import {
   solveFrame,
   solveRecompose,
   storyGutter,
+  storyMastheadBand,
   type ChromeMetrics,
   type FrameSolveInput,
   type Rect,
@@ -166,6 +167,29 @@ describe("the story keep-outs (finding 28)", () => {
   it("a taller card in the same column is the same chrome (no re-solve on a longer scene)", () => {
     expect(sameChrome(at1024(), at1024({ card: { x: 31, y: 400, width: 420, height: 265 } }))).toBe(true);
     expect(sameChrome(at1024(), at1024({ card: null }))).toBe(false);
+  });
+
+  // The merged chrome (ui/chromelayout.ts) slides the masthead right of a tall
+  // card or hides it, a frame AFTER the camera composes. Read by visibility, a
+  // scene after a tall-card scene saw no masthead and framed into the top band:
+  // 1024x700 swiss-cheese scene 4 put 11 standards under it, e.g.
+  // "7.EE.B.4@567,254:mast" with the masthead at [31, 21, 657, 256].
+  it("the masthead band is full width and the same in every masthead state", () => {
+    const resting: Rect = { x: 31, y: 21, width: 626, height: 235 };
+    const slid: Rect = { ...resting, x: 31 + 444 }; // right of the card
+    const band = storyMastheadBand([resting, slid], 1024)!;
+    expect(band).toEqual({ x: 0, y: 21, width: 1024, height: 235 });
+    // Stays put, slides, or steps aside (hidden, same layout box): one band.
+    expect(storyMastheadBand([resting, resting], 1024)).toEqual(band);
+    // The rect starts one gutter below it, whatever column the card leaves.
+    const r = computeUsableRect(at1024({ masthead: band }));
+    expect(r.y).toBeCloseTo(256 + storyGutter(1024), 6);
+    const narrow = computeUsableRect(
+      at1024({ masthead: storyMastheadBand([{ x: 16, y: 16, width: 300, height: 48 }], 1024) }),
+    );
+    expect(narrow.y).toBeCloseTo(Math.max(16 + 48 + storyGutter(1024), 700 * 0.11), 6);
+    // Nothing laid out, no band.
+    expect(storyMastheadBand([{ x: 0, y: 0, width: 0, height: 0 }], 1024)).toBeNull();
   });
 });
 

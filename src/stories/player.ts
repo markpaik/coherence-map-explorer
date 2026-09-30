@@ -730,25 +730,23 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
     return litDuration;
   }
 
-  // Above this many nodes a fit is sized by its strays rather than its mass, so
-  // the box trims its outliers (see nodeBoundingBox). At or below it — a spine of
-  // four named standards, a handful of codes — every node is the subject and
-  // dropping one would cut an end off the line the card narrates.
+  // Above this many nodes a CONTEXT box (a lit set, a year's downstream band) is
+  // sized by its mass, not its strays, so it trims its outliers (see
+  // nodeBoundingBox). What a scene NARRATES is never trimmed: its spine, or its
+  // fit set when it has no spine (designer rule F2: every narrated standard
+  // lands inside the usable rect). A 10% trim on the fit used to drop the
+  // band's depth extremes, the standards nearest the camera, which perspective
+  // throws furthest out: at 900x700 opportunity-myth scene 3 (grades 4 and 5)
+  // put 5.OA.A.1 off the right edge at x=903 once the taller masthead narrowed
+  // the frame. In the Ascent the trim changed only the depth of a fit box
+  // (9-39%) and its height by at most 9%, never its width.
   const TRIM_ABOVE = 8;
-  const FIT_TRIM = 0.1;
-  /** Outlier trim on the CONTEXT box (lighter than the fit's: a context is
-   *  allowed to be big, it just must not be defined by two strays). */
+  /** Outlier trim on the CONTEXT box: a context is allowed to be big, it just
+   *  must not be defined by two strays. */
   const CONTEXT_TRIM = 0.05;
   function storyFitBox(indices: number[], trim: number): Box3 {
     return nodeBoundingBox(nodes, indices, trim, MIN_FIT_EXTENT);
   }
-  /**
-   * A `fit` selector is a MASS (a grade band, a closure): size it by the mass and
-   * let its strays bleed. A SPINE is named content — the standards the card
-   * talks about — so it is never trimmed: dropping one would leave a standard
-   * the reader is being told about hanging off the edge of the frame.
-   */
-  const fitTrim = (indices: number[]): number => (indices.length > TRIM_ABOVE ? FIT_TRIM : 0);
   /**
    * How far a scene's fit may retreat from its SPINE to take the lit context in
    * with it. The spine is what the card narrates and must read; the lit wash
@@ -800,7 +798,7 @@ export function createStoryPlayer(deps: StoryPlayerDeps): StoryPlayerHandle {
       rig.frameHome(animate);
       return;
     }
-    frame([...idx], fitTrim([...idx]));
+    frame([...idx], 0); // the fit set is what this scene narrates: every node of it frames
   }
 
   async function goto(index: number, animate: boolean): Promise<void> {

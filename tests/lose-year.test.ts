@@ -26,7 +26,13 @@ import { yearSwitchEases } from "../src/stories/player";
 import { trapTarget } from "../src/ui/storycard";
 import { rovingIndex } from "../src/ui/chipgroup";
 import { planClearFrame, type ClearFrameInput } from "../src/stories/yearframe";
-import { computeUsableRect, solveFrame, type ChromeMetrics, type Rect } from "../src/scene/frame";
+import {
+  computeUsableRect,
+  solveFrame,
+  storyMastheadBand,
+  type ChromeMetrics,
+  type Rect,
+} from "../src/scene/frame";
 import { nodeBoundingBox } from "../src/state/machine";
 import { createDamageEngine } from "../src/stories/damage";
 import { createSelectorResolver } from "../src/stories/selectors";
@@ -121,15 +127,16 @@ describe("finding 12: the chosen year frames inside the story's keep-out rect", 
 
   const wholeMap = nodeBoundingBox(ascent, core.nodes.map((_n, i) => i), 0, 140);
 
-  // Measured live during lose-a-year (l2_lychrome.mjs): the story card, the
-  // title block (the masthead), and the scrubber's top edge.
+  // Measured live during lose-a-year on the merged chrome (main 6b61cba, the
+  // title block now carries the license line): the story card, the title
+  // block (the masthead), and the scrubber's top edge.
   const SCREENS: { name: string; W: number; H: number; card: Rect; masthead: Rect; scrubberTop: number }[] = [
     {
       name: "1440x900",
       W: 1440,
       H: 900,
       card: { x: 32, y: 485, width: 420, height: 370 },
-      masthead: { x: 36, y: 27, width: 626, height: 203 },
+      masthead: { x: 36, y: 27, width: 626, height: 246 },
       scrubberTop: 814,
     },
     {
@@ -137,7 +144,7 @@ describe("finding 12: the chosen year frames inside the story's keep-out rect", 
       W: 1280,
       H: 720,
       card: { x: 32, y: 314, width: 420, height: 370 },
-      masthead: { x: 36, y: 22, width: 626, height: 203 },
+      masthead: { x: 36, y: 22, width: 626, height: 246 },
       scrubberTop: 638,
     },
     {
@@ -145,7 +152,7 @@ describe("finding 12: the chosen year frames inside the story's keep-out rect", 
       W: 900,
       H: 700,
       card: { x: 27, y: 295, width: 420, height: 370 },
-      masthead: { x: 27, y: 21, width: 626, height: 181 },
+      masthead: { x: 27, y: 21, width: 626, height: 224 },
       scrubberTop: 619,
     },
   ];
@@ -157,7 +164,7 @@ describe("finding 12: the chosen year frames inside the story's keep-out rect", 
     bottomChromeTop: s.scrubberTop,
     panelWidth: 0,
     card: story ? s.card : null,
-    masthead: story ? s.masthead : null,
+    masthead: story ? storyMastheadBand([s.masthead], s.W) : null, // as measureChrome reports it
   });
   const VIEW = new Vector3(0, 0, -1); // the Ascent's head-on story view
   const SWAY = (18 * Math.PI) / 180;

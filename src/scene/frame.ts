@@ -63,8 +63,9 @@ export interface ChromeMetrics {
    */
   card: Rect | null;
   /**
-   * STORY KEEP-OUT: the masthead (title block) while a story plays. Null
-   * outside a story, where the title keeps its modest top strip.
+   * STORY KEEP-OUT: the masthead (title block) while a story plays, as the
+   * full-width band storyMastheadBand makes of it. Null outside a story, where
+   * the title keeps its modest top strip.
    */
   masthead: Rect | null;
 }
@@ -110,6 +111,35 @@ export function storyGutter(viewportWidth: number): number {
 }
 
 /**
+ * The masthead's keep-out while a story plays: a FULL-WIDTH band from the top
+ * of the title block's boxes to the bottom of the lowest one. Pure.
+ *
+ * The chrome layout pass (ui/chromelayout.ts) decides the masthead per scene:
+ * it stays put, slides right of the story card (--title-shift), or steps aside
+ * (.title-cramped, visibility hidden) when a tall card leaves no room. That
+ * pass runs a frame AFTER the card takes a scene's copy, and the camera
+ * composes synchronously before it, so any masthead state read at compose time
+ * is the PREVIOUS scene's. Read that way, a scene after a tall-card scene saw
+ * no masthead at all, framed up into the top band, and then the masthead came
+ * back over its standards (1024x700 swiss-cheese scene 4: 11 under the
+ * masthead). So the band ignores the masthead's visibility and its sideways
+ * slide: its height is the same in every state, and it spans every column the
+ * masthead can move into. A step-aside scene keeps an empty band above the
+ * frame, which is the smaller frame the designer chose over occlusion.
+ */
+export function storyMastheadBand(boxes: readonly Rect[], viewportWidth: number): Rect | null {
+  let top = Infinity;
+  let bottom = -Infinity;
+  for (const b of boxes) {
+    if (!(b.width > 0 && b.height > 0)) continue;
+    top = Math.min(top, b.y);
+    bottom = Math.max(bottom, b.y + b.height);
+  }
+  if (!(bottom > top)) return null;
+  return { x: 0, y: top, width: Math.max(1, viewportWidth), height: bottom - top };
+}
+
+/**
  * The on-screen rectangle a framing targets. Pure over measured chrome.
  *
  * Outside a story it is the viewport minus the title's modest top strip, the
@@ -118,7 +148,8 @@ export function storyGutter(viewportWidth: number): number {
  *   • the card's COLUMN: the rect starts one gutter past the card's right edge
  *     (its left edge, for a card on the right), whatever the card's height;
  *   • the MASTHEAD: where the title block reaches into that column, the rect
- *     starts one gutter below it;
+ *     starts one gutter below it (measureChrome reports it as a full-width
+ *     band, storyMastheadBand, because it can slide into the column);
  *   • the SCRUBBER: bottom chrome, as the filter rail is outside a story.
  */
 export function computeUsableRect(m: ChromeMetrics): Rect {
@@ -190,9 +221,19 @@ export function measureChrome(): ChromeMetrics {
       };
       if (box.width > W * 0.7) bottomChromeTop = Math.min(bottomChromeTop, box.y);
       else card = box;
-      // While a story plays the masthead is a keep-out too.
-      const t = rectOf(".title-block");
-      if (t) masthead = { x: t.left, y: t.top, width: t.width, height: t.height };
+      // While a story plays the masthead is a keep-out too, read from its
+      // layout, NOT its visibility (see storyMastheadBand).
+      const t = document.querySelector(".title-block");
+      if (t instanceof HTMLElement && !t.hidden && t.getClientRects().length > 0) {
+        const r = t.getBoundingClientRect();
+        masthead = storyMastheadBand(
+          [
+            { x: t.offsetLeft, y: t.offsetTop, width: t.offsetWidth, height: t.offsetHeight },
+            { x: r.left, y: r.top, width: r.width, height: r.height },
+          ],
+          W,
+        );
+      }
     }
   }
   // The detail panel is a right-side panel on desktop and a bottom sheet below

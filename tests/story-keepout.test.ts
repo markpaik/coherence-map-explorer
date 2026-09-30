@@ -20,7 +20,13 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vector3 } from "three";
 import type { GraphCore } from "../src/data";
-import { computeUsableRect, solveFrame, type ChromeMetrics, type Rect } from "../src/scene/frame";
+import {
+  computeUsableRect,
+  solveFrame,
+  storyMastheadBand,
+  type ChromeMetrics,
+  type Rect,
+} from "../src/scene/frame";
 import { MIN_FIT_EXTENT, nodeBoundingBox } from "../src/state/machine";
 import { createSelectorResolver } from "../src/stories/selectors";
 import { STORIES, findStory } from "../src/stories/scripts";
@@ -41,8 +47,9 @@ const union = (sels: readonly string[]): number[] => {
   return [...out];
 };
 
-// Story chrome measured live (l2 census, drift off): the card, the title block,
-// and the scrubber's top edge. The card's height changes scene to scene; its
+// Story chrome measured live on the merged chrome (main 6b61cba: the title
+// block carries the license line, so it is taller), from the l2 census with
+// drift off: the card, the title block, and the scrubber's top edge. The card's height changes scene to scene; its
 // column does not, and the column is what the rect leaves out.
 interface Screen {
   name: string;
@@ -58,7 +65,7 @@ const SCREENS: Screen[] = [
     W: 1024,
     H: 700,
     card: { x: 31, y: 191, width: 420, height: 474 },
-    masthead: { x: 31, y: 21, width: 626, height: 192 },
+    masthead: { x: 31, y: 21, width: 626, height: 235 },
     scrubberTop: 619,
   },
   {
@@ -66,7 +73,7 @@ const SCREENS: Screen[] = [
     W: 1440,
     H: 900,
     card: { x: 32, y: 381, width: 420, height: 474 },
-    masthead: { x: 36, y: 27, width: 626, height: 203 },
+    masthead: { x: 36, y: 27, width: 626, height: 246 },
     scrubberTop: 814,
   },
   {
@@ -74,7 +81,7 @@ const SCREENS: Screen[] = [
     W: 900,
     H: 700,
     card: { x: 27, y: 191, width: 420, height: 474 },
-    masthead: { x: 27, y: 21, width: 626, height: 181 },
+    masthead: { x: 27, y: 21, width: 626, height: 224 },
     scrubberTop: 619,
   },
 ];
@@ -85,11 +92,12 @@ const chromeOf = (s: Screen): ChromeMetrics => ({
   bottomChromeTop: s.scrubberTop,
   panelWidth: 0,
   card: s.card,
-  masthead: s.masthead,
+  masthead: storyMastheadBand([s.masthead], s.W), // as measureChrome reports it
 });
 
-// player.ts applyCamera, restated: the spine frames untrimmed, the lit set is
-// the context (5% trim above 8 nodes), and the fit may retreat 2.6x for it.
+// player.ts applyCamera, restated: the narrated set (spine, else fit set)
+// frames untrimmed, the lit set is the context (5% trim above 8 nodes), and the
+// fit may retreat 2.6x for it.
 const STORY_CONTEXT_PULLBACK = 2.6;
 const TRIM_ABOVE = 8;
 const CONTEXT_TRIM = 0.05;
@@ -101,8 +109,9 @@ function frameScene(
   spine: number[],
   lit: number[],
   rect: Rect = computeUsableRect(chromeOf(s)),
+  trim = 0,
 ): [number, number][] {
-  const subject = nodeBoundingBox(ascent, spine, 0, MIN_FIT_EXTENT);
+  const subject = nodeBoundingBox(ascent, spine, trim, MIN_FIT_EXTENT);
   const context = lit.length
     ? nodeBoundingBox(ascent, lit, lit.length > TRIM_ABOVE ? CONTEXT_TRIM : 0, MIN_FIT_EXTENT)
     : null;
@@ -201,6 +210,38 @@ describe("finding 28: a scene's narrated standards frame clear of the story chro
         }
       });
     }
+  });
+
+  it("every fit scene (no spine) frames its whole fit set clear, untrimmed", () => {
+    for (const story of STORIES) {
+      story.scenes.forEach((scene, index) => {
+        const cam = scene.camera;
+        if (!cam || cam.spine?.length || cam.fit === "all") return;
+        const fit = narrated(story.id, index);
+        for (const s of SCREENS) {
+          const pts = frameScene(s, fit, litOf(story.id, index));
+          expect(census(s, pts), `${story.id} scene ${index} at ${s.name}`).toEqual({
+            card: 0,
+            masthead: 0,
+            scrubber: 0,
+            off: 0,
+          });
+        }
+      });
+    }
+  });
+
+  it("the trim defect: a 10% fit trim drops a narrated standard off the frame at 900x700", () => {
+    // Merged census, 900x700, opportunity-myth scene 3 (grades 4 and 5), fit
+    // trimmed: "5.OA.A.1@903,616:off". The trim drops the band's depth
+    // extremes, and perspective throws the one nearest the camera furthest out.
+    const s = SCREENS[2];
+    const fit = narrated("opportunity-myth", 3);
+    const lit = litOf("opportunity-myth", 3);
+    const rect = computeUsableRect(chromeOf(s));
+    const inside = (pts: [number, number][]): number => pts.filter((p) => inRect(rect, p)).length;
+    expect(inside(frameScene(s, fit, lit, rect, 0.1))).toBeLessThan(fit.length);
+    expect(inside(frameScene(s, fit, lit, rect, 0))).toBe(fit.length);
   });
 
   it("the defect: without the keep-outs, the swiss-cheese coda buries its own lights under the card", () => {
