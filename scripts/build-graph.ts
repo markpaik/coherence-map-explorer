@@ -2,8 +2,10 @@
  * build-graph.ts — build-time data pipeline for the Coherence Map Explorer.
  *
  * Reads the vendored raw dump (data/raw/data.js), drops ELA/task/orphan blocks,
- * derives standard codes and strands, normalizes both edge kinds, sanitizes the
- * HTML text fields, computes a deterministic seeded 3D force layout, bakes edge
+ * derives standard codes and strands, applies the source errata
+ * (scripts/errata.json), normalizes both edge kinds, sanitizes the HTML text
+ * fields, projects cluster and domain names to plain text, computes a
+ * deterministic seeded 3D force layout, bakes edge
  * control points, and emits public/data/graph-core.json plus per-grade detail
  * shards.
  *
@@ -284,6 +286,72 @@ function isDeadImage(url: string): boolean {
   return linkFixes.deadImagePatterns.some((p) => url.includes(p));
 }
 
+// Source-data errata (scripts/errata.json). data/raw/data.js is a frozen
+// snapshot and is never edited. `text` entries fix a known error in one field
+// of one standard, each checked against the published CCSS page it cites, and
+// buildGraph applies them right after it derives codes. `glossaryTables` gives
+// a real definition to glossary anchors whose id only points at a CCSS
+// Glossary table ("[3]" is Table 3, the properties of operations).
+export type ErratumField = "desc" | "example_problem" | "progressions";
+export interface Erratum {
+  code: string;
+  field: ErratumField;
+  raw: string;
+  corrected: string;
+  why: string;
+  source: string;
+  citation: string;
+}
+export interface Errata {
+  text: Erratum[];
+  glossaryTables: Record<string, { def: string; author: string; source: string; citation: string }>;
+}
+export const ERRATA: Errata = JSON.parse(readFileSync(resolve(HERE, "errata.json"), "utf-8"));
+
+/**
+ * Apply one erratum to a raw field value. The raw substring must occur exactly
+ * once: zero means the snapshot changed under the erratum, two means the fix
+ * is ambiguous, and either one fails the build rather than ship a guess.
+ */
+export function applyErratum(value: string | undefined, e: Erratum): string {
+  const hits = value ? value.split(e.raw).length - 1 : 0;
+  if (hits !== 1) {
+    throw new Error(
+      `[build-graph] erratum for ${e.code} ${e.field}: expected the raw text once, found it ${hits} times: ${JSON.stringify(e.raw)}`,
+    );
+  }
+  return value!.split(e.raw).join(e.corrected);
+}
+
+/** A glossary anchor id that points at a CCSS Glossary table: "[3]". */
+const GLOSSARY_TABLE_REF = /^\[\d+\]$/;
+
+/**
+ * The popover text for a glossary anchor. The source writes the definition
+ * into the anchor's id. Two id shapes need help:
+ * - "[3]" is a pointer to CCSS Glossary Table 3, not a definition. It maps to
+ *   the definition in scripts/errata.json. A table pointer with no entry there
+ *   fails the build: nobody should invent a definition at build time.
+ * - 16 definitions arrive wrapped in a pair of straight quotes
+ *   ("\"A multi-digit number …\""). The pair drops. A definition that only
+ *   ENDS on a quote mark (1.OA.C.6's "counting on" closes a quotation with ”)
+ *   is left alone.
+ */
+export function glossaryDef(id: string): string {
+  const key = id.trim();
+  if (GLOSSARY_TABLE_REF.test(key)) {
+    const ref = ERRATA.glossaryTables[key];
+    if (!ref) {
+      throw new Error(
+        `[build-graph] glossary anchor id ${key} points to a CCSS Glossary table with no definition in scripts/errata.json`,
+      );
+    }
+    return ref.def;
+  }
+  const wrapped = /^"([^"]*)"$/.exec(id);
+  return wrapped ? wrapped[1] : id;
+}
+
 // HS traditional-pathway course map (scripts/hs-course-map.json, derived from
 // CCSS Appendix A's Traditional Pathway tables — see its source/notes fields).
 // The dump DOES carry its own traditional_/integrated_course_frameworks_*
@@ -378,7 +446,7 @@ const sanitizeOpts: sanitizeHtml.IOptions = {
       if (!isExternal && attribs.id) {
         const out: Record<string, string> = {
           class: "term",
-          "data-def": attribs.id,
+          "data-def": glossaryDef(attribs.id),
         };
         return { tagName: "span", attribs: out };
       }
@@ -783,6 +851,33 @@ export function toSearchText(html: string | undefined, limit = 240): string {
   return (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "…";
 }
 
+/**
+ * Plain-text projection of a cluster or domain name. The client sets these with
+ * textContent (Browse headings, breadcrumbs, the strand chip tooltip, search),
+ * so any markup ships as literal text. Six cluster names carry a "[3]" glossary
+ * anchor and a closing </p>, and one (4.NBT.B) carries a footnote paragraph
+ * after it ("*A range of algorithms may be used."). Steps: keep only the text
+ * before the first </p> (the footnote block follows it), drop inline tags with
+ * no space and every other tag as a word break, decode entities once, collapse
+ * whitespace, and trim. Last, drop a trailing "*" footnote marker: its note
+ * never ships (the three starred domain names in grades 3 and 4 carry no note
+ * at all), and the marker split each of those domains from its unstarred twin
+ * in the strand tooltip ("Number And Operations In Base Ten, Number And
+ * Operations In Base Ten*").
+ */
+export function plainName(html: string | undefined): string {
+  if (!html) return "";
+  let s = html;
+  const end = s.search(/<\/p\s*>/i);
+  if (end >= 0) s = s.slice(0, end);
+  s = s.replace(INLINE_TAG, "");
+  s = s.replace(/<[^>]*>/g, " ");
+  s = decodeHTML(s);
+  s = s.replace(/[­​⁣]/g, "");
+  s = s.replace(/\s+/g, " ").trim();
+  return s.replace(/\s*\*+$/, "");
+}
+
 // ---------------------------------------------------------------------------
 // Main build
 // ---------------------------------------------------------------------------
@@ -938,6 +1033,18 @@ export function buildGraph(): BuildResult {
   assert(seenCodes.has("F-IF.A.1"), "golden code F-IF.A.1 missing");
   assert(seenCodes.has("4.NF.B.3.a"), "golden code 4.NF.B.3.a missing");
 
+  // --- 3b. Source errata (scripts/errata.json) -----------------------------
+  // `cc` is parsed fresh on every call, so the corrections touch this build's
+  // copy only. Nothing downstream (sanitizeField, toSearchText, the example
+  // flag) ever sees the raw text of a corrected field.
+  const erratumIdByCode = new Map<string, string>();
+  for (const [id, code] of codeById) erratumIdByCode.set(code, id);
+  for (const e of ERRATA.text) {
+    const id = erratumIdByCode.get(e.code);
+    assert(id, `erratum names unknown standard ${e.code}`);
+    standards[id][e.field] = applyErratum(standards[id][e.field], e);
+  }
+
   // --- 4. Strand assignment (hard-fail on unmapped domain ordinal) ---------
   const distinctOrdinals = new Set<string>();
   for (const c of Object.values(keptClusters))
@@ -1025,7 +1132,7 @@ export function buildGraph(): BuildResult {
       grade,
       strand,
       domainOrd: d.ordinal,
-      domainName: d.name,
+      domainName: plainName(d.name),
       clusterCode,
       msa,
       wap: s.wap === "1",
@@ -2281,7 +2388,8 @@ export function buildGraph(): BuildResult {
       if (safe) entry.exampleUrl = safe; // drop non-http(s) example sources
     }
     if (progressions) entry.progressions = progressions;
-    if (c.name) entry.clusterName = c.name;
+    const clusterName = plainName(c.name);
+    if (clusterName) entry.clusterName = clusterName;
     const tasks: { group: string; name: string; url: string }[] = [];
     for (const grp of s.links || []) {
       for (const l of grp.links || []) {
@@ -2306,7 +2414,7 @@ export function buildGraph(): BuildResult {
       strand: m.strand,
       text: toSearchText(standards[id].desc),
       domainName: m.domainName,
-      clusterName: c.name ?? "",
+      clusterName: plainName(c.name),
     };
     // Flag standards carrying a level-appropriate worked example so the hover
     // card can advertise it before the panel opens (326 of 480 have one).
@@ -2314,6 +2422,14 @@ export function buildGraph(): BuildResult {
     return doc;
   });
   assert(search.length === 480, `expected 480 search docs, got ${search.length}`);
+  for (const d of search) {
+    for (const name of [d.domainName, d.clusterName]) {
+      assert(
+        !/[<>*]|&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);/.test(name),
+        `markup or footnote marker in a name for ${d.code}: ${JSON.stringify(name)}`,
+      );
+    }
+  }
 
   // Bounds report
   let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity, zmin = Infinity, zmax = -Infinity;
