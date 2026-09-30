@@ -12,12 +12,14 @@
 import { describe, it, expect } from "vitest";
 import { Box3, Vector3 } from "three";
 import {
-  compositionBias,
   computeUsableRect,
+  sameChrome,
   solveFrame,
   solveRecompose,
+  storyGutter,
   type ChromeMetrics,
   type FrameSolveInput,
+  type Rect,
 } from "../src/scene/frame";
 
 const VIEWPORT = { width: 1728, height: 907 };
@@ -28,7 +30,8 @@ const chrome = (over: Partial<ChromeMetrics> = {}): ChromeMetrics => ({
   titleBottom: 238,
   bottomChromeTop: VIEWPORT.height - 114,
   panelWidth: 0,
-  cardWidth: 0,
+  card: null,
+  masthead: null,
   ...over,
 });
 
@@ -95,15 +98,74 @@ describe("the usable rect", () => {
   });
 });
 
-describe("the story-card bias", () => {
-  it("is a nudge, not an evacuation", () => {
-    // Half the viewport (what the old frame shift did with a 420px card) is what
-    // emptied the left half of the frame.
-    expect(compositionBias(chrome({ cardWidth: 420 })).x).toBeCloseTo(103.7, 1); // 6% of 1728
-    expect(compositionBias(chrome({ cardWidth: 900 })).x).toBeCloseTo(103.7, 1); // capped
-    // ...and the same card is a smaller nudge on a narrower window.
-    expect(compositionBias(chrome({ cardWidth: 420, viewportWidth: 1280 })).x).toBeCloseTo(76.8, 1);
-    expect(compositionBias(chrome()).x).toBe(0);
+// Finding 28 and the designer's rules F1 and F3 (2026-09): while a story plays,
+// the card, the masthead and the scrubber are KEEP-OUT zones. The card used to
+// count only as a 61-120px bias, so at 1024x700 the swiss-cheese card sat over
+// two of the four standards it names ("Four lights remain").
+describe("the story keep-outs (finding 28)", () => {
+  // Measured live at 1024x700 during swiss-cheese scene 5 (l2 census): the card,
+  // the title block, and the scrubber's top edge.
+  const at1024 = (over: Partial<ChromeMetrics> = {}): ChromeMetrics =>
+    chrome({
+      viewportWidth: 1024,
+      viewportHeight: 700,
+      titleBottom: 213,
+      bottomChromeTop: 619,
+      card: { x: 31, y: 191, width: 420, height: 474 },
+      masthead: { x: 31, y: 21, width: 626, height: 192 },
+      ...over,
+    });
+
+  it("excludes the card's whole COLUMN: the rect starts one gutter past its right edge", () => {
+    const m = at1024();
+    const r = computeUsableRect(m);
+    const g = storyGutter(1024);
+    expect(g).toBeCloseTo(30.72, 2); // clamp(16px, 3vw, 32px), as the CSS insets the card
+    expect(r.x).toBeCloseTo(31 + 420 + g, 6);
+    expect(r.x + r.width).toBe(1024);
+    // Whatever the card's height: a short card still owns its column.
+    const short = computeUsableRect(at1024({ card: { x: 31, y: 500, width: 420, height: 165 } }));
+    expect(short.x).toBeCloseTo(r.x, 6);
+    // No point of the card lies inside the rect.
+    const c = m.card!;
+    expect(c.x + c.width).toBeLessThan(r.x);
+  });
+
+  it("puts the rect below the masthead where the masthead reaches into the card's column", () => {
+    const r = computeUsableRect(at1024());
+    expect(r.y).toBeCloseTo(21 + 192 + storyGutter(1024), 6);
+    expect(r.y + r.height).toBe(619); // the scrubber band below
+    // A masthead that stops short of the column leaves the title's plain strip.
+    const narrow = computeUsableRect(at1024({ masthead: { x: 31, y: 21, width: 300, height: 192 } }));
+    expect(narrow.y).toBeCloseTo(Math.max(56, Math.min(213, 700 * 0.11)), 6);
+  });
+
+  it("keeps a card on the RIGHT out the same way, from the other side", () => {
+    const r = computeUsableRect(at1024({ card: { x: 573, y: 191, width: 420, height: 474 }, masthead: null }));
+    expect(r.x).toBe(0);
+    expect(r.x + r.width).toBeCloseTo(573 - storyGutter(1024), 6);
+  });
+
+  it("changes nothing outside a story: no card, no keep-outs (the explorer's framing)", () => {
+    const plain = computeUsableRect(chrome());
+    expect(plain.x).toBe(0);
+    expect(plain.width).toBe(1728);
+    expect(plain.y).toBeCloseTo(907 * 0.11, 6);
+    expect(plain.height).toBeCloseTo(907 - 907 * 0.11 - 114, 6);
+    expect(computeUsableRect(chrome({ panelWidth: 480 })).width).toBe(1728 - 480);
+  });
+
+  it("never lets a mis-measured keep-out collapse the rect", () => {
+    const r = computeUsableRect(
+      at1024({ card: { x: 0, y: 0, width: 690, height: 700 }, masthead: { x: 0, y: 0, width: 1024, height: 690 } }),
+    );
+    expect(r.width).toBeGreaterThanOrEqual(1024 * 0.38 - 0.5);
+    expect(r.height).toBeGreaterThanOrEqual(700 * (1 - 0.42) - (700 - 619) - 0.5);
+  });
+
+  it("a taller card in the same column is the same chrome (no re-solve on a longer scene)", () => {
+    expect(sameChrome(at1024(), at1024({ card: { x: 31, y: 400, width: 420, height: 265 } }))).toBe(true);
+    expect(sameChrome(at1024(), at1024({ card: null }))).toBe(false);
   });
 });
 
@@ -201,17 +263,22 @@ describe("solveFrame", () => {
     expect(sol.subjectRect[0]).toBeGreaterThan(0);
   });
 
-  it("biases toward the clear side without pushing the subject out", () => {
-    const r = rectOf();
-    const plain = solve();
-    const biased = solve({ bias: { x: 105, y: 0 } });
-    const cxOf = (s: [number, number, number, number]): number => (s[0] + s[2]) / 2;
-    // A small subject takes the whole bias; the containment clamp only bites
-    // when the subject is large enough to run into the rect edge.
-    expect(cxOf(biased.subjectRect) - cxOf(plain.subjectRect)).toBeGreaterThan(0);
-    expect(inside(r, biased.subjectRect)).toBe(true);
-    const wide = solve({ subject: box(0, 0, 4000, 200), bias: { x: 105, y: 0 } });
-    expect(inside(r, wide.subjectRect)).toBe(true);
+  it("lands a story subject clear of the card, the masthead and the scrubber", () => {
+    // 1440x900 story chrome, measured live: the card, the title block, and the
+    // scrubber's top edge.
+    const card: Rect = { x: 32, y: 381, width: 420, height: 474 };
+    const masthead: Rect = { x: 36, y: 27, width: 626, height: 203 };
+    const m = chrome({ viewportWidth: 1440, viewportHeight: 900, titleBottom: 230, bottomChromeTop: 814, card, masthead });
+    const r = computeUsableRect(m);
+    const clear = (s: [number, number, number, number], k: Rect): boolean =>
+      s[2] < k.x || s[0] > k.x + k.width || s[3] < k.y || s[1] > k.y + k.height;
+    for (const subject of [box(0, 0, 400, 200), box(0, 0, 4000, 200), box(0, 0, 300, 1200), box(0, 0, 60, 60)]) {
+      const sol = solve({ viewportWidth: 1440, viewportHeight: 900, rect: r, subject });
+      expect(inside(r, sol.subjectRect)).toBe(true);
+      expect(clear(sol.subjectRect, card)).toBe(true);
+      expect(clear(sol.subjectRect, masthead)).toBe(true);
+      expect(sol.subjectRect[3]).toBeLessThan(814); // above the scrubber
+    }
   });
 
   it("a stage that frames the closure is a PERCEPTIBLE move from one that frames the subject", () => {
@@ -260,7 +327,6 @@ describe("solveRecompose", () => {
       viewportWidth: m.viewportWidth,
       viewportHeight: m.viewportHeight,
       rect: computeUsableRect(m),
-      bias: compositionBias(m),
       eye: eyeFor(target),
       target,
       subject,
