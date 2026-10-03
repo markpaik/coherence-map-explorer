@@ -42,6 +42,8 @@ const PALETTES: readonly SheetPalette[] = [
   { field: "#123a63", wash1: "#1a4a7a", wash2: "#0d2c4e", ink: "#eaf2ff" },
   { field: "#f0ece0", wash1: "#e2dccb", wash2: "#d8d0bc", ink: "#1a1712" },
   { field: "#43a08b", wash1: "#4fb89f", wash2: "#2f7d6a", ink: "#e8e0cd" },
+  { field: "#efe6d2", wash1: "#e2d8c0", wash2: "#d9cdb2", ink: "#1c1a17" }, // 3 Washi (dormant pose)
+  { field: "#2e4262", wash1: "#3a5277", wash2: "#1f3150", ink: "#ece3cf" }, // 4 Dusk (dormant pose)
 ];
 
 // #rrggbb → "r,g,b" for building rgba() strokes at arbitrary opacity.
@@ -199,8 +201,8 @@ export function createSheet(nodes: GraphNode[]): SheetHandle {
 
   // Front + back textures per art style, generated on first use and cached. The
   // back is the front re-plated on an opaque field with the ink at 0.22.
-  const frontCache: (THREE.CanvasTexture | null)[] = [null, null, null];
-  const backCache: (THREE.CanvasTexture | null)[] = [null, null, null];
+  const frontCache: (THREE.CanvasTexture | null)[] = [null, null, null, null, null];
+  const backCache: (THREE.CanvasTexture | null)[] = [null, null, null, null, null];
   const frontTextureFor = (style: number): THREE.CanvasTexture => {
     let t = frontCache[style];
     if (!t) {

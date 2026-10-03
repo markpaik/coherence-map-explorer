@@ -34,7 +34,7 @@
 
 import * as THREE from "three";
 import type { GraphCore, StrandId } from "../data";
-import { RINGERS, FIDENZA } from "./artstyle";
+import { RINGERS, FIDENZA, isHanga, hangaPalette } from "./artstyle";
 import { connectedness, draftFocusFade } from "./focusgrammar";
 
 // Strand brights — DESIGN.md's validated line palette (the same source the
@@ -47,7 +47,7 @@ const LINE_HEX: Record<StrandId, number> = {
 };
 // Per-style ink base (tinted 30% toward the strand). Galaxy white-ink; Ringers
 // graphite; Fidenza cream.
-const INK_BASE: readonly number[] = [0xeaf2ff, 0x1a1712, 0xe8e0cd];
+const INK_BASE: readonly number[] = [0xeaf2ff, 0x1a1712, 0xe8e0cd, 0x1c1a17, 0xece3cf]; // + 3 Washi sumi, 4 Dusk pale key block
 const MISSED = 0x0a0a16; // near-black a missed / ghosted symbol fades toward
 const RING_R_FACTOR = 1.7; // primary ring radius vs. node visual radius
 const DOT_R_FACTOR = 0.5; // Major-Work centre dot radius vs. node visual radius
@@ -381,7 +381,13 @@ export function createDrafts(
   function bakeColors(style: number): void {
     const inkHex = INK_BASE[style] ?? INK_BASE[0];
     const strandHexFor = (s: StrandId): number =>
-      style === 1 ? (RINGERS.peg[s] ?? RINGERS.pegWhite) : style === 2 ? (FIDENZA.node[s] ?? FIDENZA.palette[0]) : LINE_HEX[s];
+      style === 1
+        ? (RINGERS.peg[s] ?? RINGERS.pegWhite)
+        : style === 2
+          ? (FIDENZA.node[s] ?? FIDENZA.palette[0])
+          : isHanga(style)
+            ? hangaPalette(style).pigment[s]
+            : LINE_HEX[s];
     // Resting white-ink strand tint: raised to 50% for Galaxy (round 11 — the user
     // found 30% too faint); the paper styles keep 30%. Bake BOTH the resting ink
     // (white-ink tinted toward strand) and the FULL strand colour a connected ring

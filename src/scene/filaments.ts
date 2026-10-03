@@ -21,6 +21,7 @@
 import * as THREE from "three";
 import type { GraphCore } from "../data";
 import type { NodesHandle } from "./nodes";
+import { HANGA } from "./artstyle";
 
 const DIM = new THREE.Color(0x34315e).multiplyScalar(0.22); // baked hairline
 const LIT = new THREE.Color(0x9a94d8).multiplyScalar(0.85); // both ends lit
@@ -32,6 +33,12 @@ const DIM_RING = new THREE.Color(0x1a1712).multiplyScalar(0.25);
 const LIT_RING = new THREE.Color(0x1a1712);
 const DIM_FID = new THREE.Color(0x14332c).multiplyScalar(0.3);
 const LIT_FID = new THREE.Color(0x14332c);
+// Hanga: the family tether is a sumi hairline (Washi dark ink, Dusk pale ink).
+// Dimness here is a lerp toward the field, since paper does not darken to glow.
+const LIT_WASHI = new THREE.Color(HANGA.washi.sumi);
+const DIM_WASHI = new THREE.Color(HANGA.washi.bg).lerp(LIT_WASHI, 0.16);
+const LIT_DUSK = new THREE.Color(HANGA.dusk.sumi);
+const DIM_DUSK = new THREE.Color(HANGA.dusk.bg).lerp(LIT_DUSK, 0.16);
 
 export interface FilamentsHandle {
   /** The single LineSegments draw call — add it to the scene. */
@@ -100,8 +107,10 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
   let style = 0;
 
   function update(): void {
-    const dim = style === 1 ? DIM_RING : style === 2 ? DIM_FID : DIM;
-    const lit = style === 1 ? LIT_RING : style === 2 ? LIT_FID : LIT;
+    const dim =
+      style === 1 ? DIM_RING : style === 2 ? DIM_FID : style === 3 ? DIM_WASHI : style === 4 ? DIM_DUSK : DIM;
+    const lit =
+      style === 1 ? LIT_RING : style === 2 ? LIT_FID : style === 3 ? LIT_WASHI : style === 4 ? LIT_DUSK : LIT;
     for (let s = 0; s < segCount; s++) {
       const pi = pairs[s][0];
       const ci = pairs[s][1];

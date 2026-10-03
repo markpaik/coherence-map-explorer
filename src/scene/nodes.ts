@@ -15,7 +15,8 @@
 import * as THREE from "three";
 import type { GraphNode } from "../data";
 import { EMPHASIS, STRAND_COLORS, STRAND_VIVID, restRadius } from "./palette";
-import { RINGERS, FIDENZA, artHash } from "./artstyle";
+import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE } from "./artstyle";
+import { STRAND_ORDER } from "./palette";
 
 const DIM_TARGET = 0x0a0a18; // dimmed nodes lerp toward this (factor 0.82)
 const PROXY_RADIUS_FACTOR = 2.5; // pick radius vs. visual radius
@@ -121,6 +122,13 @@ export function struggleFlickMul(raw: number, display: number, breath: number): 
 
 const glf = (x: number): string => x.toFixed(4);
 
+/** Mix two sRGB hex colors per channel (the preview's mixHex), rounded. */
+export function mixSrgbHex(a: number, b: number, t: number): number {
+  const ch = (h: number, sh: number): number => (h >> sh) & 255;
+  const m = (sh: number): number => Math.round(ch(a, sh) + (ch(b, sh) - ch(a, sh)) * t);
+  return (m(16) << 16) | (m(8) << 8) | m(0);
+}
+
 // ---------------------------------------------------------------------------
 // Art-style node materials (Ringers pegs / outline, Fidenza pipes).
 //
@@ -137,6 +145,61 @@ const glf = (x: number): string => x.toFixed(4);
 // The shared alpha law:
 //   alpha = (1 − 0.92·(1−aVisible)) · (1 − 0.7·dimT) · (1 − 0.55·damage)
 // where dimT is the emphasis-only dim from the galaxy dim table.
+// ---------------------------------------------------------------------------
+// Hanga node skin (styles 3 Washi and 4 Dusk): a printed pigment disc.
+//
+// The disc is a sphere with a FLAT pigment fill and a soft bokashi fade inside
+// it, read in view space so it holds from any orbit: a deeper ink of the same
+// hue at the top of the disc, a lighter wash at the bottom (the preview's
+// 0.08 / 0.45 / 1.0 stops). The sumi key-block line is the shared inverted-hull
+// outline mesh, grown by a constant screen width and cut to a ring in the
+// fragment, so it never depends on draw order. An edgeless standard is a bare
+// paper disc (on Dusk, a faint hollow disc).
+//
+// The story grammar is opacity and weight, never brightness:
+//   lit        full pigment, full outline weight; the story lift prints the
+//              disc a touch larger with a heavier line
+//   unlit      faint sumi underdrawing (disc HANGA_NODE.UNDER_ALPHA)
+//   damage     the pigment washes toward the field and loses opacity; a husk
+//              is a pale stain with a thin line. The struggle breath keeps the
+//              Galaxy period and swing (STRUGGLE_PERIOD_SEC, STRUGGLE_SWING) on
+//              the RAW damage, as opacity.
+export const HANGA_NODE = {
+  /** Disc opacity in the underdrawing (unlit or focus-dimmed). */
+  UNDER_ALPHA: 0.12,
+  /** Outline opacity in the underdrawing. */
+  UNDER_OUTLINE_ALPHA: 0.2,
+  /** Key-block line width in CSS px at rest, and its gain when lit or lifted. */
+  OUTLINE_PX: 1.15,
+  OUTLINE_LIT_GAIN: 0.25,
+  OUTLINE_LIFT_GAIN: 0.45,
+  /** Story lift: healthy lit discs print this much larger. */
+  LIFT_SCALE: 0.12,
+  /** Damage: how far the pigment washes toward the field, and the opacity it sheds. */
+  WASH: 0.72,
+  WASH_ALPHA: 0.45,
+  /** A husk's line thins to this fraction of the rest width. */
+  HUSK_OUTLINE: 0.6,
+} as const;
+
+/** Shared uniform objects for the two Hanga node materials (disc + outline). */
+interface HangaNodeUniforms {
+  /** Fill, deep (disc top), and light (disc bottom) tones, LINEAR, 4 strands + bare paper. */
+  uHFill: { value: THREE.Vector3[] };
+  uHDeep: { value: THREE.Vector3[] };
+  uHLight: { value: THREE.Vector3[] };
+  uHSumi: { value: THREE.Color };
+  /** Bare-disc fill opacity, and the bare-disc outline opacity. */
+  uHBareA: { value: number };
+  uHBareOutlineA: { value: number };
+  /** Drawing-buffer size (device px) and device px per CSS px. */
+  uHViewW: { value: number };
+  uHViewH: { value: number };
+  uHPxRatio: { value: number };
+  uStoryLift: { value: number };
+  uTime: { value: number };
+}
+
 interface ArtNodeMatOpts {
   /** Flat fill color: a per-instance vec3 attribute, or a flat ink uniform. */
   colorSource: { kind: "attr"; name: string } | { kind: "uniform" };
@@ -153,6 +216,12 @@ interface ArtNodeMatOpts {
   pipe: boolean;
   /** Distinct program cache key so patched programs never collide. */
   cacheKey: string;
+  /**
+   * Hanga skin (styles 3 and 4). When set, the shared emphasis-scale and
+   * pose-fade skeleton is kept, and the flat fill + alpha law are replaced by
+   * the woodblock disc (role "disc") or the sumi key-block ring (role "outline").
+   */
+  hanga?: { role: "disc" | "outline"; uniforms: HangaNodeUniforms };
   /**
    * Pose-3 station handoff (0 normal … 1 fully stationed). At Transit the galaxy
    * node sprites cede to the station marks (scene/stations.ts): the peg shrinks
@@ -194,10 +263,146 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
     : "";
   const pipeVarying = opts.pipe ? "varying vec3 vPipeNrm; varying vec3 vPipeView;" : "";
 
+  // Hanga snippets (empty strings for Ringers / Fidenza, so their programs are
+  // unchanged). See HANGA_NODE above for the grammar.
+  const hg = opts.hanga;
+  const isRing = hg?.role === "outline";
+  const hangaVertDecl = hg
+    ? /* glsl */ `
+        attribute float aHangaIdx;
+        attribute float aDamageRaw;
+        attribute float aPhase;
+        uniform float uStoryLift;
+        uniform float uHViewW;
+        uniform float uHViewH;
+        uniform float uHPxRatio;
+        varying float vHIdx;
+        varying float vHLift;
+        varying float vHLit;
+        varying float vDamageRaw;
+        varying float vPhase;
+        varying vec2 vHCenter;
+        varying float vHRpx;
+        varying float vHOlPx;`
+    : "";
+  // Story lift: a healthy lit disc prints a touch larger (never brighter).
+  const hangaVertScale = hg
+    ? /* glsl */ `
+          vHLift = clamp((uStoryLift - 1.0) / 0.9, 0.0, 1.0)
+            * (1.0 - clamp(aDamage * 3.0, 0.0, 1.0)) * clamp(aVisible, 0.0, 1.0);
+          vHLit = clamp(e - 1.0, 0.0, 1.0);
+          scl *= ${glf(HANGA_DISC_SCALE)} * (1.0 + ${glf(HANGA_NODE.LIFT_SCALE)} * vHLift);
+          vHIdx = aHangaIdx;
+          vDamageRaw = clamp(aDamageRaw, 0.0, 1.0);
+          vPhase = aPhase;`
+    : "";
+  // Screen-space sizing: the disc's projected radius (device px) and, for the
+  // ring, a hull grown by a constant line width so the key block reads the
+  // same at every zoom. The ring collapses with the disc under uPoseFade.
+  const hangaVertAfter = hg
+    ? /* glsl */ `
+          {
+            vec4 mvC = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+            float wScale = length(instanceMatrix[0].xyz);
+            float pxPerUnit = wScale * projectionMatrix[1][1] * uHViewH * 0.5 / max(-mvC.z, 1e-3);
+            vHRpx = scl * pxPerUnit;
+            float d = clamp(aDamage, 0.0, 1.0);
+            float ol = ${glf(HANGA_NODE.OUTLINE_PX)} * uHPxRatio
+              * (1.0 + ${glf(HANGA_NODE.OUTLINE_LIT_GAIN)} * vHLit + ${glf(HANGA_NODE.OUTLINE_LIFT_GAIN)} * vHLift)
+              * mix(1.0, ${glf(HANGA_NODE.HUSK_OUTLINE)}, smoothstep(0.5, 1.0, d))
+              * (1.0 - uPoseFade);
+            vHOlPx = ol;
+            // The hull reaches one px past the line so its outer edge can feather.
+            ${isRing ? "transformed = normalize(position) * (scl + (ol + 1.0) / max(pxPerUnit, 1e-4));" : ""}
+            // The disc centre in drawing-buffer px: the fragment measures its
+            // screen distance from here, so the disc edge, the ring, and the
+            // bokashi are exact circles at any zoom.
+            vec4 cC = projectionMatrix * mvC;
+            vHCenter = (cC.xy / max(cC.w, 1e-6) * 0.5 + 0.5) * vec2(uHViewW, uHViewH);
+          }`
+    : "";
+  const hangaFragDecl = hg
+    ? /* glsl */ `
+        uniform vec3 uHFill[5];
+        uniform vec3 uHDeep[5];
+        uniform vec3 uHLight[5];
+        uniform vec3 uHSumi;
+        uniform float uHBareA;
+        uniform float uHBareOutlineA;
+        uniform float uTime;
+        varying float vHIdx;
+        varying float vHLift;
+        varying float vHLit;
+        varying float vDamageRaw;
+        varying float vPhase;
+        varying vec2 vHCenter;
+        varying float vHRpx;
+        varying float vHOlPx;`
+    : "";
+  // Shared Hanga opacity terms: the underdrawing amount and the struggle breath
+  // (struggleFlickMul in TS, applied to opacity). A steady husk never breathes.
+  const hangaShared = /* glsl */ `
+        int hIdx = int(vHIdx + 0.5);
+        float under = clamp(max(1.0 - vVisible, vDimE / 0.82), 0.0, 1.0);
+        float d = vDamage;
+        float huskCut = 1.0 - step(${HUSK_STEADY_AT.toFixed(4)}, d);
+        float r = vDamageRaw;
+        float struggle = 4.0 * r * (1.0 - r) * huskCut;
+        float struggleDip = 4.0 * d * (1.0 - d) * huskCut;
+        float breath = sin(uTime * ${glf((2 * Math.PI) / STRUGGLE_PERIOD_SEC)} + vPhase * ${glf(STRUGGLE_PHASE_MUL)});
+        float flickMul = (1.0 - ${glf(STRUGGLE_DEPTH / 2)} * struggleDip)
+                       * (1.0 - ${glf(STRUGGLE_SWING / 2)} * struggle * breath);`;
+  const hangaFragBody = !hg
+    ? ""
+    : isRing
+      ? /* glsl */ `
+        #include <color_fragment>
+        ${hangaShared}
+        // Sumi key-block ring: keep only the band between the disc's projected
+        // radius and the line width past it, so the hull never paints over the
+        // disc whatever the draw order. rho is the screen distance (device px)
+        // from the disc centre; both edges feather over one px.
+        float rho = distance(gl_FragCoord.xy, vHCenter);
+        float band = smoothstep(vHRpx - 0.5, vHRpx + 0.5, rho)
+                   * (1.0 - smoothstep(vHRpx + vHOlPx - 0.5, vHRpx + vHOlPx + 0.5, rho));
+        if (band < 0.002) discard;
+        float lineA = hIdx == 4 ? uHBareOutlineA : 1.0;
+        float a = mix(lineA, ${glf(HANGA_NODE.UNDER_OUTLINE_ALPHA)}, under);
+        a *= 1.0 - 0.3 * d;
+        diffuseColor.rgb = uHSumi;
+        diffuseColor.a *= a * band * flickMul;
+        `
+      : /* glsl */ `
+        #include <color_fragment>
+        ${hangaShared}
+        // Bokashi inside the disc, in screen space (holds through any orbit):
+        // o = 0 at the top of the disc, 1 at the bottom. Deep ink to 0.08,
+        // the pigment at 0.45, the light wash at 1.0 (the preview's stops).
+        float rho = distance(gl_FragCoord.xy, vHCenter);
+        float yRel = (gl_FragCoord.y - vHCenter.y) / max(vHRpx, 1e-3);
+        float o = 0.5 - 0.5 * clamp(yRel, -1.0, 1.0);
+        vec3 base = uHFill[hIdx];
+        vec3 col = o < 0.45
+          ? mix(uHDeep[hIdx], base, clamp((o - 0.08) / 0.37, 0.0, 1.0))
+          : mix(base, uHLight[hIdx], clamp((o - 0.45) / 0.55, 0.0, 1.0));
+        float a = hIdx == 4 ? uHBareA : 1.0;
+        // Unlit: faint sumi underdrawing.
+        col = mix(col, uHSumi, under);
+        a = mix(a, ${glf(HANGA_NODE.UNDER_ALPHA)}, under);
+        // Damage: wash toward the field, shed opacity (a husk is a pale stain).
+        col = mix(col, uField, ${glf(HANGA_NODE.WASH)} * d);
+        a *= 1.0 - ${glf(HANGA_NODE.WASH_ALPHA)} * d;
+        // A clean circular edge, feathered over one px.
+        a *= 1.0 - smoothstep(vHRpx - 0.5, vHRpx + 0.5, rho);
+        diffuseColor.rgb = col;
+        diffuseColor.a *= a * flickMul;
+        `;
+
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uField = opts.uField;
     shader.uniforms.uPoseFade = opts.uPoseFade;
     if (opts.uColor) shader.uniforms.uArtColor = opts.uColor;
+    if (hg) Object.assign(shader.uniforms, hg.uniforms);
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -216,6 +421,7 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         varying float vDimE;
         varying float vDamage;
         ${pipeVarying}
+        ${hangaVertDecl}
         `,
       )
       .replace(
@@ -240,8 +446,10 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
           vVisible = aVisible;
           vDamage = clamp(aDamage, 0.0, 1.0);
           ${colorAssign}
+          ${hangaVertScale}
           transformed *= scl;
           ${twistApply}
+          ${hangaVertAfter}
         }
         `,
       );
@@ -257,11 +465,14 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         varying float vDimE;
         varying float vDamage;
         ${pipeVarying}
+        ${hangaFragDecl}
         `,
       )
       .replace(
         "#include <color_fragment>",
-        /* glsl */ `
+        opts.hanga
+          ? hangaFragBody
+          : /* glsl */ `
         #include <color_fragment>
         // Flat fill — overwrite whatever instanceColor produced with the art
         // color, fading toward the field as damage rises (dissolve into paper).
@@ -380,9 +591,16 @@ export interface NodesHandle {
   /** Grow the proxy pick radius for touch pointers (idempotent). */
   setTouchPicking(on: boolean): void;
   /**
+   * Drawing-buffer size (device px) and device px per CSS px. The Hanga disc
+   * edge, key-block line, and bokashi are measured in screen px, so they need
+   * these. Call on resize; unused by the other skins.
+   */
+  setViewport(widthPx: number, heightPx: number, pixelRatio: number): void;
+  /**
    * Swap the render skin: 0 Galaxy (orbs, exactly the shipped look) |
    * 1 Ringers (bold-outlined pegs on cream) | 2 Fidenza (palette pipes on
-   * teal). Geometry/material swap only — instanced attributes, positions,
+   * teal) | 3 Washi and 4 Dusk (woodblock pigment discs with a sumi
+   * key-block ring). Geometry/material swap only: instanced attributes, positions,
    * picking, and every driver keep working identically across styles.
    */
   setArtStyle(style: number): void;
@@ -462,6 +680,13 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     vivid[i * 3 + 2] = bakeC.b;
     twist[i] = (artHash(nd.id) - 0.5) * 0.6;
   }
+  // Hanga palette slot per standard: its strand index (0..3), or 4 for an
+  // edgeless standard (the bare paper disc).
+  const hangaIdx = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    hangaIdx[i] = nodes[i].deg === 0 ? 4 : Math.max(0, STRAND_ORDER.indexOf(nodes[i].strand));
+  }
+  const hangaIdxAttr = new THREE.InstancedBufferAttribute(hangaIdx, 1);
   const artRingAttr = new THREE.InstancedBufferAttribute(artRing, 3);
   const artFidAttr = new THREE.InstancedBufferAttribute(artFid, 3);
   const twistAttr = new THREE.InstancedBufferAttribute(twist, 1);
@@ -755,6 +980,77 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     uPoseFade: uniforms.uPoseFade,
   });
 
+  // Hanga disc + key-block ring (styles 3 and 4). One geometry serves both the
+  // disc mesh and the shared outline mesh. Neither writes depth: the ring cuts
+  // itself to the band outside the disc, and an unlit underdrawing disc must
+  // never hide a lit disc behind it.
+  const hangaGeometry = new THREE.IcosahedronGeometry(1, 2);
+  attachShared(hangaGeometry);
+  hangaGeometry.setAttribute("aHangaIdx", hangaIdxAttr);
+  const hangaU: HangaNodeUniforms = {
+    uHFill: { value: Array.from({ length: 5 }, () => new THREE.Vector3()) },
+    uHDeep: { value: Array.from({ length: 5 }, () => new THREE.Vector3()) },
+    uHLight: { value: Array.from({ length: 5 }, () => new THREE.Vector3()) },
+    uHSumi: { value: new THREE.Color() },
+    uHBareA: { value: 1 },
+    uHBareOutlineA: { value: 0.75 },
+    uHViewW: { value: 1 },
+    uHViewH: { value: 1 },
+    uHPxRatio: { value: 1 },
+    uStoryLift: uniforms.uStoryLift,
+    uTime: uniforms.uTime,
+  };
+  const hangaField = { value: new THREE.Color() };
+  const hangaMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+  hangaMaterial.depthWrite = false;
+  patchArtNodeMaterial(hangaMaterial, {
+    colorSource: { kind: "uniform" },
+    uColor: hangaU.uHSumi,
+    uField: hangaField,
+    pipe: false,
+    cacheKey: "coherence-nodes-hanga-disc",
+    uPoseFade: uniforms.uPoseFade,
+    hanga: { role: "disc", uniforms: hangaU },
+  });
+  const hangaOutlineMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    side: THREE.BackSide,
+  });
+  hangaOutlineMaterial.depthWrite = false;
+  patchArtNodeMaterial(hangaOutlineMaterial, {
+    colorSource: { kind: "uniform" },
+    uColor: hangaU.uHSumi,
+    uField: hangaField,
+    pipe: false,
+    cacheKey: "coherence-nodes-hanga-ring",
+    uPoseFade: uniforms.uPoseFade,
+    hanga: { role: "outline", uniforms: hangaU },
+  });
+  // Fill the Hanga uniforms for a field, in place (no allocation on a swap).
+  // The bokashi ends mix in sRGB, as the preview does, then convert to LINEAR.
+  const hangaC = new THREE.Color();
+  function applyHangaPalette(style: number): void {
+    const pal = hangaPalette(style);
+    // Mix the sRGB hexes, then let THREE.Color.setHex store the LINEAR value.
+    const put = (v: THREE.Vector3, hex: number, toward: number, k: number): void => {
+      hangaC.setHex(mixSrgbHex(hex, toward, k));
+      v.set(hangaC.r, hangaC.g, hangaC.b);
+    };
+    STRAND_ORDER.forEach((sid, i) => {
+      put(hangaU.uHFill.value[i], pal.pigment[sid], pal.pigment[sid], 0);
+      put(hangaU.uHDeep.value[i], pal.pigment[sid], pal.deep[sid], pal.deepMix);
+      put(hangaU.uHLight.value[i], pal.pigment[sid], pal.light[sid], pal.lightMix);
+    });
+    put(hangaU.uHFill.value[4], pal.paper, pal.paper, 0);
+    put(hangaU.uHDeep.value[4], pal.paper, pal.paper, 0);
+    put(hangaU.uHLight.value[4], pal.paper, pal.paper, 0);
+    hangaU.uHSumi.value.setHex(pal.sumi);
+    hangaU.uHBareA.value = pal.paperAlpha;
+    hangaU.uHBareOutlineA.value = style === 4 ? 0.6 : 0.75;
+    hangaField.value.setHex(pal.bg);
+  }
+
   const fidMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
   fidMaterial.depthWrite = true;
   patchArtNodeMaterial(fidMaterial, {
@@ -775,7 +1071,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
   // (written alongside the visible matrix below). Parented to `mesh` (identity
   // transform) so it enters the scene graph without touching main.ts, and
   // renders in lockstep with the pegs (same renderOrder). Hidden off-Ringers.
-  const outline = new THREE.InstancedMesh(outlineGeometry, outlineMaterial, count);
+  const outline: THREE.InstancedMesh = new THREE.InstancedMesh(outlineGeometry, outlineMaterial, count);
   outline.frustumCulled = false;
   outline.visible = false;
   outline.name = "nodes-outline";
@@ -915,6 +1211,11 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     setEnvLight(amount) {
       uniforms.uEnvLight.value = amount;
     },
+    setViewport(widthPx, heightPx, pixelRatio) {
+      hangaU.uHViewW.value = widthPx;
+      hangaU.uHViewH.value = heightPx;
+      hangaU.uHPxRatio.value = pixelRatio;
+    },
     setTouchPicking(on) {
       if (on === touchMode) return;
       touchMode = on;
@@ -928,6 +1229,15 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
       if (style === 1) {
         mesh.geometry = ringGeometry;
         mesh.material = ringMaterial;
+        outline.geometry = outlineGeometry;
+        outline.material = outlineMaterial;
+        outline.visible = true;
+      } else if (isHanga(style)) {
+        applyHangaPalette(style);
+        mesh.geometry = hangaGeometry;
+        mesh.material = hangaMaterial;
+        outline.geometry = hangaGeometry;
+        outline.material = hangaOutlineMaterial;
         outline.visible = true;
       } else if (style === 2) {
         mesh.geometry = fidGeometry;
@@ -948,6 +1258,9 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
       ringMaterial.dispose();
       outlineMaterial.dispose();
       fidMaterial.dispose();
+      hangaGeometry.dispose();
+      hangaMaterial.dispose();
+      hangaOutlineMaterial.dispose();
       proxyGeometry.dispose();
       proxyMaterial.dispose();
     },

@@ -55,7 +55,7 @@ import { createTour } from "./ui/tour";
 import { createViewToggle } from "./ui/viewtoggle";
 // The art-style switcher (createStyleToggle) is on hold — see docs/DESIGN.md.
 // applyArtStyle stays below so the shader/skin fan-out remains intact and dormant.
-import { FIDENZA, RINGERS, type ArtStyle } from "./scene/artstyle";
+import { FIDENZA, HANGA, RINGERS, isHanga, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
 import { PHONE_QUERY } from "./ui/chromelayout";
@@ -370,7 +370,7 @@ function start(graph: GraphCore): void {
   // fan-out below is left intact and dormant — re-mount createStyleToggle and the
   // boot deep-link to bring the skins back.
   let artStyle: ArtStyle = 0;
-  const ART_BG: readonly number[] = [BG, RINGERS.bg, FIDENZA.bg];
+  const ART_BG: readonly number[] = [BG, RINGERS.bg, FIDENZA.bg, HANGA.washi.bg, HANGA.dusk.bg];
   function applyArtStyle(style: ArtStyle): void {
     artStyle = style;
     nodes.setArtStyle(style);
@@ -382,7 +382,10 @@ function start(graph: GraphCore): void {
     sheet.setArtStyle(style);
     contours.setArtStyle(style);
     etches.setArtStyle(style);
-    bloom.setArtPaper(style !== 0);
+    // Ringers / Fidenza bypass the composer (flat direct render). The Hanga
+    // styles keep it for its MSAA, printing with no bloom and no vignette.
+    bloom.setArtPaper(style === 1 || style === 2);
+    bloom.setArtInk(isHanga(style));
     const sky = style === 0;
     stars.points.visible = sky;
     nebula.group.visible = sky;
@@ -390,6 +393,8 @@ function start(graph: GraphCore): void {
     (scene.background as THREE.Color).setHex(ART_BG[style]);
     document.body.classList.toggle("art-ringers", style === 1);
     document.body.classList.toggle("art-fidenza", style === 2);
+    document.body.classList.toggle("art-washi", style === 3);
+    document.body.classList.toggle("art-dusk", style === 4);
     // The strand legend mirrors the scene: repaint its swatches to this skin's
     // colorway (galaxy palette / Ringers pegs / Fidenza nodes).
     filters.setArtStyle(style);
@@ -788,6 +793,7 @@ function start(graph: GraphCore): void {
       rig.recompose(false);
     }
     edges.setViewport(w * dpr, h * dpr, dpr);
+    nodes.setViewport(w * dpr, h * dpr, dpr); // the Hanga discs are measured in screen px
     // The beacon rings size their minimum on-screen radius from this (a hollow
     // must stay a hollow at a wide framing — scene/beacons.ts MIN_RING_PX).
     beacons.setViewportHeight(h);
@@ -922,10 +928,12 @@ function start(graph: GraphCore): void {
       rig,
       // Dual-pose morph driver, for automation (drive setPose, read pose/target).
       pose: { driver: poseDriver },
-      // Art styles, for automation (0 Galaxy | 1 Ringers | 2 Fidenza).
+      // Art styles, for automation (0 Galaxy | 1 Ringers | 2 Fidenza | 3 Washi |
+      // 4 Dusk). The only way to reach styles 1 to 4: there is no UI entry point.
       art: {
         set(style: number): void {
-          applyArtStyle(style as ArtStyle);
+          if (style !== 0 && style !== 1 && style !== 2 && style !== 3 && style !== 4) return;
+          applyArtStyle(style);
         },
         get(): number {
           return artStyle;

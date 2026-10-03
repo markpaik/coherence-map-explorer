@@ -37,7 +37,7 @@
 import * as THREE from "three";
 import type { GraphCore, StrandId } from "../data";
 import { STRAND_VIVID } from "./palette";
-import { RINGERS, FIDENZA } from "./artstyle";
+import { RINGERS, FIDENZA, isHanga, hangaPalette } from "./artstyle";
 import { stationFocusFade, cityFadeTarget } from "./focusgrammar";
 
 const STRAND_ORDER: StrandId[] = ["number", "algebra", "geometry", "data"];
@@ -486,7 +486,13 @@ export function createStations(
   const c = new THREE.Color();
   function bakeColors(style: number): void {
     const lineHexFor = (s: StrandId): number =>
-      style === 1 ? (RINGERS.peg[s] ?? RINGERS.pegWhite) : style === 2 ? (FIDENZA.node[s] ?? FIDENZA.palette[0]) : LINE_HEX[s];
+      style === 1
+        ? (RINGERS.peg[s] ?? RINGERS.pegWhite)
+        : style === 2
+          ? (FIDENZA.node[s] ?? FIDENZA.palette[0])
+          : isHanga(style)
+            ? hangaPalette(style).pigment[s]
+            : LINE_HEX[s];
     frames.forEach((d, k) => {
       let fill: number;
       let stroke: number;
@@ -496,6 +502,10 @@ export function createStations(
       } else if (style === 2) {
         fill = FIDENZA_FILL;
         stroke = FIDENZA_STROKE;
+      } else if (isHanga(style)) {
+        // Dormant pose under Hanga: paper discs with a key-block border.
+        fill = hangaPalette(style).paper;
+        stroke = hangaPalette(style).sumi;
       } else {
         // Galaxy: disc is a pale field with a strand border; interchange/family
         // are dark, the interchange bordered pale, the family bordered strand.

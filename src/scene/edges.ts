@@ -30,7 +30,7 @@
 import * as THREE from "three";
 import type { GraphEdge, GraphNode } from "../data";
 import { STRAND_COLORS, STRAND_VIVID, STRAND_ORDER, restRadius } from "./palette";
-import { RINGERS, FIDENZA, artHash } from "./artstyle";
+import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE } from "./artstyle";
 
 const SEGMENTS = 24;
 
@@ -102,7 +102,108 @@ export function cometDiscFade(gapA: number, gapB: number): number {
   return smooth01((gapA - COMET_DISC_IN) / w) * smooth01((gapB - COMET_DISC_IN) / w);
 }
 
+// ---------------------------------------------------------------------------
+// Hanga brush strokes (styles 3 Washi and 4 Dusk). Every tunable lives here; the
+// GLSL constants at the top of the Hanga branches are generated from these, so
+// a reviewer tunes the look in one place. Widths are CSS px.
+//
+// A prerequisite edge is one tapered stroke of the source standard's pigment. It
+// starts full (with a slight pigment pool) at the prerequisite's rim, holds its
+// width to TAPER_START, then thins along a long whisked tail toward the
+// dependent standard. From KASURE_START the brush runs dry (kasure): the stroke
+// splits into 2 or 3 bristle streaks with hashed breaks, which open toward the
+// tail. A related pair is a row of soft round sumi dabs.
+export const HANGA_STROKE = {
+  /** Full stroke width at the prerequisite end (CSS px). */
+  HEAD_PX: 2.4,
+  /** Extra width at the pool peak, as a fraction of the head width. */
+  POOL: 0.14,
+  /** The pool swells and settles back to the head width by this stroke fraction. */
+  POOL_END: 0.16,
+  /** The taper begins here (fraction of the stroke from the prerequisite rim). */
+  TAPER_START: 0.35,
+  /** Taper curve exponent: above 1 thins early and leaves a long fine tail. */
+  TAPER_POW: 1.5,
+  /** Width left at the very tip, as a fraction of the head width. */
+  TAIL: 0.06,
+  /** The dry-brush split begins here. */
+  KASURE_START: 0.45,
+  /** Bristle breaks per this many device px of stroke length. */
+  BREAK_PX: 14,
+  /** How much of each bristle lane the dry brush leaves bare at the tail. */
+  KASURE_GAP: 0.3,
+  /** Hand pressure: the width breathes by this fraction along the stroke. */
+  PRESSURE: 0.09,
+  /** Width multiplier for hover, focus, and chain strokes. */
+  EMPH_WIDTH: 1.6,
+  /** Width multiplier for a healthy lit stroke while a story plays. */
+  LIFT_WIDTH: 1.4,
+  /** Width multiplier for the unlit underdrawing. */
+  UNDER_WIDTH: 0.85,
+  /** Opacity at rest, when lit, and as underdrawing. */
+  REST_ALPHA: 0.78,
+  LIT_ALPHA: 0.94,
+  UNDER_ALPHA: 0.1,
+  /** Wet-ink sheen on lit chain strokes: one pass per period, small swing. */
+  SHEEN_PERIOD_SEC: 4.5,
+  SHEEN_SWING: 0.08,
+  SHEEN_WAVES: 1.0,
+} as const;
+
+export const HANGA_DAB = {
+  /** Spacing between dab centres along a related pair (CSS px). */
+  SPACING_PX: 9,
+  /** Dab half-length and half-thickness (CSS px), before the hashed jitter. */
+  RX_PX: 1.3,
+  RY_PX: 0.7,
+  /** Hashed growth added to RX and RY (CSS px). */
+  RX_JITTER_PX: 0.55,
+  RY_JITTER_PX: 0.3,
+  /** Inner radius (as a fraction of the dab) where the soft edge begins. */
+  SOFT: 0.4,
+  /** Strip half-width that holds the dabs (CSS px). */
+  HALF_PX: 1.6,
+  /** Opacity at rest and when lit. */
+  REST_ALPHA: 0.34,
+  LIT_ALPHA: 0.62,
+} as const;
+
+/**
+ * Hanga stroke width at stroke fraction u (0 = prerequisite rim, 1 = dependent
+ * rim), as a fraction of the head width (TS mirror of hangaWidth in the vertex
+ * shader). Exactly 1 at u = 0, a smooth pool just after, flat to TAPER_START,
+ * then a monotone taper to TAIL at u = 1.
+ */
+export function hangaStrokeWidth(u: number): number {
+  const S = HANGA_STROKE;
+  const x = u < 0 ? 0 : u > 1 ? 1 : u;
+  const k = x < S.POOL_END ? Math.sin((Math.PI * x) / S.POOL_END) : 0;
+  const pool = S.POOL * k * k;
+  let body = 1;
+  if (x > S.TAPER_START) {
+    const s = (x - S.TAPER_START) / (1 - S.TAPER_START);
+    body = S.TAIL + (1 - S.TAIL) * Math.pow(1 - s, S.TAPER_POW);
+  }
+  return body * (1 + pool);
+}
+
+/**
+ * Soft dab opacity 0..1 at a fragment `along` / `across` px from the dab centre,
+ * for a dab of half-length rx and half-thickness ry (TS mirror of hangaDab in
+ * the fragment shader). 1 in the core, a smooth fall to 0 at the ellipse edge.
+ */
+export function hangaDabAlpha(along: number, across: number, rx: number, ry: number): number {
+  const d = Math.hypot(along / Math.max(rx, 1e-4), across / Math.max(ry, 1e-4));
+  return 1 - smooth01((d - HANGA_DAB.SOFT) / (1 - HANGA_DAB.SOFT));
+}
+
 const glf = (x: number): string => x.toFixed(4);
+
+// GLSL constants for the Hanga branches, generated from the tables above.
+const HANGA_GLSL_CONSTS = [
+  ...Object.entries(HANGA_STROKE).map(([k, v]) => `const float H_${k} = ${glf(v)};`),
+  ...Object.entries(HANGA_DAB).map(([k, v]) => `const float HD_${k} = ${glf(v)};`),
+].join("\n      ");
 
 // Edge emphasis is the full 6-state scale (fractional values blend adjacent
 // states, which lets the state machine ease hover in/out on the CPU):
@@ -145,10 +246,14 @@ const VERT = /* glsl */ `
 
   uniform vec2 uViewport;   // drawing-buffer size in device px
   uniform float uPxRatio;   // device px per CSS px (capped at 2)
-  uniform float uArtStyle;  // 0 Galaxy | 1 Ringers | 2 Fidenza
+  uniform float uArtStyle;  // 0 Galaxy | 1 Ringers | 2 Fidenza | 3 Washi | 4 Dusk
   uniform float uPose;      // eased pose value 0..3 (driver-fed); 3 = Transit
   uniform float uEnvLight;  // 0..1 light-environment amount (Ascent dawn OR Transit daylight)
   uniform vec3 uVivid[4];   // VIVID enamel palette, index-aligned number/algebra/geometry/data
+  // Hanga strand pigments (LINEAR), index-aligned number/algebra/geometry/data,
+  // for the active field (Washi or Dusk). Read only by the Hanga branch.
+  uniform vec3 uHanga[4];
+  uniform float uStory;     // story lift amount (the Hanga branch widens lit strokes)
 
   out float vT;
   out vec3 vColor;
@@ -183,6 +288,28 @@ const VERT = /* glsl */ `
   // the source (x) and target (y) centres, in projected orb radii. Interpolated
   // along the ribbon. The paper skins write a large value and never read it.
   out vec2 vOrbGap;
+  // Hanga stroke data (styles 3 and 4 only): x = stroke fraction u (0 at the
+  // prerequisite rim, 1 at the dependent rim), y = per-edge seed 0..1, z = the
+  // trimmed stroke's screen length in device px, w = the true half-width in
+  // device px (the strip itself is a little wider, to hold the feather).
+  out vec4 vHanga;
+
+  // Hanga tuning constants (generated from HANGA_STROKE / HANGA_DAB in TS).
+  ${HANGA_GLSL_CONSTS}
+
+  // Hanga stroke width profile (hangaStrokeWidth in TS): 1 at u = 0, a soft pool
+  // just after, flat to the taper start, then a long monotone taper to the tail.
+  float hangaWidth(float u) {
+    float x = clamp(u, 0.0, 1.0);
+    float k = x < H_POOL_END ? sin(3.14159265 * x / H_POOL_END) : 0.0;
+    float pool = H_POOL * k * k;
+    float body = 1.0;
+    if (x > H_TAPER_START) {
+      float s = (x - H_TAPER_START) / (1.0 - H_TAPER_START);
+      body = H_TAIL + (1.0 - H_TAIL) * pow(1.0 - s, H_TAPER_POW);
+    }
+    return body * (1.0 + pool);
+  }
 
   vec3 bezier(float s) {
     float u = 1.0 - s;
@@ -251,6 +378,7 @@ const VERT = /* glsl */ `
     vTrunk = clamp((aArtScalars.z - 1.6) * 2.0, 0.0, 4.0) * 0.25;
     vEndZone = vec4(0.0, 0.01, 0.0, 0.01);
     vOrbGap = vec2(1e3);
+    vHanga = vec4(0.0);
     if (uArtStyle < 0.5) {
       // ===================== GALAXY (shipped, byte-identical) ===============
       // At m3 == 0 curveAt returns the exact shipped bezier point + analytic
@@ -405,7 +533,7 @@ const VERT = /* glsl */ `
       vEmphasis = clamp(aEmphasis, 0.0, 5.0);
       vVisible = mix(0.06, 1.0, aVisible);
       vDamage = clamp(aDamage, 0.0, 1.0);
-    } else {
+    } else if (uArtStyle < 2.5) {
       // ===================== FIDENZA: round pipe (screen-facing) ============
       // Round 7 (Mark): the anamorphic WORLD-PLANE ribbons were replaced by
       // PIPES. Expand in SCREEN space (the exact galaxy math) so every
@@ -443,6 +571,95 @@ const VERT = /* glsl */ `
       vEmphasis = clamp(aEmphasis, 0.0, 5.0);
       vVisible = mix(0.06, 1.0, aVisible);
       vDamage = clamp(aDamage, 0.0, 1.0);
+    } else {
+      // ===================== HANGA (3 Washi | 4 Dusk): brush strokes ========
+      // The Galaxy curve (curveAt, so the Transit knuckles still apply), drawn
+      // as a screen-space strip whose width follows the stroke profile. The
+      // tuning constants are the H_ / HD_ block above.
+      vec3 p; vec3 tangent;
+      curveAt(t, m3, p, tangent);
+      float tlen = length(tangent);
+      vec3 tdir = tlen > 1e-6 ? tangent / tlen : vec3(1.0, 0.0, 0.0);
+      vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      vec4 clipT = projectionMatrix * modelViewMatrix * vec4(p + tdir, 1.0);
+      vec2 dir = (clipT.xy / clipT.w - clip.xy / clip.w) * uViewport;
+      float len = max(length(dir), 1e-6);
+      vec2 normalPx = vec2(-dir.y, dir.x) / len;
+
+      // Trim to the two rims: the stroke parameter u runs 0 at the
+      // prerequisite's rim to 1 at the dependent's rim (k = rest radius over
+      // the chord, the comet end-zone basis). Inside the discs the strip is
+      // hidden by the opaque disc anyway.
+      vec2 endK = aArtScalars.zw / max(length(aEnd - aStart), 1e-3);
+      float tA = min(endK.x * ${glf(HANGA_DISC_SCALE)}, 0.45);
+      float tB = 1.0 - min(endK.y * ${glf(HANGA_DISC_SCALE)}, 0.45);
+      float u = (t - tA) / max(tB - tA, 1e-3);
+
+      // Screen length of the stroke (device px): the two half-chords through
+      // the curve midpoint, trimmed to the rims. Constant per instance.
+      vec3 pm; vec3 tm;
+      curveAt(0.5, m3, pm, tm);
+      vec4 cA = projectionMatrix * modelViewMatrix * vec4(aStart, 1.0);
+      vec4 cM = projectionMatrix * modelViewMatrix * vec4(pm, 1.0);
+      vec4 cB = projectionMatrix * modelViewMatrix * vec4(aEnd, 1.0);
+      vec2 hv = 0.5 * uViewport;
+      float lenPx = 0.0;
+      if (cA.w > 1e-3 && cM.w > 1e-3 && cB.w > 1e-3) {
+        lenPx = length((cM.xy / cM.w - cA.xy / cA.w) * hv) + length((cB.xy / cB.w - cM.xy / cM.w) * hv);
+      }
+      lenPx *= max(tB - tA, 0.0);
+
+      // Per-edge seed from baked per-instance data (the Fidenza width hash, the
+      // Ringers side, and both rest radii). aColorA.w is the opener clock and is
+      // 0 outside the opener, so it cannot seed.
+      float seed = fract(sin(dot(aArtScalars, vec4(12.9898, 78.233, 37.719, 4.581))) * 43758.5453);
+
+      // Emphasis and story lift widen the stroke, never brighten it. The unlit
+      // underdrawing (a focus's dimmed edges, a story's unlit set) thins a little.
+      float e = clamp(aEmphasis, 0.0, 5.0);
+      float lit = clamp(e - 1.0, 0.0, 1.0);
+      float dimd = clamp(1.0 - e, 0.0, 1.0);
+      float vis = clamp(aVisible, 0.0, 1.0);
+      float story = uStory * (1.0 - clamp(aDamage * 3.0, 0.0, 1.0)) * vis;
+      float wMul = max(mix(1.0, H_EMPH_WIDTH, lit), mix(1.0, H_LIFT_WIDTH, story));
+      wMul *= mix(1.0, H_UNDER_WIDTH, max(dimd, 1.0 - vis));
+
+      float widthCss;
+      if (aKind < 0.5) {
+        // Hand pressure: the width breathes a little along the stroke, at a
+        // hashed rate and phase, so no two edges are ruled parallels.
+        float pf = 1.3 + fract(seed * 7.13) * 1.4;
+        float pp = fract(seed * 3.71) * 6.2831853;
+        float press = 1.0 + H_PRESSURE * sin(6.2831853 * pf * clamp(u, 0.0, 1.0) + pp);
+        widthCss = H_HEAD_PX * hangaWidth(u) * press * wMul;
+      } else {
+        widthCss = 2.0 * HD_HALF_PX * wMul;
+      }
+      float halfTrue = widthCss * uPxRatio * 0.5;
+      // The strip is at least one device px wide plus a feather margin; the
+      // fragment cuts the true silhouette inside it (sub-pixel tails become
+      // partial coverage instead of aliasing).
+      float halfGeo = max(halfTrue, 0.5 * uPxRatio) + 0.75;
+      vec2 offsetNdc = normalPx * (halfGeo * side) / (uViewport * 0.5);
+      clip.xy += offsetNdc * clip.w;
+      gl_Position = clip;
+
+      vT = t;
+      vSide = side;
+      vHalfPx = halfGeo;
+      vHanga = vec4(u, seed, lenPx, halfTrue);
+      vColor = mix(aColorA.rgb, aColorB, t);
+      // The stroke carries the prerequisite's pigment (the preview grammar).
+      vArtColor = uHanga[int(aStrand.x + 0.5)];
+      vArtColor2 = vArtColor;
+      vKind = aKind;
+      vEmphasis = e;
+      vVisible = mix(0.06, 1.0, aVisible);
+      vDamage = clamp(aDamage, 0.0, 1.0);
+      // Comet end-fade zones (the Galaxy basis), reused by the wet-ink sheen.
+      vec2 zIn = min(endK * ${glf(COMET_ORB_IN)}, vec2(0.49));
+      vec2 zOut = max(min(endK * ${glf(COMET_ORB_OUT)}, vec2(0.5)), zIn + 0.01);
+      vEndZone = vec4(zIn.x, zOut.x, zIn.y, zOut.y);
     }
   }
 `;
@@ -453,8 +670,10 @@ const FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uFlow; // 1 = animate prereq comets, 0 = frozen (reduced motion)
   uniform float uStory; // 1 while a story plays: healthy edges lift toward the chain look
-  uniform float uArtStyle; // 0 Galaxy | 1 Ringers | 2 Fidenza
+  uniform float uArtStyle; // 0 Galaxy | 1 Ringers | 2 Fidenza | 3 Washi | 4 Dusk
   uniform float uPose; // eased pose value 0..3; 3 = Transit (opaque metro lines)
+  uniform vec3 uHangaSumi; // Hanga key-block ink (LINEAR): related dabs + the unlit underdrawing
+  uniform float uPxRatio; // device px per CSS px (the Hanga dab sizes)
   uniform vec3 uField; // active art-style field color (damage fades toward it)
   uniform float uEnvLight; // 0..1 light-environment amount (Ascent dawn OR Transit daylight)
   // Opener per-edge crystallization: uOpenerClock is ms since the opener started
@@ -478,8 +697,27 @@ const FRAG = /* glsl */ `
   in float vTrunk; // Transit trunk metric 0..1 (reach) — unfocused-overview ghost
   in vec4 vEndZone; // comet orb end-fade zones [inner, outer] per end, Galaxy only
   in vec2 vOrbGap; // comet screen-disc gaps in projected orb radii, Galaxy only
+  in vec4 vHanga; // Hanga stroke data (u, seed, length px, true half-width px)
 
   out vec4 fragColor;
+
+  // Hanga tuning constants (generated from HANGA_STROKE / HANGA_DAB in TS).
+  ${HANGA_GLSL_CONSTS}
+
+  // Hanga hash + value noise for the dry-brush breaks (texture only).
+  float hHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float hNoise(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p); vec2 w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hHash(i), hHash(i + vec2(1.0, 0.0)), w.x),
+               mix(hHash(i + vec2(0.0, 1.0)), hHash(i + vec2(1.0, 1.0)), w.x), w.y);
+  }
+
+  // Soft round dab (hangaDabAlpha in TS): 1 in the core, a smooth fall to 0 at
+  // the ellipse edge. No hard step anywhere, so a dab never aliases into a dash.
+  float hangaDab(float along, float across, float rx, float ry) {
+    float d = length(vec2(along / max(rx, 1e-4), across / max(ry, 1e-4)));
+    return 1.0 - smoothstep(HD_SOFT, 1.0, d);
+  }
 
   // Flow-comet pulse (cometPulse in TS): the old cubic tail compressed into the
   // first 1 − HEAD of the period, times a smoothstep fall to 0 at the wrap. Peak
@@ -676,7 +914,7 @@ const FRAG = /* glsl */ `
       // Opener per-edge crystallization: each ribbon ghosts in after both its
       // nodes land. openerReveal() is exactly 1.0 off-opener, so byte-identical.
       fragColor = vec4(col, alpha * vVisible * openerReveal());
-    } else {
+    } else if (uArtStyle < 2.5) {
       // ===================== ART STYLES (paper: opacity, never HDR) =========
       // Dimness is OPACITY toward the field: no comets, no shimmer, no bloom.
       vec3 col = vArtColor;
@@ -714,6 +952,106 @@ const FRAG = /* glsl */ `
       alpha *= (1.0 - 0.5 * vDamage);
 
       fragColor = vec4(col, alpha * openerReveal()); // opener crystallization (1 = shipped)
+    } else {
+      // ===================== HANGA (3 Washi | 4 Dusk) ========================
+      // Ink on paper: dimness is opacity, emphasis is width (vertex), and the
+      // only motion is a slow wet-ink sheen down lit chain strokes. The tuning
+      // constants are the H_ / HD_ block above.
+      float u = vHanga.x;
+      float seed = vHanga.y;
+      float lenPx = vHanga.z;
+      float halfTrue = vHanga.w;
+      float e = vEmphasis;
+      float lit = clamp(e - 1.0, 0.0, 1.0);
+      float dimd = clamp(1.0 - e, 0.0, 1.0);
+      float litness = clamp((vVisible - 0.06) / 0.94, 0.0, 1.0);
+      // Underdrawing amount: a focus's dimmed edges and a story's unlit set.
+      float under = max(dimd, 1.0 - litness);
+      // Story lift (healthy lit strokes): full pigment, like a chain stroke.
+      float story = uStory * (1.0 - clamp(vDamage * 3.0, 0.0, 1.0)) * litness;
+      float distPx = abs(vSide) * vHalfPx; // device px from the centreline
+      int i0 = int(floor(e));
+      int i1 = int(min(floor(e) + 1.0, 5.0));
+      float f = fract(e);
+
+      vec3 col;
+      float alpha;
+      if (vKind < 0.5) {
+        // Silhouette: a one-px feather on the true half-width. A tail thinner
+        // than a pixel keeps partial coverage instead of aliasing.
+        float cover = clamp(halfTrue - distPx + 0.5, 0.0, 1.0);
+        // Round head inside the prerequisite's disc (seen only when the disc
+        // is translucent, for example in the underdrawing).
+        if (u < 0.0) {
+          float back = -u * lenPx;
+          cover = clamp(halfTrue - length(vec2(back, distPx)) + 0.5, 0.0, 1.0);
+        }
+        // The tail lifts off just short of the dependent's rim.
+        cover *= 1.0 - smoothstep(0.97, 1.0, u);
+
+        // Kasure: from H_KASURE_START the brush runs dry. The stroke splits
+        // into 2 or 3 bristle lanes whose bare gaps widen toward the tail, and
+        // each lane breaks at hashed points along its length.
+        float dry = smoothstep(H_KASURE_START, 1.0, u);
+        float nb = seed < 0.5 ? 2.0 : 3.0;
+        float xs = clamp(vSide * vHalfPx / max(halfTrue, 1e-3) * 0.5 + 0.5, 0.0, 1.0);
+        float lc = xs * nb;
+        float lane = floor(min(lc, nb - 0.001));
+        float lf = lc - lane;
+        float gap = 0.06 + H_KASURE_GAP * dry;
+        float prof = smoothstep(0.0, gap, lf) * (1.0 - smoothstep(1.0 - gap, 1.0, lf));
+        // A lane narrower than ~2 px cannot resolve: blend the split toward its
+        // mean so a thin stroke never shimmers.
+        float resolve = smoothstep(0.9, 2.2, 2.0 * halfTrue / nb);
+        float split = mix(1.0 - gap, prof, resolve);
+        float breaks = max(lenPx / H_BREAK_PX, 2.0);
+        float n = hNoise(vec2(u * breaks + lane * 7.31 + seed * 3.0, lane * 3.7 + seed * 19.0));
+        float keep = smoothstep(dry * 0.6 - 0.06, dry * 0.6 + 0.06, n);
+        float ink = mix(1.0, split * keep, dry) * mix(1.0, 0.82, dry);
+
+        col = vArtColor;
+        alpha = mix(H_REST_ALPHA, H_LIT_ALPHA, max(lit, story));
+
+        // Wet-ink sheen: a slow band of denser pigment travels down a lit chain
+        // stroke from prerequisite to dependent (cometPulse, end-faded at both
+        // orbs). Opacity only, a small swing, frozen by uFlow under reduced motion.
+        float flowTab[6] = float[](0.0, 0.0, 1.0, 1.0, 1.0, 0.0);
+        float flow = max(mix(flowTab[i0], flowTab[i1], f), story) * (1.0 - under);
+        float fr = fract(u * H_SHEEN_WAVES - uTime / H_SHEEN_PERIOD_SEC * uFlow);
+        float sheen = cometPulse(fr) * cometEndFade(vT);
+        alpha *= 1.0 - H_SHEEN_SWING * flow * (1.0 - sheen);
+
+        // Underdrawing: faint sumi, the stroke shape kept.
+        col = mix(col, uHangaSumi, under);
+        alpha = mix(alpha, H_UNDER_ALPHA, under);
+        alpha *= cover * ink;
+      } else {
+        // Related pair: a row of soft round sumi dabs, anchored at the source
+        // rim, each with a hashed size, offset, and ink load.
+        float wMul = halfTrue / max(HD_HALF_PX * uPxRatio, 1e-3);
+        float cell = HD_SPACING_PX * uPxRatio;
+        float sPx = u * lenPx;
+        float k = floor(sPx / cell);
+        float h1 = hHash(vec2(k, seed * 31.0));
+        float h2 = hHash(vec2(k + 17.0, seed * 13.0));
+        float h3 = hHash(vec2(k + 41.0, seed * 7.0));
+        float h4 = hHash(vec2(k + 73.0, seed * 5.0));
+        float along = (fract(sPx / cell) - 0.5 - (h1 - 0.5) * 0.45) * cell;
+        float rx = (HD_RX_PX + h2 * HD_RX_JITTER_PX) * uPxRatio * wMul;
+        float ry = (HD_RY_PX + h3 * HD_RY_JITTER_PX) * uPxRatio * wMul;
+        float dab = hangaDab(along, distPx, rx, ry);
+        dab *= smoothstep(0.0, 0.02, u) * (1.0 - smoothstep(0.98, 1.0, u));
+        col = uHangaSumi;
+        alpha = mix(HD_REST_ALPHA, HD_LIT_ALPHA, max(lit, story)) * (0.7 + 0.3 * h4);
+        alpha = mix(alpha, H_UNDER_ALPHA * 0.8, under);
+        alpha *= dab;
+      }
+
+      // Damage: the pigment washes toward the field and sheds opacity.
+      col = mix(col, uField, clamp(vDamage * 0.85, 0.0, 1.0));
+      alpha *= 1.0 - 0.6 * vDamage;
+
+      fragColor = vec4(col, alpha * openerReveal());
     }
   }
 `;
@@ -781,7 +1119,8 @@ export interface EdgesHandle {
   /**
    * Swap the render skin: 0 Galaxy (additive light ribbons, exactly the
    * shipped look) | 1 Ringers (taut pure-color strings, normal blending) |
-   * 2 Fidenza (thin screen-facing round pipes with striped caps). Emphasis /
+   * 2 Fidenza (thin screen-facing round pipes with striped caps) | 3 Washi and
+   * 4 Dusk (tapered woodblock brush strokes and sumi dabs). Emphasis /
    * visibility / damage attributes keep their meaning; art styles express
    * dimness as opacity.
    */
@@ -851,6 +1190,10 @@ export function createEdges(
     const cc = new THREE.Color().setHex(STRAND_VIVID[s]);
     return new THREE.Vector3(cc.r, cc.g, cc.b);
   });
+
+  // Hanga pigment palette (LINEAR), index-aligned to STRAND_ORDER, refilled in
+  // place by setArtStyle (no allocation on a swap).
+  const hangaVecs = STRAND_ORDER.map(() => new THREE.Vector3());
 
   // Art-style per-instance data (baked once; static across poses — a node's
   // radius and strand never change). Colors baked via THREE.Color.r/g/b, i.e.
@@ -952,6 +1295,10 @@ export function createEdges(
     uEnvLight: { value: 0 },
     // VIVID enamel palette (LINEAR), index-aligned number/algebra/geometry/data.
     uVivid: { value: vividVecs },
+    // Hanga pigments (LINEAR) and key-block ink for the active field; written
+    // by setArtStyle for styles 3 and 4, unread elsewhere.
+    uHanga: { value: hangaVecs },
+    uHangaSumi: { value: new THREE.Color(0x000000) },
     // Opener per-edge crystallization. uOpenerClock = ms since the opener started
     // (−1 = inactive ⇒ every ribbon fully present, byte-identical); uEdgeFadeMs =
     // each ribbon's ghost-in length. Appear-times ride in aColorA.w.
@@ -978,6 +1325,7 @@ export function createEdges(
     side: THREE.DoubleSide,
   });
 
+  const scratchColor = new THREE.Color();
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.name = "edges";
@@ -1058,7 +1406,19 @@ export function createEdges(
       // changes need no material.needsUpdate.
       uniforms.uArtStyle.value = style;
       material.blending = style === 0 ? THREE.AdditiveBlending : THREE.NormalBlending;
-      uniforms.uField.value.setHex(style === 1 ? RINGERS.bg : FIDENZA.bg);
+      if (isHanga(style)) {
+        // Washi or Dusk: the field color the damage wash lerps toward, the four
+        // strand pigments, and the key-block ink, all LINEAR.
+        const pal = hangaPalette(style);
+        uniforms.uField.value.setHex(pal.bg);
+        uniforms.uHangaSumi.value.setHex(pal.sumi);
+        STRAND_ORDER.forEach((sid, i) => {
+          const cc = scratchColor.setHex(pal.pigment[sid]);
+          hangaVecs[i].set(cc.r, cc.g, cc.b);
+        });
+      } else {
+        uniforms.uField.value.setHex(style === 1 ? RINGERS.bg : FIDENZA.bg);
+      }
     },
     dispose() {
       geometry.dispose();
