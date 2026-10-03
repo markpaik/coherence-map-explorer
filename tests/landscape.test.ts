@@ -225,13 +225,12 @@ describe("ridge legibility (Washi)", () => {
     pairs.push([`ring ${i + 1} body`, hexToLinear(c)]);
     pairs.push([`ring ${i + 1} crest band`, crestLinear(c, W.crest, W.crestOp[i])]);
   });
-  pairs.push(["peak body", hexToLinear(W.peak)]);
-  pairs.push(["peak summit", hexToLinear(W.peakTop)]);
 
   for (const [name, col] of pairs) {
-    it(`gold and teal keep 2.8:1 or more on the ${name}`, () => {
-      expect(contrast(gold, col)).toBeGreaterThanOrEqual(2.8);
-      expect(contrast(teal, col)).toBeGreaterThanOrEqual(2.8);
+    // The designer chose the preview's stronger Washi ridges: the gate is 2.5:1.
+    it(`gold and teal keep 2.5:1 or more on the ${name}`, () => {
+      expect(contrast(gold, col)).toBeGreaterThanOrEqual(2.5);
+      expect(contrast(teal, col)).toBeGreaterThanOrEqual(2.5);
     });
   }
 

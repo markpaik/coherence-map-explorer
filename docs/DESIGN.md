@@ -593,7 +593,8 @@ peak 1.5x larger.
   beside the moon and the peak's flank.
 
 Legibility is a test (`tests/landscape.test.ts`): Washi gold and teal keep
-2.8:1 or more on every ring body, crest band, and the peak, so the Washi ridges
-sit close to the paper in value. Motion keeps the project rules: every period is
+2.5:1 or more on every ring body and crest band. The Washi ridges and peak use
+the preview sheet's colors (the designer chose the stronger ridges), with the
+crest ink capped on the two near rings to hold that gate. Motion keeps the project rules: every period is
 several seconds or longer, a story or a focus fades the birds out over 2 s,
 and reduced motion freezes the water, mist, and waterfall and hides the birds.

@@ -20,8 +20,9 @@
 //              near the far shore
 //
 // Legibility: the map stays the subject. Every color the strokes can cross
-// (ring body, crest band, peak body, peak summit) keeps a contrast ratio of 2.8
-// or more against the Washi gold and teal pigments (tests/landscape.test.ts).
+// (ring body, crest band) keeps a contrast ratio of 2.5 or more against the
+// Washi gold and teal pigments (tests/landscape.test.ts). The Washi peak uses the
+// preview sheet's colors as chosen, without a gate.
 //
 // Motion: every period is several seconds or longer and nothing pulses in
 // brightness. `quiet` (a story or a focus) fades the birds out over about 2 s.
@@ -186,8 +187,12 @@ export const CRANE = {
   hSpan: 70,
   halfArc: 54 * DEG,
   centerSpan: 26 * DEG,
-  /** Quad half-extent in world units (the silhouette spans about 0.9 of it). */
-  size: 26,
+  /** Silhouette scale: about 16 px nose to toe and 14 to 18 px across the wings
+   *  at the home view (the crossing is about 4300 units from the camera). */
+  size: 46,
+  /** Wing lengths in silhouette units: the arm to the wrist, then the hand. */
+  arm: 0.5,
+  hand: 0.78,
   maxCount: 5,
 } as const;
 export const craneGap = (k: number): number => CRANE.gapMin + CRANE.gapSpan * lhash(911, k);
@@ -340,8 +345,9 @@ export function murmurationLocal(p0: readonly [number, number, number], t: numbe
 }
 
 // ---------------------------------------------------------------------------
-// Palettes (sRGB hex). Washi ridge colors are the preview hues pulled toward
-// the paper until every Washi gold and teal pair passes 2.8:1.
+// Palettes (sRGB hex). Washi uses the preview sheet's ridge, crest, and peak
+// colors (the designer chose the stronger ridges): Washi gold and teal keep
+// 2.5:1 or more on every ring body and crest band (tests/landscape.test.ts).
 
 export interface LandPalette {
   rings: [number, number, number, number];
@@ -374,12 +380,14 @@ export interface LandPalette {
 export const LAND: { washi: LandPalette; dusk: LandPalette } = {
   washi: {
     // near (grey-green) to far (pale Prussian blue)
-    rings: [0xdbe3d2, 0xdde4d9, 0xdfe5e1, 0xe1e7e8],
+    rings: [0xcbd3c6, 0xcfd8d0, 0xd2dbdb, 0xd6dfe4],
     crest: 0x6d889f, // ridge-top bokashi ink (Prussian grey)
-    crestOp: [0.07, 0.07, 0.08, 0.09],
-    peak: 0xdee3e5,
-    peakTop: 0xd6dde3,
-    cap: 0xf6f4ef,
+    // Preview opacities 0.20 / 0.18 / 0.16 / 0.14, capped on the two near rings
+    // so the deepest crest ink keeps 2.5:1 against Washi gold.
+    crestOp: [0.055, 0.13, 0.16, 0.14],
+    peak: 0xc9d5df,
+    peakTop: 0x9fb4c8,
+    cap: 0xf5f3ee,
     capOp: 0.96,
     peakLine: 0x2b4a70,
     peakLineOp: 0.3,
@@ -763,11 +771,26 @@ const CRANE_VERT = /* glsl */ `
   uniform float uSize;
   varying vec2 vUv;
   varying float vA;
-  varying float vWing;
+  // Wing joints in silhouette space (x forward, y up): wrist.xy, tip.xy.
+  varying vec4 vNear;
+  varying vec4 vFar;
   vec3 pathAt(float p, float rise) {
     float az = mix(uAz0, uAz1, p);
     float h = mix(uH0, uH1, p) + rise;
     return vec3(uR * sin(az), h, -uR * cos(az));
+  }
+  // A wing in silhouette space, drawn the way a print draws it rather than as
+  // a projection: Y is the wing's rise (+1 raised, -1 lowered). Each wing
+  // shortens as it swings through level (it points at the viewer there), and
+  // the near and far wings keep apart (near lower and swept back, far higher
+  // and squarer), so both read at every phase of the beat.
+  vec4 wing(float beat, float lag, float bias, float sweep) {
+    float y = beat + bias;
+    float len = 0.62 + 0.38 * min(1.0, abs(y));
+    vec2 arm = ${f(CRANE.arm)} * len * normalize(vec2(sweep, y));
+    // The long primaries trail the arm, swept back, lagging the beat.
+    vec2 hand = arm + ${f(CRANE.hand)} * len * normalize(vec2(sweep - 0.5, 0.95 * y + lag));
+    return vec4(arm, hand);
   }
   void main() {
     float p = uProg - aSlot.x;
@@ -785,47 +808,54 @@ const CRANE_VERT = /* glsl */ `
     vUv = position.xy;
     float ends = smoothstep(0.0, 0.08, p) * (1.0 - smoothstep(0.92, 1.0, p));
     vA = uAlpha * ends * step(aSlot.w + 0.5, uCount);
-    vWing = sin(6.28318530718 * uTime / ${f(CRANE.wingPeriod)} + aSlot.z * 6.28318530718);
+    // A slow beat (period ${CRANE.wingPeriod} s) between a raised and a lowered pose.
+    float ph = 6.28318530718 * uTime / ${f(CRANE.wingPeriod)} + aSlot.z * 6.28318530718;
+    float beat = sin(ph);
+    float lag = -0.35 * cos(ph);
+    vNear = wing(beat, lag, -0.35, -0.25);
+    vFar = wing(0.85 * beat, lag, 0.45, 0.15);
   }
 `;
 const CRANE_FRAG = /* glsl */ `
   uniform vec3 uInk;
   varying vec2 vUv;
   varying float vA;
-  varying float vWing;
-  // Tapered stroke from a (radius ra) to b (radius rb), coverage in [0, 1].
-  // Strokes thinner than half a pixel keep their ink but spread it.
+  varying vec4 vNear;
+  varying vec4 vFar;
+  // Signed-distance tapered stroke from a (radius ra) to b (radius rb), as
+  // anti-aliased coverage. A stroke thinner than a pixel draws one pixel wide
+  // with its ink thinned, so the line stays continuous and never swells.
   float stroke(vec2 p, vec2 a, vec2 b, float ra, float rb, float px) {
     vec2 pa = p - a;
     vec2 ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
     float d = length(pa - ba * h);
     float r = mix(ra, rb, h);
-    float re = max(r, 0.55 * px);
-    return clamp((re - d) / px + 0.5, 0.0, 1.0) * (r / re);
+    float re = max(r, 0.5 * px);
+    return clamp((re - d) / px + 0.5, 0.0, 1.0) * sqrt(r / re);
   }
   void main() {
     if (vA <= 0.001) discard;
     vec2 p = vUv;
-    float px = max(max(fwidth(p.x), fwidth(p.y)), 1e-4);
+    float px = max(fwidth(p.x) + fwidth(p.y), 1e-4) * 0.7071;
+    // Silhouette units: x forward, y up, the quad spans -1..1.
+    vec2 shoulder = vec2(0.12, 0.02);
     float ink = 0.0;
-    // Beak and long neck, body, trailing legs: one line, nose to toe.
-    ink = max(ink, stroke(p, vec2(0.96, 0.07), vec2(0.26, 0.02), 0.016, 0.034, px));
-    ink = max(ink, stroke(p, vec2(0.26, 0.02), vec2(-0.26, -0.01), 0.075, 0.06, px));
-    ink = max(ink, stroke(p, vec2(-0.26, -0.01), vec2(-0.94, -0.07), 0.024, 0.012, px));
-    // Wings, seen a little from below: the near wing beats through a wide arc
-    // (high on the upstroke, low on the downstroke), the far wing follows it
-    // through a narrower one. Root at the shoulder, an elbow, a swept tip.
-    vec2 root = vec2(0.04, 0.02);
-    float wn = 0.18 + 0.72 * vWing;
-    vec2 elbow = root + vec2(-0.14, 0.46 * wn);
-    vec2 tip = elbow + vec2(-0.3, 0.4 * wn + 0.05);
-    ink = max(ink, stroke(p, root, elbow, 0.09, 0.06, px));
-    ink = max(ink, stroke(p, elbow, tip, 0.06, 0.014, px));
-    float wf = 0.1 + 0.5 * vWing;
-    vec2 elbowF = root + vec2(-0.04, 0.4 * wf);
-    vec2 tipF = elbowF + vec2(-0.24, 0.34 * wf + 0.04);
-    ink = max(ink, 0.75 * max(stroke(p, root, elbowF, 0.07, 0.045, px), stroke(p, elbowF, tipF, 0.045, 0.012, px)));
+    // Long neck forward, small head, a fine beak.
+    ink = max(ink, stroke(p, vec2(0.26, 0.03), vec2(0.72, 0.1), 0.032, 0.02, px));
+    ink = max(ink, stroke(p, vec2(0.72, 0.1), vec2(0.76, 0.105), 0.032, 0.032, px));
+    ink = max(ink, stroke(p, vec2(0.76, 0.105), vec2(0.9, 0.085), 0.015, 0.006, px));
+    // Body: a slim tapered spindle.
+    ink = max(ink, stroke(p, vec2(0.28, 0.03), vec2(-0.22, -0.01), 0.065, 0.04, px));
+    // Legs trailing straight behind, a little apart.
+    ink = max(ink, stroke(p, vec2(-0.2, -0.03), vec2(-0.78, -0.07), 0.016, 0.009, px));
+    ink = max(ink, stroke(p, vec2(-0.2, -0.03), vec2(-0.76, -0.11), 0.014, 0.008, px));
+    // Two long tapered wings: arm to the wrist, then the swept primaries.
+    float nearW = max(stroke(p, shoulder, shoulder + vNear.xy, 0.085, 0.05, px),
+                      stroke(p, shoulder + vNear.xy, shoulder + vNear.zw, 0.05, 0.008, px));
+    float farW = max(stroke(p, shoulder, shoulder + vFar.xy, 0.06, 0.04, px),
+                     stroke(p, shoulder + vFar.xy, shoulder + vFar.zw, 0.04, 0.006, px));
+    ink = max(ink, max(nearW, 0.8 * farW));
     float a = ink * vA;
     if (a < 0.003) discard;
     gl_FragColor = vec4(uInk, a);
