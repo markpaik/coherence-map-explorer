@@ -22,6 +22,14 @@ export interface BloomRig {
    */
   setArtPaper(on: boolean): void;
   /**
+   * Ink mode (the Hanga styles 3 and 4): KEEP the composer, so its 4x MSAA
+   * still antialiases the brush strokes and disc silhouettes, but print with
+   * bloom intensity 0 and vignette darkness 0 (ink on paper never glows, and a
+   * vignette would grime the field). The paper bypass of styles 1 and 2 is
+   * unchanged. Off restores the Galaxy chain.
+   */
+  setArtInk(on: boolean): void;
+  /**
    * Concrete-daylight dimmer (Galaxy, Transit pose): scale bloom intensity by
    * (1 − daylight) so the glow bleeds out as the city surfaces into daylight.
    * Full daylight reuses the paper bypass pathway — direct render, no bloom, no
@@ -86,6 +94,8 @@ export function createBloom(
   composer.addPass(new EffectPass(camera, bloom, vignette));
 
   let artPaper = false;
+  let artInk = false;
+  const VIGNETTE_DARKNESS = vignette.darkness;
   let daylight = 0; // 0 full bloom … 1 concrete daylight (no bloom)
 
   return {
@@ -97,7 +107,15 @@ export function createBloom(
         renderer.render(scene, camera);
         return;
       }
+      if (artInk) {
+        // Ink mode: the composer runs for its MSAA, with no glow and no vignette.
+        bloom.intensity = 0;
+        vignette.darkness = 0;
+        composer.render(deltaSeconds);
+        return;
+      }
       bloom.intensity = BASE_INTENSITY * (1 - daylight);
+      vignette.darkness = VIGNETTE_DARKNESS;
       composer.render(deltaSeconds);
     },
     setSize(width, height) {
@@ -105,6 +123,9 @@ export function createBloom(
     },
     setArtPaper(on) {
       artPaper = on;
+    },
+    setArtInk(on) {
+      artInk = on;
     },
     setDaylight(daylight01) {
       daylight = daylight01 < 0 ? 0 : daylight01 > 1 ? 1 : daylight01;

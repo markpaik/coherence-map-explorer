@@ -40,6 +40,7 @@
 // back in.
 
 import * as THREE from "three";
+import { HANGA, isHanga } from "./artstyle";
 
 // ---------------------------------------------------------------------------
 // Pure window + gate math (exported for tests — no THREE, no DOM).
@@ -110,7 +111,15 @@ const SHELL_VERT = /* glsl */ `
 const SHELL_FRAG = /* glsl */ `
   precision highp float;
   uniform float uOpacity;
-  uniform int uType;   // 0 dawn | 1 studio | 2 concrete daylight
+  uniform int uType;   // 0 dawn | 1 studio | 2 concrete daylight | 3 Hanga washi | 4 Hanga dusk
+  // Hanga field colors in sRGB (0..1 per channel), from the HANGA palette: the
+  // mid field (bg), the top of the sky, the bottom of the sheet, the warm band.
+  uniform vec3 uHMid;
+  uniform vec3 uHTop;
+  uniform vec3 uHBottom;
+  uniform vec3 uHWarm;
+  // Camera heading in the xz plane (unit), fed each draw for the Hanga shell.
+  uniform vec2 uHFwd;
   varying vec3 vDir;
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -118,6 +127,86 @@ const SHELL_FRAG = /* glsl */ `
     vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
                mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+
+  // Hanga: the woodblock fields are authored in sRGB (as the acceptance
+  // previews are), then converted once to LINEAR, because these styles keep the
+  // composer (linear frame buffers, encoded to sRGB on output).
+  vec3 hSrgbToLinear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+  }
+  // Piecewise ramp: 0 below a, 1 above b.
+  float hRamp(float x, float a, float b) { return clamp((x - a) / (b - a), 0.0, 1.0); }
+
+  // Elevation stops for the Hanga fields, in units of tan(elevation) measured
+  // against the camera's heading (see main). For a level camera that is linear
+  // in screen height: with the 50 deg vertical fov the top of the screen sits at
+  // +0.466 and the bottom at -0.466, so each stop is the preview sheet's own
+  // height fraction y mapped as 0.466 * (1 - 2y).
+  const float HE_TOP = 0.466;    // preview sheet top (0% height)
+  const float HE_BAND = 0.424;   // Washi: full Prussian ends (4.5%)
+  const float HE_MID1 = 0.354;   // 12%
+  const float HE_MID2 = 0.270;   // 21%
+  const float HE_CLEAR = 0.186;  // 30%: bare paper from here down
+  const float HE_WARM0 = -0.280; // warm band begins (80%)
+  const float HE_WARM1 = -0.359; // warm band peak (88.5%)
+  const float HE_WARM2 = -0.401; // (93%)
+  const float HE_FLOOR = -0.466; // preview sheet bottom (100%)
+
+  vec3 hangaField(float e, bool dusk) {
+    vec3 col;
+    if (!dusk) {
+      // Washi daylight: Hiroshige's Prussian band at the top of the sky,
+      // composited over bare paper and gone by 30% height.
+      vec3 c1 = vec3(0.435294, 0.525490, 0.627451); // #6f86a0
+      vec3 c2 = vec3(0.290196, 0.400000, 0.533333); // #4a6688
+      vec3 c3 = vec3(0.168627, 0.290196, 0.439216); // #2b4a70
+      vec3 sky = c1;
+      float a = 0.0;
+      sky = mix(sky, c2, hRamp(e, HE_CLEAR, HE_MID2));
+      a = mix(a, 0.2, hRamp(e, HE_CLEAR, HE_MID2));
+      sky = mix(sky, c3, hRamp(e, HE_MID2, HE_MID1));
+      a = mix(a, 0.62, hRamp(e, HE_MID2, HE_MID1));
+      sky = mix(sky, uHTop, hRamp(e, HE_MID1, HE_BAND));
+      a = mix(a, 0.96, hRamp(e, HE_MID1, HE_BAND));
+      a = mix(a, 1.0, hRamp(e, HE_BAND, HE_TOP));
+      // Toward the zenith the Prussian deepens a little (looking up).
+      sky = mix(sky, uHTop * 0.78, hRamp(e, HE_TOP, 1.4));
+      col = mix(uHMid, sky, a);
+      // Faint persimmon horizon band.
+      vec3 w2 = vec3(0.905882, 0.603922, 0.407843); // #e79a68
+      float wa = mix(0.0, 0.2, hRamp(-e, -HE_WARM0, -HE_WARM1));
+      vec3 wc = mix(uHWarm, w2, hRamp(-e, -HE_WARM1, -HE_WARM2));
+      wa = mix(wa, 0.12, hRamp(-e, -HE_WARM1, -HE_WARM2));
+      wa = mix(wa, 0.0, hRamp(-e, -HE_WARM2, -HE_FLOOR));
+      col = mix(col, wc, wa);
+    } else {
+      // Indigo dusk: aizuri at the top grading through the mid field to slate.
+      vec3 z0 = vec3(0.031373, 0.070588, 0.164706); // #08122a
+      vec3 z1 = vec3(0.039216, 0.086275, 0.184314); // #0a162f
+      // Stops at the preview's 0 / 3.5 / 16 / 50 / 100% heights.
+      col = uHBottom;
+      col = mix(col, uHMid, hRamp(e, HE_FLOOR, 0.0));
+      col = mix(col, uHTop, hRamp(e, 0.0, 0.317));
+      col = mix(col, z1, hRamp(e, 0.317, 0.433));
+      col = mix(col, z0, hRamp(e, 0.433, HE_TOP));
+      // A thin warm glow low on the sheet (84.5 / 88.5 / 90.5 / 95% heights).
+      vec3 w2 = vec3(0.850980, 0.541176, 0.368627); // #d98a5e
+      float wa = mix(0.0, 0.34, hRamp(-e, 0.322, 0.359));
+      vec3 wc = mix(uHWarm, w2, hRamp(-e, 0.359, 0.378));
+      wa = mix(wa, 0.16, hRamp(-e, 0.359, 0.378));
+      wa = mix(wa, 0.0, hRamp(-e, 0.378, 0.419));
+      col = mix(col, wc, wa);
+    }
+    // Paper: a broad, soft mottle and a fine fiber grain stretched sideways
+    // like laid washi. Direction-based, so it never seams on orbit. Quiet.
+    vec2 gd = vec2(vDir.x + vDir.z * 0.7, vDir.y);
+    float m = vnoise(gd * vec2(2.6, 4.4) + 3.0) * 0.6 + vnoise(gd * vec2(6.1, 9.7) - 7.0) * 0.4;
+    col *= 1.0 + (m - 0.5) * (dusk ? 0.05 : 0.04);
+    float g = vnoise(gd * vec2(380.0, 640.0) + 21.0) * 0.65 + vnoise(gd * vec2(900.0, 1500.0) - 5.0) * 0.35;
+    vec3 grainTint = dusk ? vec3(0.93, 0.89, 0.81) : vec3(0.42, 0.34, 0.22);
+    col = mix(col, grainTint, clamp((g - 0.45) * 2.0, 0.0, 1.0) * (dusk ? 0.035 : 0.06));
+    return col;
   }
 
   void main() {
@@ -152,6 +241,13 @@ const SHELL_FRAG = /* glsl */ `
       vec3 top = vec3(0.062745, 0.082353, 0.113725); // #10151d
       vec3 bot = vec3(0.090196, 0.113725, 0.156863); // #171d28
       col = mix(bot, top, smoothstep(-0.4, 0.8, e));
+    } else if (uType >= 3) {
+      // Hanga woodblock field (3 washi, 4 dusk): full strength, LINEAR out.
+      // Elevation as tan against the camera heading, so each band prints as a
+      // straight horizontal band (a level camera sees it flat, like the
+      // preview sheet) and still rises and falls with the camera's pitch.
+      float fwd = max(dot(vDir.xz, uHFwd), 0.2);
+      col = hSrgbToLinear(hangaField(vDir.y / fwd, uType == 4));
     } else {
       // Concrete daylight — clean, light overcast; a material, not a photograph.
       // Round-13 (user: "background more concrete gray"): the round-12 warm-beige
@@ -188,7 +284,10 @@ const SHELL_FRAG = /* glsl */ `
 
 const SHELL_RADIUS = 5200; // inside the 12000 camera far plane, beyond the star shell (3600)
 
-function makeShellMaterial(type: 0 | 1 | 2): THREE.ShaderMaterial {
+const srgb01 = (hex: number): THREE.Vector3 =>
+  new THREE.Vector3(((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255);
+
+function makeShellMaterial(type: 0 | 1 | 2 | 3): THREE.ShaderMaterial {
   // depthTest (round-13 occlusion fix): the shell is transparent, so it draws in
   // the transparent phase AFTER the opaque orbs (Galaxy nodes) and the opaque etch
   // markers. With depthTest OFF the two LIGHT shells (dawn / concrete daylight) at
@@ -201,7 +300,15 @@ function makeShellMaterial(type: 0 | 1 | 2): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: SHELL_VERT,
     fragmentShader: SHELL_FRAG,
-    uniforms: { uOpacity: { value: 0 }, uType: { value: type } },
+    uniforms: {
+      uOpacity: { value: 0 },
+      uType: { value: type },
+      uHMid: { value: new THREE.Vector3() },
+      uHTop: { value: new THREE.Vector3() },
+      uHBottom: { value: new THREE.Vector3() },
+      uHWarm: { value: new THREE.Vector3() },
+      uHFwd: { value: new THREE.Vector2(0, -1) },
+    },
     side: THREE.BackSide,
     transparent: true,
     depthWrite: false,
@@ -264,7 +371,10 @@ export interface EnvironsHandle {
   /**
    * Drive the three windows for the frame. `gate` supplies the morph endpoints
    * (a window is forced to 0 unless its home is one of them). artStyle !== 0
-   * zeroes everything; storyActive lerps everything to 0 over ~0.4s. Returns
+   * zeroes everything; storyActive lerps everything to 0 over ~0.4s. The one
+   * exception is the Hanga field (styles 3 and 4): its shell shows at full
+   * strength in every pose, with no endpoint gate and no story suppression,
+   * because the woodblock field IS that style's paper. Returns
    * true while the galaxy-fade slew is still settling (keeps the pump hot under
    * render-on-demand).
    */
@@ -296,23 +406,38 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
   const dawnGroup = new THREE.Group();
   const studioGroup = new THREE.Group();
   const dayGroup = new THREE.Group();
-  dawnGroup.visible = studioGroup.visible = dayGroup.visible = false;
-  group.add(dawnGroup, studioGroup, dayGroup);
+  const hangaGroup = new THREE.Group();
+  dawnGroup.visible = studioGroup.visible = dayGroup.visible = hangaGroup.visible = false;
+  group.add(dawnGroup, studioGroup, dayGroup, hangaGroup);
 
   // -- shells --------------------------------------------------------------
   const shellGeo = new THREE.SphereGeometry(SHELL_RADIUS, 48, 24);
   const dawnShellMat = makeShellMaterial(0);
   const studioShellMat = makeShellMaterial(1);
   const dayShellMat = makeShellMaterial(2);
+  // Hanga field shell (uType 3 washi / 4 dusk, set per style in update).
+  const hangaShellMat = makeShellMaterial(3);
+  const fwdScratch = new THREE.Vector3();
   for (const [mat, g] of [
     [dawnShellMat, dawnGroup],
     [studioShellMat, studioGroup],
     [dayShellMat, dayGroup],
+    [hangaShellMat, hangaGroup],
   ] as const) {
     const mesh = new THREE.Mesh(shellGeo, mat);
     mesh.frustumCulled = false;
     mesh.renderOrder = -10; // behind everything
     g.add(mesh);
+    // The Hanga shell reads the camera heading at draw time (no allocation).
+    if (mat === hangaShellMat) {
+      mesh.onBeforeRender = (_r, _s, camera) => {
+        camera.getWorldDirection(fwdScratch);
+        const lenXZ = Math.hypot(fwdScratch.x, fwdScratch.z);
+        if (lenXZ > 1e-3) {
+          (hangaShellMat.uniforms.uHFwd.value as THREE.Vector2).set(fwdScratch.x / lenXZ, fwdScratch.z / lenXZ);
+        }
+      };
+    }
   }
 
   // -- dawn mist -----------------------------------------------------------
@@ -345,6 +470,22 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
   let lastDaylight = 0;
   let lastDawn = 0;
   let lastT = 0;
+  let hangaStyle = 0; // the field the Hanga shell last painted (0 = none)
+
+  function applyHanga(style: number): void {
+    const on = isHanga(style);
+    hangaGroup.visible = on;
+    if (!on || style === hangaStyle) return;
+    hangaStyle = style;
+    const pal = style === 4 ? HANGA.dusk : HANGA.washi;
+    const u = hangaShellMat.uniforms;
+    u.uType.value = style;
+    u.uOpacity.value = 1;
+    (u.uHMid.value as THREE.Vector3).copy(srgb01(pal.bg));
+    (u.uHTop.value as THREE.Vector3).copy(srgb01(pal.top));
+    (u.uHBottom.value as THREE.Vector3).copy(srgb01(pal.bottom));
+    (u.uHWarm.value as THREE.Vector3).copy(srgb01(pal.warm));
+  }
 
   function applyDawn(a: number): void {
     dawnGroup.visible = a > 0.0015;
@@ -388,6 +529,8 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
       applyDawn(aDawn);
       applyStudio(aStudio);
       applyDay(aDay);
+      // Hanga field: full strength, ungated, story-proof (see the interface).
+      applyHanga(artStyle);
       lastDaylight = aDay;
       lastDawn = aDawn;
 
@@ -423,6 +566,7 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
       dawnShellMat.dispose();
       studioShellMat.dispose();
       dayShellMat.dispose();
+      hangaShellMat.dispose();
       mistTex.dispose();
       for (const m of mistMats) m.dispose();
       for (const g of mistGeos) g.dispose();

@@ -27,7 +27,7 @@ import * as THREE from "three";
 import type { GraphCore } from "../data";
 import type { NodesHandle } from "./nodes";
 import type { BeaconTarget } from "../stories/contagion";
-import { FIDENZA, RINGERS } from "./artstyle";
+import { FIDENZA, RINGERS, isHanga, hangaPalette } from "./artstyle";
 
 /**
  * Damage rings breathe once per 4.5 s (0.22 Hz), the same period as the node
@@ -52,6 +52,9 @@ const MIN_RING_PX = 7;
 // The focus ring (exploration marker) sits this many radii out, clear OUTSIDE
 // the FOCUS-emphasized orb (which scales to 1.5×): inner band edge ≈ 2×radius.
 const FOCUS_RING_SCALE = 3.2;
+// Under Hanga the seal stamps wider (the discs print larger, HANGA_DISC_SCALE),
+// so it encloses the focused disc and the sub-standard discs stacked on it.
+const SEAL_RING_SCALE = 4.8;
 
 const VERT = /* glsl */ `
   attribute vec3 aCenter;
@@ -97,6 +100,13 @@ const FRAG = /* glsl */ `
   uniform float uAlpha;
   uniform float uFadeSec;
   uniform float uBreathRate; // radians per second of the radius breath
+  // Hanga seal (focus ring, styles 3 and 4 only; uSeal 0 everywhere else):
+  // a stamped ring with a slightly irregular radius and one dry break, over an
+  // optional pale underlay (uUnderA > 0 on Dusk) so the vermilion reads on
+  // aizuri blue.
+  uniform float uSeal;
+  uniform vec3 uUnderColor;
+  uniform float uUnderA;
   varying vec2 vP;
   varying float vPhase;
   varying float vIntensity;
@@ -114,6 +124,25 @@ const FRAG = /* glsl */ `
     float amp = 0.06 * mix(0.35, 1.0, vIntensity);
     float breath = 0.74 + amp * sin(uTime * uBreathRate + vPhase);
     float w = mix(0.42, 1.0, vIntensity); // band half-width scale (thinner when faint)
+    if (uSeal > 0.5) {
+      // Stamped seal: the radius wobbles a little with angle, the ink is
+      // uneven, and one short dry break interrupts the band.
+      float ang = atan(vP.y, vP.x);
+      float rr = breath * (1.0 + 0.018 * sin(3.0 * ang + 0.7) + 0.01 * sin(7.0 * ang + 2.1)
+                                + 0.006 * sin(13.0 * ang));
+      float sealBand = smoothstep(rr - 0.075, rr - 0.035, r) * (1.0 - smoothstep(rr + 0.035, rr + 0.075, r));
+      float brk = smoothstep(0.02, 0.09, abs(fract(ang / 6.2831853 + 0.08) - 0.5));
+      float inkLoad = 0.82 + 0.18 * sin(5.0 * ang + 1.3);
+      float seal = sealBand * brk * inkLoad;
+      float under = uUnderA * smoothstep(rr - 0.14, rr - 0.08, r) * (1.0 - smoothstep(rr + 0.08, rr + 0.14, r));
+      float sa = seal * uAlpha;
+      float ua = under * (1.0 - sa);
+      float outA = sa + ua;
+      if (outA < 0.002) discard;
+      vec3 sc = (uColor * sa + uUnderColor * ua) / max(outA, 1e-4);
+      gl_FragColor = vec4(sc, outA * appear);
+      return;
+    }
     float ring = smoothstep(breath - 0.12 * w, breath - 0.045 * w, r)
                * (1.0 - smoothstep(breath + 0.045 * w, breath + 0.12 * w, r));
     if (ring < 0.003) discard;
@@ -181,7 +210,10 @@ export interface BeaconsHandle {
    * (MIN_RING_PX). Call on resize; 0 (the default) disables the growth.
    */
   setViewportHeight(cssHeight: number): void;
-  /** 0 Galaxy (gold, additive, HDR graze) | 1 Ringers (ink) | 2 Fidenza (ink). */
+  /**
+   * 0 Galaxy (gold, additive, HDR graze) | 1 Ringers (ink) | 2 Fidenza (ink) |
+   * 3 Washi and 4 Dusk (sumi damage rings, a vermilion seal for the focus).
+   */
   setArtStyle(style: number): void;
   dispose(): void;
 }
@@ -230,6 +262,9 @@ export function createBeacons(
     uViewH: { value: 0 },
     uMinPx: { value: MIN_RING_PX },
     uBreathRate: { value: DAMAGE_RING_BREATH_RATE },
+    uSeal: { value: 0 },
+    uUnderColor: { value: new THREE.Color(0x000000) },
+    uUnderA: { value: 0 },
   };
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,
@@ -277,6 +312,9 @@ export function createBeacons(
     // screen-space growth). The minimum-radius rule is a DAMAGE-ring fix.
     uMinPx: { value: 0 },
     uBreathRate: { value: FOCUS_RING_BREATH_RATE },
+    uSeal: { value: 0 },
+    uUnderColor: { value: new THREE.Color(0x000000) },
+    uUnderA: { value: 0 },
   };
   const fMaterial = new THREE.ShaderMaterial({
     vertexShader: VERT,
@@ -294,6 +332,11 @@ export function createBeacons(
   fMesh.name = "focus-ring";
   fMesh.visible = false;
   let focusIndex: number | null = null;
+  // True under a Hanga style: the focus ring is the vermilion seal, so the
+  // strand tint the machine passes is ignored.
+  let sealMode = false;
+  // The last strand tint the machine asked for, restored when the seal lifts.
+  let focusTint = 0xffffff;
 
   let targetIdx: number[] = [];
   let time = 0;
@@ -353,11 +396,14 @@ export function createBeacons(
         return;
       }
       focusIndex = nodeIndex;
-      fScaleAttr.array[0] = radii[nodeIndex] * FOCUS_RING_SCALE;
+      fScaleAttr.array[0] = radii[nodeIndex] * (sealMode ? SEAL_RING_SCALE : FOCUS_RING_SCALE);
       fScaleAttr.needsUpdate = true;
       fPhaseAttr.array[0] = (nodeIndex * 2.399963) % (Math.PI * 2);
       fPhaseAttr.needsUpdate = true;
-      if (color !== undefined) fUniforms.uColor.value.setHex(color);
+      if (color !== undefined) {
+        focusTint = color;
+        if (!sealMode) fUniforms.uColor.value.setHex(color);
+      }
       fGeom.instanceCount = 1;
       fMesh.visible = true;
       updateFocus();
@@ -437,6 +483,29 @@ export function createBeacons(
       fUniforms.uMul.value = style === 0 ? 1.6 : 1.0;
       fUniforms.uAlpha.value = style === 0 ? 0.95 : 0.9;
       fMaterial.blending = style === 0 ? THREE.AdditiveBlending : THREE.NormalBlending;
+      // Hanga: damage rings print in sumi (same breath rate), and the focus ring
+      // becomes the vermilion seal (with a pale underlay on Dusk).
+      const hanga = isHanga(style);
+      if (hanga) {
+        const pal = hangaPalette(style);
+        uniforms.uColor.value.setHex(pal.sumi);
+        fUniforms.uColor.value.setHex(pal.seal);
+        fUniforms.uUnderColor.value.setHex(pal.sealUnder);
+        fUniforms.uUnderA.value = pal.sealUnderAlpha;
+        fUniforms.uAlpha.value = 0.92;
+      } else if (sealMode) {
+        // Leaving the seal: restore the focused standard's strand tint.
+        fUniforms.uColor.value.setHex(focusTint);
+      }
+      sealMode = hanga;
+      fUniforms.uSeal.value = hanga ? 1 : 0;
+      if (focusIndex !== null) {
+        fScaleAttr.array[0] = radii[focusIndex] * (hanga ? SEAL_RING_SCALE : FOCUS_RING_SCALE);
+        fScaleAttr.needsUpdate = true;
+      }
+      // A stamped seal holds still: the focus ring's radius breath is off under
+      // Hanga (calm, and a print does not move). Galaxy keeps its shipped breath.
+      fUniforms.uBreathRate.value = hanga ? 0 : FOCUS_RING_BREATH_RATE;
     },
     dispose() {
       geometry.dispose();
