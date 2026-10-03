@@ -35,6 +35,7 @@ import { createDrafts, draftFade } from "./scene/drafts";
 import { createSheet } from "./scene/sheet";
 import { createContours } from "./scene/contours";
 import { createEnvirons, endpointOwns } from "./scene/environs";
+import { createLandscape } from "./scene/landscape";
 import { computeNodeRadii } from "./scene/reach";
 import { mulberry32 } from "./scene/evolve";
 import { createAside } from "./ui/aside";
@@ -229,6 +230,10 @@ function start(graph: GraphCore): void {
   // gated (raised only when its home is a morph endpoint), Galaxy-only, and owns
   // the galaxy fade — planets recede and stars dim as an environment takes over.
   const environs = createEnvirons({ planets, stars });
+  // Hanga landscape (styles 3 and 4 only): ridges, peak, mist, water, birds,
+  // centered on the pose-0 map. Invisible, with no draw calls, in every other style.
+  const landscape = createLandscape(nodes.boundsBox.getCenter(new THREE.Vector3()));
+  scene.add(landscape.group);
   scene.add(
     environs.group,
     sheet.object,
@@ -381,6 +386,7 @@ function start(graph: GraphCore): void {
     drafts.setArtStyle(style);
     sheet.setArtStyle(style);
     contours.setArtStyle(style);
+    landscape.setArtStyle(style);
     etches.setArtStyle(style);
     // Ringers / Fidenza bypass the composer (flat direct render). The Hanga
     // styles keep it for its MSAA, printing with no bloom and no vignette.
@@ -571,6 +577,7 @@ function start(graph: GraphCore): void {
   };
 
   const sceneClock = createSceneClock();
+  let landTime = 0; // the scene clock, read by the Hanga landscape
   let last = performance.now();
   let revealed = false;
   let wasStoryHolding = false; // rising-edge detector for story-hold drift resume
@@ -594,6 +601,7 @@ function start(graph: GraphCore): void {
       // while a paused story's settled scene holds still. A held frame re-sends
       // the same time, so every layer holds its phase.
       const sceneTime = sceneClock.advance(delta, holdStory);
+      landTime = sceneTime;
       nodes.setTime(sceneTime);
       edges.setTime(sceneTime);
       stars.setTime(sceneTime);
@@ -687,6 +695,13 @@ function start(graph: GraphCore): void {
       // endpoint gate, plus story suppression and the Galaxy-only art gate. Owns
       // the planet recede + star dim; returns true while its fade is still slewing.
       const envSlewing = environs.update(pose, gate, storyPlayer.running, artStyle);
+      // Hanga landscape: the birds go quiet during a story or a focus. It rides the
+      // continuous ambient render above, so it requests no frames of its own.
+      landscape.update(landTime, {
+        quiet: storyPlayer.running || machine.focusedIndex !== null ? 1 : 0,
+        reducedMotion,
+        pose: Math.max(0, 1 - Math.abs(pose - 1)),
+      });
       // Light-environment chrome (round-12): the Sierra dawn and concrete daylight
       // are LIGHT fields (the studio behind the Blueprint is a DARK shell, so it is
       // excluded). When their combined amount owns the frame — Galaxy only, no story
@@ -955,6 +970,7 @@ function start(graph: GraphCore): void {
       sheet,
       contours,
       environs,
+      landscape,
       planets,
       stars,
       graph,

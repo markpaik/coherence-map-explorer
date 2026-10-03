@@ -566,3 +566,34 @@ continuous string wrapping each peg en route to the foundations). Bullseye
 community-favored beige); bold black peg outlines; taut tangent strings leaving
 the outer edge. Mark's colorway: pegs white, red, yellow, blue, green, with
 white for an edgeless standard.
+
+### Hanga landscape (styles 3 Washi and 4 Dusk)
+
+`src/scene/landscape.ts` raises a Hiroshige landscape around the map in the two
+woodblock styles only. It is invisible, with no draw calls, in every other
+style. It follows the approved previews (`scripts/hanga-landscape-previews.mjs`)
+with the "more landscape" pass: ridge amplitudes x1.6 and raised ring tops, so
+the far crests reach about the map's vertical center at the home view, and a
+peak 1.5x larger.
+
+- Four concentric ridge rings (r 1500 / 2050 / 2550 / 3050). The silhouette is
+  computed per fragment from seamless periodic value noise over azimuth, with
+  an anti-aliased crest, a darker crest bokashi band, and a fade to the field at
+  the base. The walls draw their inside faces only, so a camera dollied out past
+  a ring sees its far half and never a wall in front of the map.
+- One volcanic cone (lathe geometry) at a fixed azimuth just beyond the far
+  ring: pale cap with soft snow tongues, a hairline contour on the upper
+  outline, and one thin waterfall line with a slow downward swell.
+- Suyari-gasumi mist bands between the rings, printed in the exact field color
+  behind them, turning once every 25 to 35 minutes.
+- A faint water floor at y -760 with fine wave lines near the far shore.
+- Washi: a low red-orange sun and one flight of cranes (3 to 5, a loose V,
+  wingbeat 2.5 s, a 40 s crossing, then 50 to 90 s of empty sky). Dusk: a pale
+  moon and one murmuration (880 specks in one draw, moved in the vertex shader)
+  beside the moon and the peak's flank.
+
+Legibility is a test (`tests/landscape.test.ts`): Washi gold and teal keep
+2.8:1 or more on every ring body, crest band, and the peak, so the Washi ridges
+sit close to the paper in value. Motion keeps the project rules: every period is
+several seconds or longer, a story or a focus fades the birds out over 2 s,
+and reduced motion freezes the water, mist, and waterfall and hides the birds.

@@ -108,10 +108,10 @@ const SHELL_VERT = /* glsl */ `
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
-const SHELL_FRAG = /* glsl */ `
-  precision highp float;
-  uniform float uOpacity;
-  uniform int uType;   // 0 dawn | 1 studio | 2 concrete daylight | 3 Hanga washi | 4 Hanga dusk
+// The Hanga field as a GLSL chunk: the shell paints it, and the landscape
+// (scene/landscape.ts) samples it so its mist prints the exact field color
+// behind it. `dir` is the unit direction from the shell center.
+export const HANGA_FIELD_GLSL = /* glsl */ `
   // Hanga field colors in sRGB (0..1 per channel), from the HANGA palette: the
   // mid field (bg), the top of the sky, the bottom of the sheet, the warm band.
   uniform vec3 uHMid;
@@ -120,7 +120,6 @@ const SHELL_FRAG = /* glsl */ `
   uniform vec3 uHWarm;
   // Camera heading in the xz plane (unit), fed each draw for the Hanga shell.
   uniform vec2 uHFwd;
-  varying vec3 vDir;
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float vnoise(vec2 p) {
@@ -153,7 +152,7 @@ const SHELL_FRAG = /* glsl */ `
   const float HE_WARM2 = -0.401; // (93%)
   const float HE_FLOOR = -0.466; // preview sheet bottom (100%)
 
-  vec3 hangaField(float e, bool dusk) {
+  vec3 hangaField(float e, bool dusk, vec3 dir) {
     vec3 col;
     if (!dusk) {
       // Washi daylight: Hiroshige's Prussian band at the top of the sky,
@@ -200,7 +199,7 @@ const SHELL_FRAG = /* glsl */ `
     }
     // Paper: a broad, soft mottle and a fine fiber grain stretched sideways
     // like laid washi. Direction-based, so it never seams on orbit. Quiet.
-    vec2 gd = vec2(vDir.x + vDir.z * 0.7, vDir.y);
+    vec2 gd = vec2(dir.x + dir.z * 0.7, dir.y);
     float m = vnoise(gd * vec2(2.6, 4.4) + 3.0) * 0.6 + vnoise(gd * vec2(6.1, 9.7) - 7.0) * 0.4;
     col *= 1.0 + (m - 0.5) * (dusk ? 0.05 : 0.04);
     float g = vnoise(gd * vec2(380.0, 640.0) + 21.0) * 0.65 + vnoise(gd * vec2(900.0, 1500.0) - 5.0) * 0.35;
@@ -208,6 +207,20 @@ const SHELL_FRAG = /* glsl */ `
     col = mix(col, grainTint, clamp((g - 0.45) * 2.0, 0.0, 1.0) * (dusk ? 0.035 : 0.06));
     return col;
   }
+
+  // The field at a shell direction, LINEAR out (the shell main does the same).
+  vec3 hangaFieldAt(vec3 dir, bool dusk) {
+    float fwd = max(dot(dir.xz, uHFwd), 0.2);
+    return hSrgbToLinear(hangaField(dir.y / fwd, dusk, dir));
+  }
+`;
+
+const SHELL_FRAG = /* glsl */ `
+  precision highp float;
+  uniform float uOpacity;
+  uniform int uType;   // 0 dawn | 1 studio | 2 concrete daylight | 3 Hanga washi | 4 Hanga dusk
+  ${HANGA_FIELD_GLSL}
+  varying vec3 vDir;
 
   void main() {
     float e = clamp(vDir.y, -1.0, 1.0); // -1 nadir … +1 zenith
@@ -247,7 +260,7 @@ const SHELL_FRAG = /* glsl */ `
       // straight horizontal band (a level camera sees it flat, like the
       // preview sheet) and still rises and falls with the camera's pitch.
       float fwd = max(dot(vDir.xz, uHFwd), 0.2);
-      col = hSrgbToLinear(hangaField(vDir.y / fwd, uType == 4));
+      col = hSrgbToLinear(hangaField(vDir.y / fwd, uType == 4, vDir));
     } else {
       // Concrete daylight — clean, light overcast; a material, not a photograph.
       // Round-13 (user: "background more concrete gray"): the round-12 warm-beige
@@ -282,7 +295,7 @@ const SHELL_FRAG = /* glsl */ `
   }
 `;
 
-const SHELL_RADIUS = 5200; // inside the 12000 camera far plane, beyond the star shell (3600)
+export const SHELL_RADIUS = 5200; // inside the 12000 camera far plane, beyond the star shell (3600)
 
 const srgb01 = (hex: number): THREE.Vector3 =>
   new THREE.Vector3(((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255);
