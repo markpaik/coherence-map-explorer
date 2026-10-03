@@ -801,19 +801,20 @@ body.art-fidenza .art-credit {
    Washi prints on bare paper under a Prussian band across the top of the sky.
    The band rises and falls with the camera's pitch, so no single ink reads on
    the title block at every framing: sumi fails on the band, paper fails on the
-   paper. The title block therefore prints on its own paper cartouche (an opaque
-   slip with a double sumi keyline, as on a print's title slip) and takes sumi
-   ink. chromelayout.ts counts the cartouche as part of the title (--scrim-x/y).
-   The nav hints and the depth-scale captions lie over the graph itself, whose
-   strokes print dark on paper, so they take small paper slips of their own.
-   Dusk is dark from top to bottom and keeps light ink, but the graph prints
-   pale there, so bare light text over it fell to 1.5:1 where the two meet
-   (the license lines at 1280 x 720). Dusk's title takes the same cartouche in
-   aizuri indigo with a pale keyline, and its nav hints and depth captions
-   print on dark glass slips (the hints also meet the warm glow low on the
-   sheet, where no bare ink reaches 4.5:1). On both fields the glass cards
-   stay dark framed cards, and the ghost buttons join them (as on Ringers and
-   Fidenza). */
+   paper. So each title line prints in sumi over its own kasumi, a soft paper
+   mist feathered to nothing on every side (the mist bands of the prints).
+   Over bare paper the mist is paper on paper and does not show; over the band
+   or the graph it lifts the ground under the ink. Dusk is dark from top to
+   bottom and keeps light ink, but the graph prints pale there, so bare light
+   text over it fell to 1.5:1 where the two meet (the license lines at
+   1280 x 720). Dusk's lines take the same mist in aizuri indigo, strong only
+   under the small lines low in the block, where the graph reaches. The mist
+   is decoration under the ink, not a surface: chromelayout.ts counts only the
+   ink. The nav hints and the depth-scale captions lie over the graph itself,
+   so they print on small slips (paper on Washi, dark glass on Dusk, where the
+   hints also meet the warm glow low on the sheet). On both fields the glass
+   cards stay dark framed cards, and the ghost buttons join them (as on
+   Ringers and Fidenza). */
 body.art-washi {
   background: #efe6d2;
 }
@@ -828,31 +829,60 @@ body.art-dusk {
   --ink-3: #9894b6;
 }
 
-.title-block {
-  --scrim-x: 0px;
-  --scrim-y: 0px;
+/* Title mist: one feathered wash per line, sized to that line's text (the
+   lines shrink to fit), so the mist follows the wide title lines and the
+   narrow attribution lines. A blurred pseudo-element with no edge: it fades
+   to zero opacity on every side. --mist is the field color, --mist-a the
+   strength each line needs (measured, see the census in the hanga notes). */
+body.art-washi .title-block > *,
+body.art-dusk .title-block > * {
+  position: relative;
+  width: fit-content;
 }
-body.art-washi .title-block,
-body.art-dusk .title-block {
-  --scrim-x: 14px;
-  --scrim-y: 10px;
-}
-body.art-washi .title-block::before,
-body.art-dusk .title-block::before {
+body.art-washi .title-block > *::before,
+body.art-dusk .title-block > *::before {
   content: "";
   position: absolute;
-  inset: calc(-1 * var(--scrim-y)) calc(-1 * var(--scrim-x));
+  inset: -26px -60px;
   z-index: -1;
-  background: #f6efdf;
-  border: 1px solid rgb(28 26 23 / 0.7);
-  outline: 1px solid rgb(28 26 23 / 0.32);
-  outline-offset: -5px;
-  border-radius: 2px;
+  border-radius: 999px;
+  background: rgb(var(--mist) / var(--mist-a, 0));
+  filter: blur(26px);
+  pointer-events: none;
 }
-body.art-dusk .title-block::before {
-  background: #12233f;
-  border-color: rgb(236 227 207 / 0.55);
-  outline-color: rgb(236 227 207 / 0.25);
+/* No line may form its own stacking context: the tagline's 0.92 opacity did,
+   so its mist painted over the headline's glyphs above it. The tagline keeps
+   its dimming in the ink's alpha instead. */
+body.art-washi .title-block > .tagline,
+body.art-dusk .title-block > .tagline {
+  opacity: 1;
+}
+body.art-dusk .title-block > .tagline {
+  color: rgb(236 234 246 / 0.92);
+}
+body.art-washi .title-block {
+  --mist: 246 239 223; /* washi paper */
+  --mist-a: 0.82;
+}
+body.art-washi .title-block > .statline,
+body.art-washi .title-block > .provline,
+body.art-washi .title-block > .licline {
+  --mist-a: 0.9;
+  text-shadow:
+    0 0 3px rgb(246 239 223 / 0.9),
+    0 0 8px rgb(246 239 223 / 0.7);
+}
+body.art-dusk .title-block {
+  --mist: 18 35 63; /* aizuri */
+  --mist-a: 0.3;
+}
+body.art-dusk .title-block > .statline,
+body.art-dusk .title-block > .provline,
+body.art-dusk .title-block > .licline {
+  --mist-a: 0.8;
+  text-shadow:
+    0 0 3px rgb(18 35 63 / 0.9),
+    0 0 8px rgb(18 35 63 / 0.7);
 }
 body.art-washi .headline {
   color: #1c1a17;
