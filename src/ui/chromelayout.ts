@@ -315,27 +315,17 @@ export function inkBox(el: Element): Box | null {
 }
 
 /**
- * The paper cartouche the title block prints on under the Washi style: the
- * block's own box grown by --scrim-x / --scrim-y (style.css). Null when the
- * style has none (both are 0px).
+ * Ink of the title block's visible lines. The feathered mist under the lines
+ * on Washi and Dusk (style.css) is decoration, not a surface, so it is not
+ * counted.
  */
-function titleScrim(title: HTMLElement): Box | null {
-  const cs = getComputedStyle(title);
-  const x = parseFloat(cs.getPropertyValue("--scrim-x")) || 0;
-  const y = parseFloat(cs.getPropertyValue("--scrim-y")) || 0;
-  if (x <= 0 && y <= 0) return null;
-  const r = title.getBoundingClientRect();
-  return { l: r.left - x, t: r.top - y, r: r.right + x, b: r.bottom + y };
-}
-
-/** Ink of the title block's visible lines, and its cartouche when it has one. */
 function titleInk(title: HTMLElement): Box | null {
   let box: Box | null = null;
   for (const child of title.children) {
     if (getComputedStyle(child).display === "none") continue;
     box = union(box, inkBox(child));
   }
-  return box ? union(box, titleScrim(title)) : null;
+  return box;
 }
 
 /**
@@ -356,14 +346,11 @@ export function chromeBoxes(): Box[] {
   const out: Box[] = [];
   const title = document.querySelector<HTMLElement>(".title-block");
   if (shown(title)) {
-    const scrim = titleScrim(title);
-    if (scrim) out.push(scrim);
-    else
-      for (const child of title.children) {
-        if (getComputedStyle(child).display === "none") continue;
-        const b = inkBox(child);
-        if (b) out.push(b);
-      }
+    for (const child of title.children) {
+      if (getComputedStyle(child).display === "none") continue;
+      const b = inkBox(child);
+      if (b) out.push(b);
+    }
   }
   for (const sel of [
     "#search-bar",
