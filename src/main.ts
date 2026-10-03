@@ -54,8 +54,13 @@ import { createSearch } from "./ui/search";
 import { createFilters } from "./ui/filters";
 import { createTour } from "./ui/tour";
 import { createViewToggle } from "./ui/viewtoggle";
-// The art-style switcher (createStyleToggle) is on hold — see docs/DESIGN.md.
-// applyArtStyle stays below so the shader/skin fan-out remains intact and dormant.
+import {
+  applyChromeSwatches,
+  createStyleToggle,
+  readStoredStyle,
+  resolveBootStyle,
+  writeStoredStyle,
+} from "./ui/styletoggle";
 import { FIDENZA, HANGA, RINGERS, isHanga, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
@@ -158,6 +163,11 @@ function start(graph: GraphCore): void {
   // ?nowebgl=1 forces it; otherwise fall back only if WebGL2 is truly absent or
   // cannot render the bloom chain's float color buffers.
   const glBlocker = params.has("nowebgl") ? "forced via ?nowebgl=1" : webglBlocker();
+  // Boot style: ?style= wins, else the reader's stored choice (ui/styletoggle).
+  // The chrome swatches follow it from the first paint, the fallback list too.
+  const styleStore = () => window.localStorage;
+  const bootStyle = resolveBootStyle(params.get("style"), readStoredStyle(styleStore));
+  applyChromeSwatches(bootStyle);
   if (glBlocker) {
     createFallback(graph, glBlocker);
     return;
@@ -364,16 +374,14 @@ function start(graph: GraphCore): void {
   let lastReflectedPose = poseDriver.pose;
   filters.setPose(poseDriver.target); // sync the Transit metro key to the boot pose
 
-  // -- art styles (Galaxy / Ringers / Fidenza) ------------------------------
+  // -- art styles (Galaxy / Washi / Dusk; Ringers and Fidenza dormant) --------
   // A style is a LOOK: geometry skins + field color + UI ink swap in place;
   // poses, focus, filters, and stories keep operating identically. The sky
   // (stars/nebula/planets) belongs to the Galaxy alone — paper has no stars.
   // Style 0 must stay pixel-identical to the shipped Galaxy.
   //
-  // ON HOLD: the "Style overrides" switcher and the ?style= deep-link are removed
-  // for now (see docs/DESIGN.md). Style stays pinned to 0 (the galaxy). The whole
-  // fan-out below is left intact and dormant — re-mount createStyleToggle and the
-  // boot deep-link to bring the skins back.
+  // The switcher offers Galaxy, Washi, and Dusk (ui/styletoggle.ts). Ringers and
+  // Fidenza have no entry point: only the ?debug=1 hook reaches them.
   let artStyle: ArtStyle = 0;
   const ART_BG: readonly number[] = [BG, RINGERS.bg, FIDENZA.bg, HANGA.washi.bg, HANGA.dusk.bg];
   function applyArtStyle(style: ArtStyle): void {
@@ -404,11 +412,19 @@ function start(graph: GraphCore): void {
     // The strand legend mirrors the scene: repaint its swatches to this skin's
     // colorway (galaxy palette / Ringers pegs / Fidenza nodes).
     filters.setArtStyle(style);
+    applyChromeSwatches(style);
+    for (const t of styleToggles) t.reflect(style);
     requestRender();
   }
-  // The "Style overrides" switcher and the ?style= deep-link are on hold; style
-  // stays 0. applyArtStyle remains reachable only through the debug hook so the
-  // skin machinery keeps compiling and can be re-exposed later.
+  // The free style card sits in the bottom-right stack (mounted after the
+  // filter rail, so the compact CSS can hide it under the open Filters sheet).
+  // A reader's choice persists; the boot deep link and the debug hook do not.
+  const chooseStyle = (style: ArtStyle): void => {
+    applyArtStyle(style);
+    writeStoredStyle(styleStore, style);
+  };
+  const styleToggles = [createStyleToggle({ choose: chooseStyle, initial: bootStyle, variant: "free" })];
+  if (bootStyle !== 0) applyArtStyle(bootStyle);
   search.setFilterContext({
     passes: (id) => filters.passesFilters(id),
     isFiltering: () => filters.isFiltering(),
@@ -446,6 +462,15 @@ function start(graph: GraphCore): void {
     reducedMotion: () => reducedMotion,
   });
   const storyPicker = createStoryPicker({ player: storyPlayer });
+  // The story card's STYLE row, under its FORMATION row (inside the card's trap).
+  styleToggles.push(
+    createStyleToggle({
+      choose: chooseStyle,
+      initial: artStyle,
+      variant: "story",
+      host: document.querySelector(".story-card"),
+    }),
+  );
   void storyPicker;
 
   // -- Browse mode (phone-first drill-down; default on phones) -------------
@@ -944,7 +969,8 @@ function start(graph: GraphCore): void {
       // Dual-pose morph driver, for automation (drive setPose, read pose/target).
       pose: { driver: poseDriver },
       // Art styles, for automation (0 Galaxy | 1 Ringers | 2 Fidenza | 3 Washi |
-      // 4 Dusk). The only way to reach styles 1 to 4: there is no UI entry point.
+      // 4 Dusk). The only way to reach styles 1 and 2: the switcher offers 0, 3,
+      // and 4. Not persisted.
       art: {
         set(style: number): void {
           if (style !== 0 && style !== 1 && style !== 2 && style !== 3 && style !== 4) return;

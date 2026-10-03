@@ -10,7 +10,7 @@
 
 import type { GraphCore, SearchDoc } from "../data";
 import { loadSearchDocs } from "../data";
-import { STRAND_COLORS } from "../scene/palette";
+import { swatchVar } from "./styletoggle";
 import type { Machine } from "../state/machine";
 import { rankResults, type RankItem } from "./searchrank";
 import { installChromeLayout } from "./chromelayout";
@@ -29,9 +29,6 @@ interface Indexed {
   search(query: string, options?: unknown): { id: string; score: number }[];
 }
 
-function hexColor(v: number): string {
-  return `#${v.toString(16).padStart(6, "0")}`;
-}
 function shortTitle(text: string, words = 8): string {
   const parts = text.split(/\s+/);
   const t = parts.slice(0, words).join(" ");
@@ -209,7 +206,7 @@ export function createSearch(deps: SearchDeps): SearchHandle {
 
     const chip = document.createElement("span");
     chip.className = "res-chip";
-    chip.style.setProperty("--dot", hexColor(STRAND_COLORS[d.strand]));
+    chip.style.setProperty("--dot", swatchVar(d.strand));
     chip.textContent = d.grade;
     chip.setAttribute("aria-label", gradeAccessibleName(d.grade));
 

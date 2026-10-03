@@ -80,7 +80,7 @@ export interface ArrowCard {
 /**
  * Whether ArrowLeft / ArrowRight should step scenes, given where focus is.
  * False while focus sits inside a CONTROL GROUP on the card (role="group": the
- * FORMATION segments, the lose-a-year chips). A segmented control invites the
+ * FORMATION segments, the lose-a-year chips; role="radiogroup": the STYLE row). A segmented control invites the
  * arrow keys, and each group moves focus among its own members with them, so
  * stepping scenes from there would yank the story out from under the reader.
  * On a one-scene story it was worse: Next reads "Done", so an arrow meant for
@@ -91,7 +91,7 @@ export interface ArrowCard {
  */
 export function arrowsStepScenes(active: ArrowFocus | null, card: ArrowCard): boolean {
   if (!active) return true;
-  const group = active.closest('[role="group"]');
+  const group = active.closest('[role="group"], [role="radiogroup"]');
   return !group || !card.contains(group as never);
 }
 
