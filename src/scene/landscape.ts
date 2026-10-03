@@ -780,16 +780,13 @@ const CRANE_VERT = /* glsl */ `
     return vec3(uR * sin(az), h, -uR * cos(az));
   }
   // A wing in silhouette space, drawn the way a print draws it rather than as
-  // a projection: Y is the wing's rise (+1 raised, -1 lowered). Each wing
-  // shortens as it swings through level (it points at the viewer there), and
-  // the near and far wings keep apart (near lower and swept back, far higher
-  // and squarer), so both read at every phase of the beat.
-  vec4 wing(float beat, float lag, float bias, float sweep) {
-    float y = beat + bias;
-    float len = 0.62 + 0.38 * min(1.0, abs(y));
-    vec2 arm = ${f(CRANE.arm)} * len * normalize(vec2(sweep, y));
-    // The long primaries trail the arm, swept back, lagging the beat.
-    vec2 hand = arm + ${f(CRANE.hand)} * len * normalize(vec2(sweep - 0.5, 0.95 * y + lag));
+  // a projection. A is the arm's angle above the backward horizontal (+ up).
+  // The primaries bend back toward the horizontal and lag the beat. The wing
+  // shortens a little as it swings through level (it points at the viewer).
+  vec4 wing(float A, float lag, float len) {
+    vec2 arm = ${f(CRANE.arm)} * len * vec2(-cos(A), sin(A));
+    float H = 0.55 * A + lag;
+    vec2 hand = arm + ${f(CRANE.hand)} * len * vec2(-cos(H), sin(H));
     return vec4(arm, hand);
   }
   void main() {
@@ -811,9 +808,14 @@ const CRANE_VERT = /* glsl */ `
     // A slow beat (period ${CRANE.wingPeriod} s) between a raised and a lowered pose.
     float ph = 6.28318530718 * uTime / ${f(CRANE.wingPeriod)} + aSlot.z * 6.28318530718;
     float beat = sin(ph);
-    float lag = -0.35 * cos(ph);
-    vNear = wing(beat, lag, -0.35, -0.25);
-    vFar = wing(0.85 * beat, lag, 0.45, 0.15);
+    float w = 0.5 + 0.5 * beat;
+    float lag = -0.3 * cos(ph);
+    float len = 0.72 + 0.28 * abs(beat);
+    // Near wing from about 49 deg below to 66 deg above the back line. The far
+    // wing rides 29 deg higher, so the pair opens into a V when raised.
+    float A = mix(-0.85, 1.15, w);
+    vNear = wing(A, lag, len);
+    vFar = wing(min(A + 0.5, 1.6), lag, len * 0.92);
   }
 `;
 const CRANE_FRAG = /* glsl */ `
@@ -843,10 +845,10 @@ const CRANE_FRAG = /* glsl */ `
     float ink = 0.0;
     // Long neck forward, small head, a fine beak.
     ink = max(ink, stroke(p, vec2(0.26, 0.03), vec2(0.72, 0.1), 0.032, 0.02, px));
-    ink = max(ink, stroke(p, vec2(0.72, 0.1), vec2(0.76, 0.105), 0.032, 0.032, px));
+    ink = max(ink, stroke(p, vec2(0.72, 0.1), vec2(0.77, 0.105), 0.045, 0.04, px));
     ink = max(ink, stroke(p, vec2(0.76, 0.105), vec2(0.9, 0.085), 0.015, 0.006, px));
     // Body: a slim tapered spindle.
-    ink = max(ink, stroke(p, vec2(0.28, 0.03), vec2(-0.22, -0.01), 0.065, 0.04, px));
+    ink = max(ink, stroke(p, vec2(0.28, 0.03), vec2(-0.22, -0.01), 0.08, 0.045, px));
     // Legs trailing straight behind, a little apart.
     ink = max(ink, stroke(p, vec2(-0.2, -0.03), vec2(-0.78, -0.07), 0.016, 0.009, px));
     ink = max(ink, stroke(p, vec2(-0.2, -0.03), vec2(-0.76, -0.11), 0.014, 0.008, px));
