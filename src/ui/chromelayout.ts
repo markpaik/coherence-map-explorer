@@ -10,8 +10,9 @@
 // sizes a surface that it also measures, so it cannot feed back on itself.
 //
 // Stacking works bottom-up, the way the chrome is drawn: the filter rail (and
-// the phone Browse pill) hold the floor; the view toggle, the nav hints, the
-// tour card, and the undocked search rail each rise just far enough to clear
+// the phone Browse pill) hold the floor; the view toggle, the style card (beside
+// the view toggle when there is width, else above it), the nav hints, the tour
+// card, and the undocked search rail each rise just far enough to clear
 // whatever below them shares their columns. The depth scale takes the column
 // that is left between the title block and that stack. Tooltips use the same
 // surface list to stay off every one of them.
@@ -120,6 +121,26 @@ export function dockTopRight(d: DockInput): boolean {
   const railL = right - d.railW;
   const ddL = right - d.dropdownW;
   return railL >= d.headline.r + DOCK_CLEARANCE && ddL >= d.title.r + DOCK_CLEARANCE;
+}
+
+/**
+ * A box of size w x h placed just left of `anchor` (bottom edges aligned, `gap`
+ * px apart), or null when it would leave the region or meet an obstacle. The
+ * style card takes this place beside the pose control when it can, which keeps
+ * the bottom-right column one row shorter.
+ */
+export function besideLeft(
+  anchor: Box,
+  w: number,
+  h: number,
+  gap: number,
+  regionL: number,
+  obstacles: readonly Box[],
+): Box | null {
+  const box: Box = { l: anchor.l - gap - w, t: anchor.b - h, r: anchor.l - gap, b: anchor.b };
+  if (box.l < regionL + 12 || box.t < 12) return null;
+  for (const o of obstacles) if (overlaps(box, o, 0)) return null;
+  return box;
 }
 
 /** Comfortable and minimum heights for the Ascent depth scale's column. */
@@ -293,14 +314,38 @@ export function inkBox(el: Element): Box | null {
   return box;
 }
 
-/** Ink of the title block's visible lines. */
+/**
+ * The paper cartouche the title block prints on under the Washi style: the
+ * block's own box grown by --scrim-x / --scrim-y (style.css). Null when the
+ * style has none (both are 0px).
+ */
+function titleScrim(title: HTMLElement): Box | null {
+  const cs = getComputedStyle(title);
+  const x = parseFloat(cs.getPropertyValue("--scrim-x")) || 0;
+  const y = parseFloat(cs.getPropertyValue("--scrim-y")) || 0;
+  if (x <= 0 && y <= 0) return null;
+  const r = title.getBoundingClientRect();
+  return { l: r.left - x, t: r.top - y, r: r.right + x, b: r.bottom + y };
+}
+
+/** Ink of the title block's visible lines, and its cartouche when it has one. */
 function titleInk(title: HTMLElement): Box | null {
   let box: Box | null = null;
   for (const child of title.children) {
     if (getComputedStyle(child).display === "none") continue;
     box = union(box, inkBox(child));
   }
-  return box;
+  return box ? union(box, titleScrim(title)) : null;
+}
+
+/**
+ * What a free-standing text surface paints: its ink, or its whole box when it
+ * prints on a backing of its own (the nav hints' slip under the Dusk style).
+ */
+function paintBox(el: HTMLElement): Box | null {
+  const bg = getComputedStyle(el).backgroundColor;
+  const backed = !!bg && bg !== "transparent" && !/rgba\([^)]*,\s*0\)$/.test(bg);
+  return backed ? rectBox(el.getBoundingClientRect()) : inkBox(el);
 }
 
 /**
@@ -311,17 +356,21 @@ export function chromeBoxes(): Box[] {
   const out: Box[] = [];
   const title = document.querySelector<HTMLElement>(".title-block");
   if (shown(title)) {
-    for (const child of title.children) {
-      if (getComputedStyle(child).display === "none") continue;
-      const b = inkBox(child);
-      if (b) out.push(b);
-    }
+    const scrim = titleScrim(title);
+    if (scrim) out.push(scrim);
+    else
+      for (const child of title.children) {
+        if (getComputedStyle(child).display === "none") continue;
+        const b = inkBox(child);
+        if (b) out.push(b);
+      }
   }
   for (const sel of [
     "#search-bar",
     "#search-rail .ghost-btn",
     ".filters-rail",
     ".view-toggle",
+    ".style-toggle",
     "#nav-hints",
     ".depth-scale-mark",
     ".depth-scale-axis",
@@ -333,7 +382,7 @@ export function chromeBoxes(): Box[] {
   ]) {
     for (const el of document.querySelectorAll(sel)) {
       if (!shown(el)) continue;
-      const b = el.matches(".depth-scale-mark, .depth-scale-axis, #nav-hints") ? inkBox(el) : rectBox(el.getBoundingClientRect());
+      const b = el.matches(".depth-scale-mark, .depth-scale-axis, #nav-hints") ? paintBox(el) : rectBox(el.getBoundingClientRect());
       if (b && b.r - b.l > 0.5 && b.b - b.t > 0.5) out.push(b);
     }
   }
@@ -529,7 +578,27 @@ export function installChromeLayout(): () => void {
       floor.push(box);
       return box;
     };
-    stack(q(".view-toggle"), "--lift-toggle", GAP_STACK);
+    const poseBox = stack(q(".view-toggle"), "--lift-toggle", GAP_STACK);
+
+    // The style card: beside the pose control, left of it, when the region has
+    // the width; otherwise one row above it (its CSS default), rising further
+    // only when what is below it grows.
+    const styleCard = q(".style-toggle");
+    if (shown(styleCard)) {
+      const def = shiftBox(restingBox(styleCard), cur("--style-dx"), cur("--lift-style"));
+      const keepOff = tInk ? [...floor, tInk] : floor;
+      const side = poseBox ? besideLeft(poseBox, def.r - def.l, def.b - def.t, GAP_STACK, region.l, keepOff) : null;
+      if (side) {
+        setVar("--style-dx", def.r - side.r);
+        setVar("--lift-style", def.b - side.b);
+        floor.push(side);
+      } else {
+        const lift = liftClear(def, floor, GAP_STACK);
+        setVar("--style-dx", 0);
+        setVar("--lift-style", lift);
+        floor.push(shiftBox(def, 0, -lift));
+      }
+    }
 
     // The nav hints, then the tour card. A short window with the panel open can
     // leave the tour card no room under the title; the hints (mouse gestures the
@@ -562,6 +631,10 @@ export function installChromeLayout(): () => void {
     // The undocked search rail rises above the whole band. During the tour it
     // may find no room under the title (a short window with the panel open);
     // the tour holds the frame, so the rail steps aside rather than overlap.
+    // Outside the tour the same short window with the side panel open can push
+    // the rail into the title block (1024 x 600: the filter rail wraps to three
+    // rows in the narrowed region). The reader is in the panel then, so the
+    // rail steps aside until the panel closes, rather than lie over the title.
     let railBox: Box | null = null;
     if (rail && railLaid && !docked && !storying) {
       rail.classList.remove("rail-cramped");
@@ -571,7 +644,8 @@ export function installChromeLayout(): () => void {
       setVar("--lift-rail", lift);
       railBox = shiftBox(def, 0, -lift);
       const underTitle = tInk && hOverlap(railBox, tInk) && railBox.t < tInk.b + GAP_WIDE;
-      if (underTitle && touring) {
+      const intoTitle = !!tInk && overlaps(railBox, tInk, 0) && region.r < vw;
+      if ((underTitle && touring) || intoTitle) {
         rail.classList.add("rail-cramped");
         railBox = null;
       } else floor.push(railBox);
@@ -636,6 +710,7 @@ export function installChromeLayout(): () => void {
     "#search-results",
     ".filters-rail",
     ".view-toggle",
+    ".style-toggle",
     "#nav-hints",
     ".depth-scale",
     ".panel",

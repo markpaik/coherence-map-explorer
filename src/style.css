@@ -74,6 +74,7 @@
   --title-l: clamp(16px, 3vw, 36px);
   --panel-inset: 0px;
   --lift-toggle: 0px;
+  --lift-style: 0px;
   --lift-hints: 0px;
   --lift-tour: 0px;
   --lift-rail: 0px;
@@ -503,78 +504,146 @@ body.browsing .transit-key {
   display: none;
 }
 
-/* -- art-style toggle (under the pose toggle) + credit line ----------------- */
-
-/* Discovery tab: the labeled pill that unfolds the segmented control. */
-.art-tab {
+/* -- style switcher (Galaxy / Washi / Dusk), bottom-right by the pose control --
+   The free card (ui/styletoggle.ts) is a glass radio group: a STYLE label, the
+   three radios, and, while a woodblock style is active, a one-line credit.
+   chromelayout.ts puts it just left of the pose control when the region has
+   the width (--style-dx), and otherwise leaves it at its CSS default, one row
+   (the pose control's 52px + 6px) above the pose control, lifted further only
+   when something below grows.
+   A grid, not a wrapping flex row: a wrapping flex container would size itself
+   to label + radios + credit on one line before wrapping. No transitions on the
+   radios: a style change is instant. */
+.style-toggle {
   position: fixed;
-  right: calc(var(--panel-inset) + var(--gutter));
-  bottom: clamp(46px, 7vh, 62px);
-  transform: translateY(-59px); /* above the 51px pose toggle + 8px gap */
+  right: calc(var(--panel-inset) + var(--gutter) + var(--style-dx, 0px));
+  bottom: calc(clamp(46px, 7vh, 62px) + 58px + var(--lift-style, 0px));
   z-index: 11;
-  min-height: 40px;
-  padding: 0 16px;
-  font: inherit;
-  font-size: var(--fs-chip);
-  letter-spacing: 0.02em;
-  color: var(--ink-2);
+  display: grid;
+  /* The first track takes any width the credit adds, so the label stays
+     beside the radios at the right. */
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  max-width: calc(100vw - var(--panel-inset) - 24px);
+  padding: 3px 3px 3px 12px;
   background: var(--surface);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 13px;
-  cursor: pointer;
-  transition: color 150ms ease, right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.art-tab:hover,
-.art-tab[aria-expanded="true"] {
-  color: var(--ink);
-}
-.art-toggle {
-  position: fixed;
-  right: calc(var(--panel-inset) + var(--gutter));
-  bottom: clamp(46px, 7vh, 62px);
-  transform: translateY(-107px); /* above the tab when unfolded */
-  z-index: 11;
-  display: none;
-  gap: 3px;
-  padding: 3px;
-  background: var(--surface);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--line);
-  border-radius: 13px;
+  /* Glides left of the desktop panel with the pose control (--panel-inset). */
   transition: right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.art-toggle.art-toggle-open {
-  display: inline-flex;
+/* Reduced motion: the card moves without the glide. */
+:root.rm .style-toggle {
+  transition: none;
 }
-.art-credit {
-  position: fixed;
-  right: calc(var(--panel-inset) + var(--gutter));
-  bottom: clamp(46px, 7vh, 62px);
-  /* Sit above the stack: pose toggle (51) + gap + Art-styles tab (40) + gap.
-     When the tab is unfolded (body.art-open) the segmented row (51 + gap)
-     slots in beneath the credit, so it rises to clear that too. */
-  transform: translateY(-107px);
-  z-index: 11;
-  font-size: 11px;
+@media (prefers-reduced-motion: reduce) {
+  .style-toggle {
+    transition: none;
+  }
+}
+.style-label {
+  grid-column: 2;
+  margin-right: 8px;
+  font-family: var(--display);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  /* --ink-2, not the group-label --ink-3: at 10px the stock --ink-3 measured
+     4.4:1 on the glass where the graph shows through it. */
   color: var(--ink-2);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 300ms ease, right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.art-credit a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.style-radios {
+  grid-column: 3;
+  display: inline-flex;
+  gap: 3px;
 }
-.art-credit.art-credit-on {
-  opacity: 1;
-  pointer-events: auto;
+.style-seg {
+  min-height: 44px; /* touch target */
+  padding: 0 14px;
+  font: inherit;
+  font-size: var(--fs-chip);
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+  background: none;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
 }
-body.art-open .art-credit {
-  transform: translateY(-166px); /* clears the unfolded segmented row too */
+.style-seg[aria-checked="true"] {
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.1);
+}
+.style-seg:hover:not([aria-checked="true"]) {
+  color: var(--ink);
+}
+.style-credit {
+  grid-column: 1 / -1;
+  justify-self: end;
+  /* The credit never widens the card: it takes the width of the radio row and
+     wraps under it, so the card still fits beside the pose control. */
+  width: 0;
+  min-width: 100%;
+  margin: 0;
+  padding: 2px 9px 5px 0;
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  text-align: right;
+  color: var(--ink-2);
+}
+.style-credit[hidden] {
+  display: none;
+}
+
+/* The story card's STYLE row: the FORMATION row's sibling, same grammar. */
+.style-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+.style-pick .style-label {
+  margin-right: 4px;
+}
+.style-pick .style-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.style-pick .style-seg {
+  min-height: 34px; /* card density, matching the FORMATION segments */
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.style-pick .style-seg[aria-checked="true"] {
+  border-color: var(--ink-2);
+}
+.style-pick .style-credit {
+  flex-basis: 100%;
+  justify-self: auto;
+  padding: 2px 0 0;
+  text-align: left;
+  color: var(--ink-3);
+}
+/* Touch: 44px targets in the card as well. */
+@media (pointer: coarse) {
+  .style-pick .style-seg {
+    min-height: 44px;
+  }
+}
+
+/* A story owns the frame: the free card steps out (the story card carries its
+   own STYLE row). display:none also takes it out of the tab order. */
+body.storying .style-toggle,
+body.og .style-toggle,
+body.browsing .style-toggle {
+  display: none;
 }
 
 /* Detail panel ↔ every other surface (desktop, R2): the panel slides in over
@@ -726,6 +795,183 @@ body.art-fidenza .depth-scale-sep {
 body.art-fidenza .art-credit {
   color: rgb(232 224 205 / 0.92);
   text-shadow: 0 1px 3px rgb(20 51 44 / 0.5);
+}
+
+/* -- woodblock styles: Washi (paper) and Dusk (indigo) chrome ink -----------
+   Washi prints on bare paper under a Prussian band across the top of the sky.
+   The band rises and falls with the camera's pitch, so no single ink reads on
+   the title block at every framing: sumi fails on the band, paper fails on the
+   paper. The title block therefore prints on its own paper cartouche (an opaque
+   slip with a double sumi keyline, as on a print's title slip) and takes sumi
+   ink. chromelayout.ts counts the cartouche as part of the title (--scrim-x/y).
+   The nav hints and the depth-scale captions lie over the graph itself, whose
+   strokes print dark on paper, so they take small paper slips of their own.
+   Dusk is dark from top to bottom and keeps light ink, but the graph prints
+   pale there, so bare light text over it fell to 1.5:1 where the two meet
+   (the license lines at 1280 x 720). Dusk's title takes the same cartouche in
+   aizuri indigo with a pale keyline, and its nav hints and depth captions
+   print on dark glass slips (the hints also meet the warm glow low on the
+   sheet, where no bare ink reaches 4.5:1). On both fields the glass cards
+   stay dark framed cards, and the ghost buttons join them (as on Ringers and
+   Fidenza). */
+body.art-washi {
+  background: #efe6d2;
+}
+body.art-dusk {
+  background: #2e4262;
+}
+/* The glass is 88% opaque, so a lighter field shows through it and the stock
+   --ink-3 (#7e7a9c, 4.5:1 on glass over the night sky) falls to about 3.5:1 on
+   glass over paper or indigo. The muted ink lifts on both fields. */
+body.art-washi,
+body.art-dusk {
+  --ink-3: #9894b6;
+}
+
+.title-block {
+  --scrim-x: 0px;
+  --scrim-y: 0px;
+}
+body.art-washi .title-block,
+body.art-dusk .title-block {
+  --scrim-x: 14px;
+  --scrim-y: 10px;
+}
+body.art-washi .title-block::before,
+body.art-dusk .title-block::before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--scrim-y)) calc(-1 * var(--scrim-x));
+  z-index: -1;
+  background: #f6efdf;
+  border: 1px solid rgb(28 26 23 / 0.7);
+  outline: 1px solid rgb(28 26 23 / 0.32);
+  outline-offset: -5px;
+  border-radius: 2px;
+}
+body.art-dusk .title-block::before {
+  background: #12233f;
+  border-color: rgb(236 227 207 / 0.55);
+  outline-color: rgb(236 227 207 / 0.25);
+}
+body.art-washi .headline {
+  color: #1c1a17;
+  text-shadow: none; /* the sky's violet halo smears on paper */
+}
+body.art-washi .headline-art {
+  color: #1c1a17;
+  --tag-ink: #1c1a17;
+  opacity: 1;
+}
+body.art-washi .tagline,
+body.art-washi .subline {
+  color: #1c1a17;
+}
+body.art-washi .statline {
+  color: #4a4339;
+}
+body.art-washi .provline,
+body.art-washi .licline {
+  color: #574f44;
+}
+body.art-washi .nav-hints {
+  padding: 4px 10px;
+  color: #4a4339;
+  background: #f6efdf;
+  border-radius: 9px;
+}
+body.art-washi .nav-hints span {
+  color: #1c1a17;
+}
+body.art-washi .depth-scale,
+body.art-washi .depth-scale-axis,
+body.art-washi .depth-scale-mark {
+  color: #4a4339;
+}
+body.art-washi .depth-scale-mark,
+body.art-washi .depth-scale-axis {
+  padding: 3px 7px;
+  background: #f6efdf;
+  border-radius: 7px;
+  opacity: 1;
+}
+body.art-washi .depth-scale-sep {
+  color: #1c1a17;
+}
+
+body.art-dusk .statline {
+  color: #cdc8dc;
+}
+body.art-dusk .provline,
+body.art-dusk .licline {
+  color: #bdb8d0;
+}
+body.art-dusk .depth-scale,
+body.art-dusk .depth-scale-axis,
+body.art-dusk .depth-scale-mark {
+  color: #ddd8ea;
+}
+body.art-dusk .depth-scale-mark,
+body.art-dusk .depth-scale-axis {
+  padding: 3px 7px;
+  background: var(--surface);
+  border-radius: 7px;
+  opacity: 1;
+}
+body.art-dusk .depth-scale-sep {
+  color: #f4f1fa;
+}
+body.art-dusk .nav-hints {
+  padding: 4px 10px;
+  color: #cdc8dc;
+  background: var(--surface);
+  border-radius: 9px;
+}
+body.art-dusk .nav-hints span {
+  color: #f4f1fa;
+}
+
+/* Ghost buttons ("Show me around", "Stories", "Replay the opening") join the
+   dark glass cards, so their label never meets the Prussian band or the warm
+   glow bare. */
+body.art-washi .ghost-btn,
+body.art-dusk .ghost-btn {
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+body.art-washi .ghost-btn:hover,
+body.art-dusk .ghost-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+/* Dusk: the glass cards' stock hairline (#2a2848) is darker than the indigo
+   field it meets, so the card edge vanished. A pale paper line marks it. */
+body.art-dusk .search-bar,
+body.art-dusk .ghost-btn,
+body.art-dusk .filters-rail,
+body.art-dusk .filters-toggle,
+body.art-dusk .view-toggle,
+body.art-dusk .style-toggle,
+body.art-dusk .view-caption,
+body.art-dusk .story-card,
+body.art-dusk .story-scrubber,
+body.art-dusk .tour-card,
+body.art-dusk .browse-pill,
+body.art-dusk .tooltip {
+  border-color: rgb(236 227 207 / 0.72);
+}
+
+/* Focus rings on both woodblock fields: a light ring between two sumi bands,
+   so it reads on paper, on the band, on the slate, and on the dark glass. */
+body.art-washi :focus-visible:not(input),
+body.art-dusk :focus-visible:not(input),
+body.art-washi .search-bar:focus-within,
+body.art-dusk .search-bar:focus-within {
+  outline: 2px solid #f6efdf;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px #1c1a17;
 }
 
 /* -- light environments (Galaxy dawn / daylight): dark-ink chrome ------------ */
@@ -1824,7 +2070,8 @@ body:has(#search-results:not([hidden])) .depth-scale {
      view toggle stand down (as the Browse pill does) and the search rail docks
      to the top, clear of the sheet, so nothing floats half-buried on it (R1). */
   body:has(.panel.panel-open) .filters-rail,
-  body:has(.panel.panel-open) .view-toggle {
+  body:has(.panel.panel-open) .view-toggle,
+  body:has(.panel.panel-open) .style-toggle {
     display: none;
   }
   /* The decorative depth scale runs down the left edge, into the sheet. */
@@ -1981,20 +2228,22 @@ body:has(#search-results:not([hidden])) .depth-scale {
     padding: 0 10px;
     font-size: var(--fs-chip-touch);
   }
-  /* The art toggle + credit ride the same anchor + translateY stack as the pose
-     toggle, so they follow it up to the mobile position (12px / 72–96px). Their
-     segments already share .view-seg above, so they shrink with it. */
-  .art-tab,
-  .art-toggle,
-  .art-credit {
-    right: calc(var(--panel-inset) + 12px);
-    bottom: clamp(72px, 12vh, 96px);
+  /* The style card rides one row above the pose control at its compact anchor
+     and trims its radios the same way. */
+  .style-toggle {
+    right: calc(var(--panel-inset) + 12px + var(--style-dx, 0px));
+    bottom: calc(clamp(72px, 12vh, 96px) + 58px + var(--lift-style, 0px));
+  }
+  .style-toggle .style-seg {
+    padding: 0 10px;
+    font-size: var(--fs-chip-touch);
   }
   /* The open Filters sheet expands up through the view toggle's spot, and the
      toggle (z 11) sits above the sheet (z 10) — an orphaned control floating on
      the sheet. Hide it while the sheet is open (filters-rail precedes the toggle
      in the DOM, so the sibling combinator reaches it). */
-  .filters-rail.filters-open ~ .view-toggle {
+  .filters-rail.filters-open ~ .view-toggle,
+  .filters-rail.filters-open ~ .style-toggle {
     display: none;
   }
   /* NOTE: the story card + scrubber mobile overrides live in their own block
@@ -3490,17 +3739,13 @@ body.storying .browse-pill {
    can't take keyboard focus (the ?browse=1 desktop path has a Tab key).
    display:none removes it from layout, the a11y tree, AND the tab order.
    Covers every free-standing control that sits behind the overlay: the title,
-   search rail, filter rail, pose toggle, the Style-overrides tab/segments/credit,
-   the Ascent depth legend, and the nav hints. (The story-HUD formation switcher
+   search rail, filter rail, pose toggle, the Ascent depth legend, and the nav hints. (The story-HUD formation switcher
    — .formation-pick — lives inside the story card, which is not mounted during
    Browse, so it needs no rule here.) */
 body.browsing .title-block,
 body.browsing .search-rail,
 body.browsing .filters-rail,
 body.browsing .view-toggle,
-body.browsing .art-tab,
-body.browsing .art-toggle,
-body.browsing .art-credit,
 body.browsing .depth-scale,
 body.browsing .nav-hints {
   display: none;

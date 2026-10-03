@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { arrowsStepScenes } from "../src/ui/storycard";
 import { rovingIndex } from "../src/ui/chipgroup";
 
-/** A minimal element tree: enough for closest('[role="group"]') and contains(). */
+/** A minimal element tree: enough for the control-group closest() and contains(). */
 class El {
   constructor(
     readonly name: string,
@@ -22,8 +22,8 @@ class El {
     readonly role: string | null = null,
   ) {}
   closest(selector: string): El | null {
-    expect(selector).toBe('[role="group"]');
-    for (let n: El | null = this; n; n = n.parent) if (n.role === "group") return n;
+    expect(selector).toBe('[role="group"], [role="radiogroup"]');
+    for (let n: El | null = this; n; n = n.parent) if (n.role === "group" || n.role === "radiogroup") return n;
     return null;
   }
   contains(node: El): boolean {
@@ -46,12 +46,19 @@ const backBtn = new El("back", controls);
 const nextBtn = new El("next", controls);
 const formation = new El("formation-pick", card, "group");
 const segAscent = new El("seg-ascent", formation);
+const stylePick = new El("style-pick", card);
+const styleRadios = new El("style-radios", stylePick, "radiogroup");
+const radioDusk = new El("radio-dusk", styleRadios);
 const scrubber = new El("story-scrubber", body, "group");
 const dot = new El("dot", scrubber);
 
 describe("arrowsStepScenes: control groups on the card own their arrows", () => {
   it("never steps from a FORMATION segment (the story must not step or end)", () => {
     expect(arrowsStepScenes(segAscent, card)).toBe(false);
+  });
+
+  it("never steps from a STYLE radio (the radio group owns its arrows)", () => {
+    expect(arrowsStepScenes(radioDusk, card)).toBe(false);
   });
 
   it("never steps from a lose-a-year chip", () => {

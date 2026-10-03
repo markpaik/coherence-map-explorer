@@ -15,7 +15,7 @@
 import type { GraphCore, GraphNode, StrandId, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
 import type { JourneyDirection } from "../state/machine";
-import { STRAND_COLORS } from "../scene/palette";
+import { swatchVar } from "./styletoggle";
 import { httpsUpgrade, sourceLinkLabel } from "./urls";
 import { CCSS_NOTICE } from "./license";
 
@@ -75,10 +75,6 @@ const MSA_BADGE: Record<number, string> = {
   1: "Supporting Work",
   2: "Additional Work",
 };
-
-function hexColor(v: number): string {
-  return `#${v.toString(16).padStart(6, "0")}`;
-}
 
 function shortTitle(text: string | undefined, words = 7): string {
   if (!text) return "";
@@ -512,7 +508,7 @@ export function createPanel(
     btn.className = "conn-btn";
     const chip = document.createElement("span");
     chip.className = "conn-chip";
-    chip.style.setProperty("--dot", hexColor(STRAND_COLORS[n.strand]));
+    chip.style.setProperty("--dot", swatchVar(n.strand));
     chip.textContent = n.grade;
     const code = document.createElement("span");
     code.className = "conn-code";
@@ -878,7 +874,7 @@ export function createPanel(
       const n = graph.nodes[focusIndex];
 
       // Sync scaffolding — paints instantly.
-      dot.style.background = hexColor(STRAND_COLORS[n.strand]);
+      dot.style.background = swatchVar(n.strand);
       codeEl.textContent = n.code;
       crumb.textContent = `${gradeLabel.get(n.grade) ?? n.grade} · ${n.domainName} · ${n.clusterCode}`;
       renderBadges(n);

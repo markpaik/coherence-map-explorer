@@ -15,7 +15,8 @@ import type { GraphCore, StrandId } from "../data";
 import type { NodesHandle } from "../scene/nodes";
 import type { EdgesHandle } from "../scene/edges";
 import { STRAND_ORDER } from "../scene/palette";
-import { strandSwatch, type ArtStyle } from "../scene/artstyle";
+import type { ArtStyle } from "../scene/artstyle";
+import { cardSwatch } from "./styletoggle";
 import type { Pose } from "../scene/pose";
 import { toggleChip } from "./chipgroup";
 
@@ -172,8 +173,9 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   // standard is WAP, so the combination only bit in HS, silently).
   type Lens = "all" | "major" | "wap";
   let lens: Lens = "all";
-  // Active art skin — the legend swatches read the SAME colorway the scene does
-  // (galaxy / ringers / fidenza), repainted by setArtStyle on every skin swap.
+  // Active art skin: the legend swatches read the scene's colorway for the
+  // active style, as printed on a dark card (cardSwatch), repainted by
+  // setArtStyle on every skin swap.
   let artStyle: ArtStyle = 0;
 
   const visN = nodes.visibleAttr.array as Float32Array;
@@ -343,7 +345,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
     );
     chip.classList.add("strand-chip");
     chip.title = strandMembers(s);
-    chip.style.setProperty("--dot", hexColor(strandSwatch(s, artStyle)));
+    chip.style.setProperty("--dot", hexColor(cardSwatch(s, artStyle)));
     chip.insertAdjacentHTML("afterbegin", '<span class="chip-dot"></span>');
     strandChips.set(s, chip);
     strandGroup.appendChild(chip);
@@ -416,7 +418,7 @@ export function createFilters(deps: FiltersDeps): FiltersHandle {
   // Repaint the strand-legend dots to the active skin's colorway.
   function recolorSwatches(): void {
     for (const [s, chip] of strandChips) {
-      chip.style.setProperty("--dot", hexColor(strandSwatch(s, artStyle)));
+      chip.style.setProperty("--dot", hexColor(cardSwatch(s, artStyle)));
     }
   }
 

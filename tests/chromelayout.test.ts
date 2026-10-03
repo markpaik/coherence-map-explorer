@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  besideLeft,
   depthSpan,
   dockTopRight,
   hOverlap,
@@ -76,6 +77,53 @@ describe("liftClear: a bottom-band surface rises just clear of what sits under i
     const above = box(0, 690, 100, 720);
     const lift = liftClear(low, [above], 10);
     expect(shiftBox(low, 0, -lift).b).toBeLessThanOrEqual(680);
+  });
+});
+
+describe("the style card: beside the pose control when it fits, else stacked above it", () => {
+  // 1440 x 900: the wide filter rail on the floor, the pose control lifted
+  // clear of it at the right, the style card (250 x 52) to place.
+  const filters = box(94, 844, 1346, 884);
+  const pose = box(1226, 786, 1412, 838);
+  const W = 250;
+  const H = 52;
+
+  it("takes the place just left of the pose control, bottoms aligned, 6px apart", () => {
+    const side = besideLeft(pose, W, H, 6, 0, [filters, pose]);
+    expect(side).toEqual(box(970, 786, 1220, 838));
+    expect(overlaps(side!, pose)).toBe(false);
+    expect(overlaps(side!, filters)).toBe(false);
+  });
+
+  it("refuses a place that leaves the region (a phone, a narrowed region)", () => {
+    // 390 x 844 phone: the pose control is about 170px wide at the right.
+    const phonePose = box(208, 600, 378, 652);
+    expect(besideLeft(phonePose, W, H, 6, 0, [phonePose])).toBeNull();
+    // A card that would start less than 12px from the region's left edge.
+    expect(besideLeft(box(300, 400, 486, 452), 290, H, 6, 0, [])).toBeNull();
+  });
+
+  it("refuses a place that meets other chrome (a wrapped rail reaching up, the title)", () => {
+    expect(besideLeft(box(1226, 640, 1412, 692), W, H, 6, 0, [box(1100, 700, 1400, 884)])).not.toBeNull();
+    expect(besideLeft(box(1226, 690, 1412, 742), W, H, 6, 0, [box(20, 700, 1100, 884)])).toBeNull();
+    expect(besideLeft(box(1226, 250, 1412, 302), W, H, 6, 0, [box(20, 20, 1100, 300)])).toBeNull();
+  });
+
+  it("stacked instead, the card clears the pose control and the hints clear the card", () => {
+    // The CSS default puts the card one row above the pose control; liftClear
+    // lifts it only when the pose control itself rose.
+    const phonePose = box(208, 600, 378, 652);
+    const card = box(128, 542, 378, 594);
+    expect(liftClear(card, [phonePose], 6)).toBe(0);
+    const risenPose = box(208, 560, 378, 612);
+    const lift = liftClear(card, [risenPose], 6);
+    expect(lift).toBe(40);
+    const placed = shiftBox(card, 0, -lift);
+    expect(overlaps(placed, risenPose)).toBe(false);
+    const hints = box(150, 580, 378, 596);
+    const hLift = liftClear(hints, [risenPose, placed], 6);
+    expect(overlaps(shiftBox(hints, 0, -hLift), placed)).toBe(false);
+    expect(overlaps(shiftBox(hints, 0, -hLift), risenPose)).toBe(false);
   });
 });
 

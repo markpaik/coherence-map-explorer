@@ -20,7 +20,7 @@
 
 import type { GraphCore, GraphNode, SearchDoc } from "../data";
 import { loadDetails, loadSearchDocs } from "../data";
-import { STRAND_COLORS } from "../scene/palette";
+import { swatchVar } from "./styletoggle";
 import { resolveConnections, type Machine } from "../state/machine";
 import { codeFromHash, storyIdFromHash } from "../state/routing";
 import type { StoryPickerHandle } from "../stories/player";
@@ -69,10 +69,6 @@ const domainRank = (d: string): number => {
 const SEARCH_MAX = 25;
 
 // --- helpers --------------------------------------------------------------
-
-function hexColor(v: number): string {
-  return `#${v.toString(16).padStart(6, "0")}`;
-}
 
 // First ~n chars of the standard text on a word boundary (domain / connection
 // rows get a one-glance snippet; the full text lives in the standard view).
@@ -583,7 +579,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
   function gradeChip(n: GraphNode): HTMLSpanElement {
     const chip = document.createElement("span");
     chip.className = "browse-chip";
-    chip.style.setProperty("--dot", hexColor(STRAND_COLORS[n.strand]));
+    chip.style.setProperty("--dot", swatchVar(n.strand));
     chip.textContent = n.grade;
     // "4" alone is ambiguous to a screen reader — name the grade.
     chip.setAttribute("aria-label", n.grade === "HS" ? "High school" : `Grade ${n.grade}`);
@@ -627,7 +623,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
       row.className = "browse-domain-row";
       const dot = document.createElement("span");
       dot.className = "browse-dot";
-      dot.style.background = hexColor(STRAND_COLORS[info.strand]);
+      dot.style.background = swatchVar(info.strand);
       const name = document.createElement("span");
       name.className = "browse-domain-name";
       name.textContent = info.name;
@@ -716,7 +712,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     btn.dataset.nid = n.id;
     const dot = document.createElement("span");
     dot.className = "browse-dot";
-    dot.style.background = hexColor(STRAND_COLORS[n.strand]);
+    dot.style.background = swatchVar(n.strand);
     const main = rowText(n.code, textOf(nodeByCode.get(n.code)!));
     btn.append(dot, main);
     // Major work is a K-8 designation; HS clusters carry msa 0 as a source
@@ -756,7 +752,7 @@ export function createBrowse(deps: BrowseDeps): BrowseHandle {
     codeRow.className = "browse-std-code-row";
     const dot = document.createElement("span");
     dot.className = "browse-std-dot";
-    dot.style.background = hexColor(STRAND_COLORS[n.strand]);
+    dot.style.background = swatchVar(n.strand);
     const h = document.createElement("h1");
     h.className = "browse-std-code";
     h.tabIndex = -1;

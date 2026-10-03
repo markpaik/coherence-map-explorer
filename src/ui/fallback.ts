@@ -14,7 +14,7 @@ import type { GraphCore } from "../data";
 import { createPanel, type Connections } from "./panel";
 import { resolveConnections } from "../state/machine";
 import { codeFromHash } from "../state/routing";
-import { STRAND_COLORS } from "../scene/palette";
+import { swatchVar } from "./styletoggle";
 import { CCSS_NOTICE } from "./license";
 
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "HS"];
@@ -22,10 +22,6 @@ const GRADE_LABELS: Record<string, string> = {
   K: "Kindergarten",
   HS: "High School",
 };
-
-function hexColor(v: number): string {
-  return `#${v.toString(16).padStart(6, "0")}`;
-}
 
 export function createFallback(graph: GraphCore, reason: string): void {
   // Hide the 3D-only chrome (canvas host, boot veil, the inert search rail).
@@ -177,7 +173,7 @@ export function createFallback(graph: GraphCore, reason: string): void {
       el.className = "fallback-row";
       const chip = document.createElement("span");
       chip.className = "fallback-chip";
-      chip.style.setProperty("--dot", hexColor(STRAND_COLORS[n.strand]));
+      chip.style.setProperty("--dot", swatchVar(n.strand));
       chip.textContent = n.grade;
       const code = document.createElement("span");
       code.className = "fallback-code";
