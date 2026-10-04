@@ -15,7 +15,7 @@
 import * as THREE from "three";
 import type { GraphNode } from "../data";
 import { EMPHASIS, STRAND_COLORS, STRAND_VIVID, restRadius } from "./palette";
-import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE } from "./artstyle";
+import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE, HANGA_DUSK_DAMAGE } from "./artstyle";
 import { STRAND_ORDER } from "./palette";
 
 const DIM_TARGET = 0x0a0a18; // dimmed nodes lerp toward this (factor 0.82)
@@ -192,6 +192,8 @@ interface HangaNodeUniforms {
   /** Bare-disc fill opacity, and the bare-disc outline opacity. */
   uHBareA: { value: number };
   uHBareOutlineA: { value: number };
+  /** 1 on Dusk: damage darkens and desaturates (HANGA_DUSK_DAMAGE); 0 on Washi. */
+  uHDmgDark: { value: number };
   /** Drawing-buffer size (device px) and device px per CSS px. */
   uHViewW: { value: number };
   uHViewH: { value: number };
@@ -329,6 +331,7 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         uniform vec3 uHSumi;
         uniform float uHBareA;
         uniform float uHBareOutlineA;
+        uniform float uHDmgDark;
         uniform float uTime;
         varying float vHIdx;
         varying float vHLift;
@@ -369,7 +372,13 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         float lineA = hIdx == 4 ? uHBareOutlineA : 1.0;
         float a = mix(lineA, ${glf(HANGA_NODE.UNDER_OUTLINE_ALPHA)}, under);
         a *= 1.0 - 0.3 * d;
-        diffuseColor.rgb = uHSumi;
+        vec3 lineCol = uHSumi;
+        if (uHDmgDark > 0.5) {
+          // Dusk: the pale key-block line of a damaged disc dims toward the field.
+          float kd = smoothstep(0.0, ${glf(HANGA_DUSK_DAMAGE.RAMP)}, d);
+          lineCol = mix(lineCol, uField, ${glf(HANGA_DUSK_DAMAGE.LINE_DIM)} * kd);
+        }
+        diffuseColor.rgb = lineCol;
         diffuseColor.a *= a * band * flickMul;
         `
       : /* glsl */ `
@@ -389,9 +398,20 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         // Unlit: faint sumi underdrawing.
         col = mix(col, uHSumi, under);
         a = mix(a, ${glf(HANGA_NODE.UNDER_ALPHA)}, under);
-        // Damage: wash toward the field, shed opacity (a husk is a pale stain).
-        col = mix(col, uField, ${glf(HANGA_NODE.WASH)} * d);
-        a *= 1.0 - ${glf(HANGA_NODE.WASH_ALPHA)} * d;
+        if (uHDmgDark > 0.5) {
+          // Dusk: drain the colour and the light first, then a light wash, so a
+          // damaged disc reads clearly darker than a lit one (see HANGA_DUSK_DAMAGE).
+          float kd = smoothstep(0.0, ${glf(HANGA_DUSK_DAMAGE.RAMP)}, d);
+          float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+          col = mix(col, vec3(lum), ${glf(HANGA_DUSK_DAMAGE.DESAT)} * kd);
+          col *= mix(1.0, ${glf(HANGA_DUSK_DAMAGE.DARKEN)}, kd);
+          col = mix(col, uField, ${glf(HANGA_DUSK_DAMAGE.WASH)} * d);
+          a *= 1.0 - ${glf(HANGA_DUSK_DAMAGE.ALPHA)} * d;
+        } else {
+          // Washi: wash toward the field, shed opacity (a husk is a pale stain).
+          col = mix(col, uField, ${glf(HANGA_NODE.WASH)} * d);
+          a *= 1.0 - ${glf(HANGA_NODE.WASH_ALPHA)} * d;
+        }
         // A clean circular edge, feathered over one px.
         a *= 1.0 - smoothstep(vHRpx - 0.5, vHRpx + 0.5, rho);
         diffuseColor.rgb = col;
@@ -994,6 +1014,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     uHSumi: { value: new THREE.Color() },
     uHBareA: { value: 1 },
     uHBareOutlineA: { value: 0.75 },
+    uHDmgDark: { value: 0 },
     uHViewW: { value: 1 },
     uHViewH: { value: 1 },
     uHPxRatio: { value: 1 },
@@ -1048,6 +1069,7 @@ export function createNodes(nodes: GraphNode[], radii: Float32Array): NodesHandl
     hangaU.uHSumi.value.setHex(pal.sumi);
     hangaU.uHBareA.value = pal.paperAlpha;
     hangaU.uHBareOutlineA.value = style === 4 ? 0.6 : 0.75;
+    hangaU.uHDmgDark.value = style === 4 ? 1 : 0;
     hangaField.value.setHex(pal.bg);
   }
 

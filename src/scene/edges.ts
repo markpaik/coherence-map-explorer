@@ -30,7 +30,7 @@
 import * as THREE from "three";
 import type { GraphEdge, GraphNode } from "../data";
 import { STRAND_COLORS, STRAND_VIVID, STRAND_ORDER, restRadius } from "./palette";
-import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE } from "./artstyle";
+import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE, HANGA_DUSK_DAMAGE } from "./artstyle";
 
 const SEGMENTS = 24;
 
@@ -673,6 +673,7 @@ const FRAG = /* glsl */ `
   uniform float uArtStyle; // 0 Galaxy | 1 Ringers | 2 Fidenza | 3 Washi | 4 Dusk
   uniform float uPose; // eased pose value 0..3; 3 = Transit (opaque metro lines)
   uniform vec3 uHangaSumi; // Hanga key-block ink (LINEAR): related dabs + the unlit underdrawing
+  uniform float uHangaDmgDark; // 1 on Dusk: damaged strokes darken and desaturate
   uniform float uPxRatio; // device px per CSS px (the Hanga dab sizes)
   uniform vec3 uField; // active art-style field color (damage fades toward it)
   uniform float uEnvLight; // 0..1 light-environment amount (Ascent dawn OR Transit daylight)
@@ -1047,8 +1048,18 @@ const FRAG = /* glsl */ `
         alpha *= dab;
       }
 
-      // Damage: the pigment washes toward the field and sheds opacity.
-      col = mix(col, uField, clamp(vDamage * 0.85, 0.0, 1.0));
+      // Damage: the pigment washes toward the field and sheds opacity. On Dusk
+      // (a dark field under light pigments) the stroke first drains of colour
+      // and light, matching the damaged disc (HANGA_DUSK_DAMAGE).
+      if (uHangaDmgDark > 0.5) {
+        float kd = smoothstep(0.0, ${glf(HANGA_DUSK_DAMAGE.RAMP)}, vDamage);
+        float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+        col = mix(col, vec3(lum), ${glf(HANGA_DUSK_DAMAGE.DESAT)} * kd);
+        col *= mix(1.0, ${glf(HANGA_DUSK_DAMAGE.DARKEN)}, kd);
+        col = mix(col, uField, ${glf(HANGA_DUSK_DAMAGE.WASH)} * vDamage);
+      } else {
+        col = mix(col, uField, clamp(vDamage * 0.85, 0.0, 1.0));
+      }
       alpha *= 1.0 - 0.6 * vDamage;
 
       fragColor = vec4(col, alpha * openerReveal());
@@ -1299,6 +1310,7 @@ export function createEdges(
     // by setArtStyle for styles 3 and 4, unread elsewhere.
     uHanga: { value: hangaVecs },
     uHangaSumi: { value: new THREE.Color(0x000000) },
+    uHangaDmgDark: { value: 0 },
     // Opener per-edge crystallization. uOpenerClock = ms since the opener started
     // (−1 = inactive ⇒ every ribbon fully present, byte-identical); uEdgeFadeMs =
     // each ribbon's ghost-in length. Appear-times ride in aColorA.w.
@@ -1412,6 +1424,7 @@ export function createEdges(
         const pal = hangaPalette(style);
         uniforms.uField.value.setHex(pal.bg);
         uniforms.uHangaSumi.value.setHex(pal.sumi);
+        uniforms.uHangaDmgDark.value = style === 4 ? 1 : 0;
         STRAND_ORDER.forEach((sid, i) => {
           const cc = scratchColor.setHex(pal.pigment[sid]);
           hangaVecs[i].set(cc.r, cc.g, cc.b);

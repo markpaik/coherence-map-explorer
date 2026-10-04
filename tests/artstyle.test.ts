@@ -16,6 +16,7 @@ import {
   ART_STYLE_NAMES,
   ART_STYLE_SLUGS,
   HANGA,
+  HANGA_DUSK_DAMAGE,
   hangaPalette,
   isHanga,
   strandSwatch,
@@ -222,5 +223,45 @@ describe("Hanga edge shader", () => {
     expect(mat.vertexShader).toContain("} else if (uArtStyle < 2.5) {");
     expect(mat.fragmentShader).toContain("} else if (uArtStyle < 2.5) {");
     edges.dispose();
+  });
+});
+
+describe("Dusk damage reads darker than lit (QA F3)", () => {
+  // TS mirror of the Dusk damage branch in the Hanga disc shader, on the flat
+  // pigment (LINEAR), returned as sRGB luminance 0..255 over the field.
+  const toLin = (c: number): number => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const toSrgb = (c: number): number => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
+  const rgb = (hex: number): number[] => [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map((v) => toLin(v / 255));
+  const ss = (e0: number, e1: number, x: number): number => {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+  function shown(hex: number, d: number): number {
+    const D = HANGA_DUSK_DAMAGE;
+    const field = rgb(HANGA.dusk.bg);
+    let c = rgb(hex);
+    const kd = ss(0, D.RAMP, d);
+    const lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    c = c.map((v) => v + (lum - v) * D.DESAT * kd);
+    c = c.map((v) => v * (1 + (D.DARKEN - 1) * kd));
+    c = c.map((v, i) => v + (field[i] - v) * D.WASH * d);
+    const a = 1 - D.ALPHA * d;
+    c = c.map((v, i) => v * a + field[i] * (1 - a)); // composite over the field
+    const s = c.map(toSrgb);
+    return 255 * (0.2126 * s[0] + 0.7152 * s[1] + 0.0722 * s[2]);
+  }
+
+  it("drops every pigment by 45 or more of 255 from the story floor (0.35) up", () => {
+    for (const sid of STRAND_ORDER) {
+      const lit = shown(HANGA.dusk.pigment[sid], 0);
+      for (const d of [0.35, 0.5, 0.75, 1]) {
+        expect(lit - shown(HANGA.dusk.pigment[sid], d), `${sid} d=${d}`).toBeGreaterThanOrEqual(45);
+      }
+    }
+  });
+
+  it("keeps a husk lighter than the bare field (a stain, not a hole)", () => {
+    const fieldLum = shown(HANGA.dusk.bg, 0);
+    for (const sid of STRAND_ORDER) expect(shown(HANGA.dusk.pigment[sid], 1)).toBeGreaterThan(fieldLum);
   });
 });
