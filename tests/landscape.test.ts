@@ -21,7 +21,9 @@ import {
   cranePathInto,
   easeQuiet,
   murmurationCenter,
-  murmurationLocal,
+  murmurationSeed,
+  murmurationSpeck,
+  MURM_SUBS,
   hexToLinear,
   crestLinear,
   contrast,
@@ -163,68 +165,144 @@ describe("quiet easing", () => {
 
 describe("murmuration bounds", () => {
   const far = RINGS[RINGS.length - 1];
-  const highestFar = ringCeiling(far);
+  const SEEDS = Array.from({ length: MURM.count }, (_, i) => murmurationSeed(i));
+  const TIMES: number[] = [];
+  for (let t = 0; t < 600; t += 3.1) TIMES.push(t);
 
-  it("the center stays above the far ridge top and beyond the far ring radius", () => {
-    for (let t = 0; t < 1200; t += 0.5) {
-      const c = murmurationCenter(t);
-      expect(c.R).toBeGreaterThan(far.R);
-      expect(c.h).toBeGreaterThan(highestFar);
+  // The lowest height a speck at (az, R) may take and still clear every ring
+  // crest along the ray from a camera at (0, camY, camZ), relative to the
+  // landscape center.
+  function ridgeFloor(az: number, R: number, camY: number, camZ: number): number {
+    const bx = R * Math.sin(az);
+    const bz = -R * Math.cos(az);
+    const L = Math.hypot(bx, bz - camZ);
+    const ux = bx / L;
+    const uz = (bz - camZ) / L;
+    let need = -Infinity;
+    for (const ring of RINGS) {
+      const b = uz * camZ;
+      const s = -b + Math.sqrt(b * b - (camZ * camZ - ring.R * ring.R));
+      const th = Math.atan2(s * ux, -(camZ + s * uz));
+      const e = (ridgeHeight(ring, th) - camY) / s;
+      need = Math.max(need, camY + e * L);
     }
+    return need;
+  }
+  // Home cameras relative to the landscape center, measured in the app:
+  // 1440x900, 1280x720, 1024x600.
+  const HOME_CAMS: [number, number][] = [
+    [-5, 918],
+    [-15, 905],
+    [-48, 994],
+  ];
+
+  it("the center stays beyond the far ring radius", () => {
+    for (let t = 0; t < 1200; t += 0.5) expect(murmurationCenter(t).R).toBeGreaterThan(far.R);
   });
 
-  it("every speck stays above the far ridge, beyond the far ring, and under the title block", () => {
+  it("the cloud stays in open sky right of the title block and above the bottom chrome", () => {
+    // Pinhole projection of the 1440x900 home camera (level, fov 50).
+    const k = 450 / Math.tan(25 * (Math.PI / 180));
     let minR = Infinity;
-    let minH = Infinity;
-    let maxH = -Infinity;
     let minAz = Infinity;
     let maxAz = -Infinity;
-    let maxExtent = 0;
-    for (let s = 0; s < 400; s++) {
-      // corners and hashed points of the unit ball
-      const u = lhash(701, s) * TAU;
-      const v = Math.acos(2 * lhash(702, s) - 1);
-      const r = s < 50 ? 1 : Math.cbrt(lhash(703, s));
-      const p0: [number, number, number] = [r * Math.sin(v) * Math.cos(u), r * Math.cos(v), r * Math.sin(v) * Math.sin(u)];
-      for (let t = 0; t < 1200; t += 1.7) {
-        const c = murmurationCenter(t);
-        const [x, y, z] = murmurationLocal(p0, t);
-        const horiz = Math.hypot(c.R + z, x);
-        minR = Math.min(minR, horiz);
-        minH = Math.min(minH, c.h + y);
-        maxH = Math.max(maxH, c.h + y);
-        const az = c.az + Math.atan2(x, c.R + z);
-        minAz = Math.min(minAz, az);
-        maxAz = Math.max(maxAz, az);
-        maxExtent = Math.max(maxExtent, Math.hypot(x, y));
+    let minX = Infinity;
+    let maxY = -Infinity;
+    let inBand = 0;
+    let below = 0;
+    let n = 0;
+    for (const t of TIMES) {
+      for (const sd of SEEDS) {
+        const p = murmurationSpeck(sd, t);
+        minR = Math.min(minR, p.R);
+        minAz = Math.min(minAz, p.az);
+        maxAz = Math.max(maxAz, p.az);
+        const D = 918 + p.R * Math.cos(p.az);
+        const x = 720 + ((p.R * Math.sin(p.az)) / D) * k;
+        const y = 450 - ((p.h + 5) / D) * k;
+        minX = Math.min(minX, x);
+        maxY = Math.max(maxY, y);
+        if (y >= 60 && y <= 330) inBand++;
+        // Soft rule: a few specks may dip behind the ridge crest line.
+        if (HOME_CAMS.some(([cy, cz]) => p.h < ridgeFloor(p.az, p.R, cy, cz))) below++;
+        n++;
       }
     }
     expect(minR).toBeGreaterThan(far.R);
-    expect(minH).toBeGreaterThan(highestFar);
-    // QA F8: the whole drift envelope stays low and left of the map, clear of
-    // the title block at the home view (verified at 1440x900, 1280x720, 1024x600).
-    expect(maxH).toBeLessThanOrEqual(MURM.envelopeTop);
-    expect(minAz).toBeGreaterThan(-48 * (Math.PI / 180));
-    expect(maxAz).toBeLessThan(-36 * (Math.PI / 180));
-    // The flock is a loose cloud, not a line across the sky.
-    expect(maxExtent).toBeLessThan(450);
+    // Right of the map's center, clear of the title block (right edge 662 px).
+    expect(minAz).toBeGreaterThan(8 * (Math.PI / 180));
+    expect(maxAz).toBeLessThan(50 * (Math.PI / 180));
+    expect(minX).toBeGreaterThan(700);
+    // About y 90 to 320, and nowhere near the Style card or pose control (y > 700).
+    expect(inBand / n).toBeGreaterThan(0.98);
+    expect(maxY).toBeLessThan(700);
+    expect(below / n).toBeLessThan(0.02);
+    // A dispersed cloud: at least 25 deg of sky wide.
+    expect(maxAz - minAz).toBeGreaterThan(25 * (Math.PI / 180));
   });
 
-  it("holds 600 to 900 specks and moves slowly", () => {
-    expect(MURM.count).toBeGreaterThanOrEqual(600);
-    expect(MURM.count).toBeLessThanOrEqual(900);
-    // Fastest speck speed in world units per second (no darting).
-    let vmax = 0;
-    for (let s = 0; s < 120; s++) {
-      const p0: [number, number, number] = [lhash(1, s) * 2 - 1, lhash(2, s) * 2 - 1, lhash(3, s) * 2 - 1];
-      for (let t = 0; t < 200; t += 0.9) {
-        const a = murmurationLocal(p0, t);
-        const b = murmurationLocal(p0, t + 0.1);
-        vmax = Math.max(vmax, Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 0.1);
+  it("never gathers more than 30% of specks in one 60 px disc at 1440x900", () => {
+    // Pinhole projection of the 1440x900 home camera (level, fov 50).
+    const camY = -5;
+    const camZ = 918;
+    const k = 450 / Math.tan(25 * (Math.PI / 180));
+    const xs = new Float64Array(SEEDS.length);
+    const ys = new Float64Array(SEEDS.length);
+    let worst = 0;
+    for (let t = 0; t < 600; t += 2.3) {
+      SEEDS.forEach((sd, i) => {
+        const p = murmurationSpeck(sd, t);
+        const X = p.R * Math.sin(p.az);
+        const Z = -p.R * Math.cos(p.az);
+        const D = camZ - Z;
+        xs[i] = 720 + (X / D) * k;
+        ys[i] = 450 - ((p.h - camY) / D) * k;
+      });
+      for (let i = 0; i < SEEDS.length; i++) {
+        let n = 0;
+        for (let j = 0; j < SEEDS.length; j++) {
+          const dx = xs[j] - xs[i];
+          const dy = ys[j] - ys[i];
+          if (dx * dx + dy * dy <= 900) n++;
+        }
+        worst = Math.max(worst, n / SEEDS.length);
       }
     }
-    expect(vmax).toBeLessThan(90);
-    for (const per of [MURM.pW1, MURM.pW2, MURM.pW3, MURM.pS, MURM.pTilt]) expect(per).toBeGreaterThanOrEqual(13);
+    expect(worst).toBeLessThanOrEqual(0.3);
+  });
+
+  it("holds 600 to 900 specks, varies their size, and moves slowly", () => {
+    expect(MURM.count).toBeGreaterThanOrEqual(600);
+    expect(MURM.count).toBeLessThanOrEqual(900);
+    expect(MURM.px0).toBeGreaterThanOrEqual(1.5);
+    expect(MURM.px1).toBeLessThanOrEqual(3);
+    // Fastest speck speed in world units per second (no darting).
+    let vmax = 0;
+    for (const sd of SEEDS.slice(0, 200)) {
+      for (let t = 0; t < 200; t += 1.3) {
+        const a = murmurationSpeck(sd, t);
+        const b = murmurationSpeck(sd, t + 0.1);
+        const ds = Math.hypot((b.az - a.az) * a.R, b.h - a.h, b.R - a.R);
+        vmax = Math.max(vmax, ds / 0.1);
+      }
+    }
+    expect(vmax).toBeLessThan(120);
+    // No shape-change period under 20 s.
+    const periods = [MURM.pW1, MURM.pW2, MURM.pW3, MURM.pS, MURM.pTilt, MURM.pStream, MURM.jitP0, ...MURM_SUBS.flatMap((s) => [s[0], s[2], s[4]])];
+    for (const per of periods) expect(per).toBeGreaterThanOrEqual(20);
+    // The sub-flocks split and merge over 30 to 60 s (their azimuth swings).
+    for (const s of MURM_SUBS) {
+      expect(s[0]).toBeGreaterThanOrEqual(30);
+      expect(s[0]).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it("no two specks share a path", () => {
+    const a = murmurationSpeck(SEEDS[0], 50);
+    for (const sd of SEEDS.slice(1, 300)) {
+      const b = murmurationSpeck(sd, 50);
+      expect(Math.abs(b.az - a.az) + Math.abs(b.h - a.h) + Math.abs(b.R - a.R)).toBeGreaterThan(1e-6);
+    }
   });
 });
 
