@@ -26,7 +26,7 @@ import type { Pose, PoseDriver } from "../scene/pose";
 // the record so it still covers every Pose and re-enabling is a one-line change.
 const CAPTIONS: Record<Pose, string> = {
   0: "The galaxy: every standard, a star in its strand.",
-  1: "Altitude shows how much mathematics stands beneath a standard.",
+  1: "Altitude shows how much mathematics a standard depends on.",
   2: "The drafting sheet: thirteen columns, K to Advanced, after the original map.",
   3: "The metro: trunk lines of prerequisite flow; interchanges are the crossroads.",
 };

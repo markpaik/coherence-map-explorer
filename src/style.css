@@ -442,7 +442,9 @@ body.tour-cramped .nav-hints {
 .view-caption {
   position: fixed;
   left: calc((100vw - var(--panel-inset)) / 2);
-  bottom: clamp(96px, 14vh, 120px);
+  /* chromelayout.ts lifts it clear of the style card, the pose control, and
+     the search rail (--lift-caption), or steps it aside (caption-cramped). */
+  bottom: calc(clamp(96px, 14vh, 120px) + var(--lift-caption, 0px));
   transform: translateX(-50%) translateY(6px);
   z-index: 12;
   max-width: min(90vw, 460px);
@@ -463,6 +465,9 @@ body.tour-cramped .nav-hints {
 .view-caption-on {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+.view-caption.caption-cramped {
+  visibility: hidden;
 }
 /* Reduced motion: no slide, just appear/disappear (instant, no transform easing). */
 :root.rm .view-caption {
