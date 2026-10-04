@@ -388,6 +388,29 @@ export function canvasRegion(): Box {
   return { l: 0, t: 0, r, b: window.innerHeight };
 }
 
+// --- the sheet's top band -----------------------------------------------------
+
+/**
+ * The Washi and Dusk fields print their top band screen-fixed, down to the
+ * title block's bottom (scene/environs.ts). The pass reports that edge, in px
+ * from the top, or null when no title shows (hidden on a phone, stepped aside
+ * in a story, Browse). Listeners get the latest value on subscribe.
+ */
+type TitleBottomListener = (bottomPx: number | null, viewportH: number) => void;
+const titleBottomListeners = new Set<TitleBottomListener>();
+let lastTitleBottom: { px: number | null; vh: number } | null = null;
+export function onTitleBottom(fn: TitleBottomListener): () => void {
+  titleBottomListeners.add(fn);
+  if (lastTitleBottom) fn(lastTitleBottom.px, lastTitleBottom.vh);
+  return () => titleBottomListeners.delete(fn);
+}
+function reportTitleBottom(px: number | null, vh: number): void {
+  const v = px === null ? null : Math.round(px);
+  if (lastTitleBottom && lastTitleBottom.px === v && lastTitleBottom.vh === vh) return;
+  lastTitleBottom = { px: v, vh };
+  for (const fn of titleBottomListeners) fn(v, vh);
+}
+
 // --- the pass ---------------------------------------------------------------
 
 const GAP_STACK = 6; // toggle over rail, hints over toggle (the shipped spacing)
@@ -551,6 +574,7 @@ export function installChromeLayout(): () => void {
       setVar("--title-shift", dx);
       title.classList.toggle("title-cramped", cramped);
     }
+    reportTitleBottom(tInk && title && !title.classList.contains("title-cramped") ? tInk.b : null, vh);
 
     // Rising stack: each item clears everything placed below it.
     const lifted = (el: HTMLElement, name: string, gap: number, under: readonly Box[]): { lift: number; box: Box } => {

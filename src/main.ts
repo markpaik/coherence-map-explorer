@@ -34,7 +34,7 @@ import { createStations } from "./scene/stations";
 import { createDrafts, draftFade } from "./scene/drafts";
 import { createSheet } from "./scene/sheet";
 import { createContours } from "./scene/contours";
-import { createEnvirons, endpointOwns } from "./scene/environs";
+import { bandBottomFrac, createEnvirons, endpointOwns } from "./scene/environs";
 import { createLandscape } from "./scene/landscape";
 import { computeNodeRadii } from "./scene/reach";
 import { mulberry32 } from "./scene/evolve";
@@ -64,7 +64,7 @@ import {
 import { FIDENZA, HANGA, RINGERS, isHanga, type ArtStyle } from "./scene/artstyle";
 import { createFallback } from "./ui/fallback";
 import { createBrowse, type BrowseHandle } from "./ui/browse";
-import { PHONE_QUERY } from "./ui/chromelayout";
+import { PHONE_QUERY, onTitleBottom } from "./ui/chromelayout";
 import { decideRoute, storyIdFromHash, codeFromHash } from "./state/routing";
 import { claimChunkReload } from "./state/chunkreload";
 import { hasFloatColorBuffer } from "./scene/glcaps";
@@ -283,6 +283,11 @@ function start(graph: GraphCore): void {
   const requestRender = (): void => {
     needsRender = true;
   };
+  // The Washi and Dusk top band runs to the title block's bottom (screen-fixed).
+  onTitleBottom((px, vh) => {
+    environs.setBandBottom(bandBottomFrac(px, vh));
+    requestRender();
+  });
 
   // -- aria-live announcer (polite; canvas stays aria-hidden) --------------
   const liveEl = document.getElementById("aria-live");

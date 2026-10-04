@@ -120,6 +120,15 @@ export const HANGA_FIELD_GLSL = /* glsl */ `
   uniform vec3 uHWarm;
   // Camera heading in the xz plane (unit), fed each draw for the Hanga shell.
   uniform vec2 uHFwd;
+  // The top band belongs to the SHEET, not the sky: it is fixed to the screen.
+  // uViewport is the size in px of the target being drawn (gl_FragCoord's
+  // space); uBandBottom is where the full-strength band ends, as a fraction of
+  // the screen height from the top (the title block's bottom plus a margin,
+  // fed by the chrome layout pass). Below it the band fades out over
+  // H_BAND_FADE of the screen height.
+  uniform vec2 uViewport;
+  uniform float uBandBottom;
+  const float H_BAND_FADE = 0.18;
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float vnoise(vec2 p) {
@@ -152,26 +161,25 @@ export const HANGA_FIELD_GLSL = /* glsl */ `
   const float HE_WARM2 = -0.401; // (93%)
   const float HE_FLOOR = -0.466; // preview sheet bottom (100%)
 
+  // The sheet's top band: 0 above uBandBottom's fade, 1 at full strength.
+  // t runs 0..1 down the fade; the strength eases out on a smoothstep, so the
+  // edge prints as a bokashi, with no visible step at either end.
+  float hBandT() {
+    float s = 1.0 - gl_FragCoord.y / max(uViewport.y, 1.0); // 0 top .. 1 bottom
+    return clamp((s - uBandBottom) / H_BAND_FADE, 0.0, 1.0);
+  }
+
   vec3 hangaField(float e, bool dusk, vec3 dir) {
     vec3 col;
+    float bt = hBandT();
+    float ba = 1.0 - smoothstep(0.0, 1.0, bt);
     if (!dusk) {
-      // Washi daylight: Hiroshige's Prussian band at the top of the sky,
-      // composited over bare paper and gone by 30% height.
-      vec3 c1 = vec3(0.435294, 0.525490, 0.627451); // #6f86a0
+      // Washi daylight: bare paper, with Hiroshige's Prussian band printed
+      // across the top of the sheet (screen-fixed, above), thinning to paper
+      // through the old preview's blues as it fades.
       vec3 c2 = vec3(0.290196, 0.400000, 0.533333); // #4a6688
       vec3 c3 = vec3(0.168627, 0.290196, 0.439216); // #2b4a70
-      vec3 sky = c1;
-      float a = 0.0;
-      sky = mix(sky, c2, hRamp(e, HE_CLEAR, HE_MID2));
-      a = mix(a, 0.2, hRamp(e, HE_CLEAR, HE_MID2));
-      sky = mix(sky, c3, hRamp(e, HE_MID2, HE_MID1));
-      a = mix(a, 0.62, hRamp(e, HE_MID2, HE_MID1));
-      sky = mix(sky, uHTop, hRamp(e, HE_MID1, HE_BAND));
-      a = mix(a, 0.96, hRamp(e, HE_MID1, HE_BAND));
-      a = mix(a, 1.0, hRamp(e, HE_BAND, HE_TOP));
-      // Toward the zenith the Prussian deepens a little (looking up).
-      sky = mix(sky, uHTop * 0.78, hRamp(e, HE_TOP, 1.4));
-      col = mix(uHMid, sky, a);
+      col = uHMid;
       // Faint persimmon horizon band.
       vec3 w2 = vec3(0.905882, 0.603922, 0.407843); // #e79a68
       float wa = mix(0.0, 0.2, hRamp(-e, -HE_WARM0, -HE_WARM1));
@@ -179,6 +187,9 @@ export const HANGA_FIELD_GLSL = /* glsl */ `
       wa = mix(wa, 0.12, hRamp(-e, -HE_WARM1, -HE_WARM2));
       wa = mix(wa, 0.0, hRamp(-e, -HE_WARM2, -HE_FLOOR));
       col = mix(col, wc, wa);
+      vec3 sky = mix(uHTop, c3, smoothstep(0.2, 0.75, bt));
+      sky = mix(sky, c2, smoothstep(0.55, 1.0, bt));
+      col = mix(col, sky, ba);
     } else {
       // Indigo dusk: aizuri at the top grading through the mid field to slate.
       vec3 z0 = vec3(0.031373, 0.070588, 0.164706); // #08122a
@@ -196,6 +207,9 @@ export const HANGA_FIELD_GLSL = /* glsl */ `
       wa = mix(wa, 0.16, hRamp(-e, 0.359, 0.378));
       wa = mix(wa, 0.0, hRamp(-e, 0.378, 0.419));
       col = mix(col, wc, wa);
+      // The sheet's band: deep aizuri across the top of the screen, whatever
+      // the camera's pitch, fading into the field below the title.
+      col = mix(col, z1, ba);
     }
     // Paper: a broad, soft mottle and a fine fiber grain stretched sideways
     // like laid washi. Direction-based, so it never seams on orbit. Quiet.
@@ -297,6 +311,30 @@ const SHELL_FRAG = /* glsl */ `
 
 export const SHELL_RADIUS = 5200; // inside the 12000 camera far plane, beyond the star shell (3600)
 
+/**
+ * Where the full-strength top band ends (fraction of the screen height from the
+ * top) for a title block whose ink ends at `titleBottomPx`, or the default when
+ * no title shows. The band runs BAND_MARGIN px past the last title line, so the
+ * fade always starts below the title ink.
+ */
+export const BAND_DEFAULT = 0.11;
+export const BAND_MARGIN = 24;
+export function bandBottomFrac(titleBottomPx: number | null, viewportH: number): number {
+  if (titleBottomPx === null || !(viewportH > 0)) return BAND_DEFAULT;
+  return Math.min(0.75, Math.max(0.02, (titleBottomPx + BAND_MARGIN) / viewportH));
+}
+
+/**
+ * The Hanga field's screen uniforms, shared by every material that includes
+ * HANGA_FIELD_GLSL (the shell here, the mist and floor in landscape.ts): the
+ * same objects, so one write reaches them all. Only the Hanga materials read
+ * them, and those are hidden at style 0.
+ */
+export const HANGA_SCREEN_UNIFORMS = {
+  uViewport: { value: new THREE.Vector2(1, 1) },
+  uBandBottom: { value: BAND_DEFAULT },
+};
+
 const srgb01 = (hex: number): THREE.Vector3 =>
   new THREE.Vector3(((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255);
 
@@ -321,6 +359,7 @@ function makeShellMaterial(type: 0 | 1 | 2 | 3): THREE.ShaderMaterial {
       uHBottom: { value: new THREE.Vector3() },
       uHWarm: { value: new THREE.Vector3() },
       uHFwd: { value: new THREE.Vector2(0, -1) },
+      ...HANGA_SCREEN_UNIFORMS,
     },
     side: THREE.BackSide,
     transparent: true,
@@ -405,6 +444,12 @@ export interface EnvironsHandle {
    *  normal-blend vivid signage, and nodes/stations repaint to the vivid palette,
    *  whenever this owns the frame — at the Ascent dawn AND the Transit daylight. */
   envLight01(): number;
+  /**
+   * Where the Hanga field's top band ends, as a fraction of the screen height
+   * from the top (chromelayout.ts feeds the title block's bottom through
+   * bandBottomFrac). Only the Hanga shell and the landscape read it.
+   */
+  setBandBottom(frac: number): void;
   dispose(): void;
 }
 
@@ -441,9 +486,14 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
     mesh.frustumCulled = false;
     mesh.renderOrder = -10; // behind everything
     g.add(mesh);
-    // The Hanga shell reads the camera heading at draw time (no allocation).
+    // The Hanga shell reads the camera heading and the target size at draw
+    // time (no allocation). It draws first (renderOrder -10), so the landscape's
+    // field-sampling materials see the same viewport in the same pass.
     if (mat === hangaShellMat) {
-      mesh.onBeforeRender = (_r, _s, camera) => {
+      mesh.onBeforeRender = (renderer, _s, camera) => {
+        const target = renderer.getRenderTarget();
+        if (target) HANGA_SCREEN_UNIFORMS.uViewport.value.set(target.width, target.height);
+        else renderer.getDrawingBufferSize(HANGA_SCREEN_UNIFORMS.uViewport.value);
         camera.getWorldDirection(fwdScratch);
         const lenXZ = Math.hypot(fwdScratch.x, fwdScratch.z);
         if (lenXZ > 1e-3) {
@@ -573,6 +623,9 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
       // The two light environments never overlap (dawn zero by pose 1.5, daylight
       // zero until 2.5), so a max is a clean union of the two effective amounts.
       return lastDawn > lastDaylight ? lastDawn : lastDaylight;
+    },
+    setBandBottom(frac) {
+      if (Number.isFinite(frac)) HANGA_SCREEN_UNIFORMS.uBandBottom.value = frac;
     },
     dispose() {
       shellGeo.dispose();

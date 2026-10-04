@@ -35,7 +35,7 @@
 
 import * as THREE from "three";
 import { HANGA } from "./artstyle";
-import { HANGA_FIELD_GLSL, SHELL_RADIUS } from "./environs";
+import { HANGA_FIELD_GLSL, HANGA_SCREEN_UNIFORMS, SHELL_RADIUS } from "./environs";
 
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
@@ -973,6 +973,8 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     uHWarm: { value: new THREE.Vector3() },
     uHFwd: { value: new THREE.Vector2(0, -1) },
     uDusk: { value: 0 },
+    // The sheet's screen-fixed top band (shared objects, fed by environs).
+    ...HANGA_SCREEN_UNIFORMS,
   };
   const fwdScratch = new THREE.Vector3();
   const feedFwd = (_r: THREE.WebGLRenderer, _s: THREE.Scene, camera: THREE.Camera): void => {
