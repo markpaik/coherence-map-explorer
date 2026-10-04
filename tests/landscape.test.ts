@@ -196,11 +196,11 @@ describe("murmuration bounds", () => {
     [-48, 994],
   ];
 
-  it("the center stays above the far ridge top and beyond the far ring radius", () => {
+  it("the center stays above every ridge crest and beyond the far ring radius", () => {
     for (let t = 0; t < 1200; t += 0.5) {
       const c = murmurationCenter(t);
       expect(c.R).toBeGreaterThan(far.R);
-      expect(c.h).toBeGreaterThan(ringCeiling(far));
+      for (const [cy, cz] of HOME_CAMS) expect(c.h - ridgeFloor(c.az, c.R, cy, cz)).toBeGreaterThan(60);
     }
   });
 

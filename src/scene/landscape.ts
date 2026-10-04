@@ -286,16 +286,16 @@ export const MURM = {
   azSwing: 2 * DEG,
   R: 3440,
   RSwing: 90,
-  h: 58,
+  h: 50,
   hSwing: 8,
   /** The highest any speck may rise (title block clearance at 1024x600). */
   envelopeTop: 165,
   /** Sub-flock half-axes in world units: along the azimuth, up, radial. */
   ax: 220,
-  ay: 24,
+  ay: 34,
   az3: 70,
   /** The seed ball is flattened to a sheet, so the warp folds it into ribbons. */
-  sheet: 0.4,
+  sheet: 0.7,
   /** Warp amplitudes and periods (seconds). */
   warp1: 0.3,
   warp2: 0.15,
@@ -314,7 +314,7 @@ export const MURM = {
    *  can merge while the three rarely meet. Then height and radius swings. */
   subBase: 12 * DEG,
   subAz: 3.5 * DEG,
-  subH: 30,
+  subH: 34,
   subR: 140,
   /** Per-speck jitter amplitudes (world units) and period range (seconds). */
   jitX: 140,
