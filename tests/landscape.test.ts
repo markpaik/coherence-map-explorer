@@ -173,9 +173,12 @@ describe("murmuration bounds", () => {
     }
   });
 
-  it("every speck stays above the far ridge and beyond the far ring", () => {
+  it("every speck stays above the far ridge, beyond the far ring, and under the title block", () => {
     let minR = Infinity;
     let minH = Infinity;
+    let maxH = -Infinity;
+    let minAz = Infinity;
+    let maxAz = -Infinity;
     let maxExtent = 0;
     for (let s = 0; s < 400; s++) {
       // corners and hashed points of the unit ball
@@ -183,17 +186,26 @@ describe("murmuration bounds", () => {
       const v = Math.acos(2 * lhash(702, s) - 1);
       const r = s < 50 ? 1 : Math.cbrt(lhash(703, s));
       const p0: [number, number, number] = [r * Math.sin(v) * Math.cos(u), r * Math.cos(v), r * Math.sin(v) * Math.sin(u)];
-      for (let t = 0; t < 600; t += 1.7) {
+      for (let t = 0; t < 1200; t += 1.7) {
         const c = murmurationCenter(t);
         const [x, y, z] = murmurationLocal(p0, t);
         const horiz = Math.hypot(c.R + z, x);
         minR = Math.min(minR, horiz);
         minH = Math.min(minH, c.h + y);
+        maxH = Math.max(maxH, c.h + y);
+        const az = c.az + Math.atan2(x, c.R + z);
+        minAz = Math.min(minAz, az);
+        maxAz = Math.max(maxAz, az);
         maxExtent = Math.max(maxExtent, Math.hypot(x, y));
       }
     }
     expect(minR).toBeGreaterThan(far.R);
     expect(minH).toBeGreaterThan(highestFar);
+    // QA F8: the whole drift envelope stays low and left of the map, clear of
+    // the title block at the home view (verified at 1440x900, 1280x720, 1024x600).
+    expect(maxH).toBeLessThanOrEqual(MURM.envelopeTop);
+    expect(minAz).toBeGreaterThan(-48 * (Math.PI / 180));
+    expect(maxAz).toBeLessThan(-36 * (Math.PI / 180));
     // The flock is a loose cloud, not a line across the sky.
     expect(maxExtent).toBeLessThan(450);
   });

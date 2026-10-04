@@ -272,16 +272,21 @@ export const smooth01 = (x: number): number => {
 
 export const MURM = {
   count: 880,
-  // Left of the map at the home view, between the moon and the peak's flank.
-  az: -41 * DEG,
-  azSwing: 4 * DEG,
+  // Left of the map at the home view: low over the far ridges, under the moon
+  // and against the peak's flank. Kept low and flat so the whole drift
+  // envelope stays clear of the title block at 1440x900, 1280x720, and
+  // 1024x600 (QA F8).
+  az: -42 * DEG,
+  azSwing: 2.5 * DEG,
   R: 3440,
   RSwing: 100,
-  h: 470,
-  hSwing: 40,
+  h: 95,
+  hSwing: 12,
+  /** The highest any speck may rise (tests/landscape.test.ts). */
+  envelopeTop: 165,
   /** Half-axes in world units: along the azimuth, up, radial. */
-  ax: 150,
-  ay: 62,
+  ax: 85,
+  ay: 22,
   az3: 80,
   /** The seed ball is flattened to a sheet, so the warp folds it into ribbons. */
   sheet: 0.4,
@@ -289,7 +294,7 @@ export const MURM = {
   warp1: 0.55,
   warp2: 0.3,
   stretch: 0.35,
-  tilt: 0.18,
+  tilt: 0.06,
   pW1: 31,
   pW2: 23,
   pW3: 26,
