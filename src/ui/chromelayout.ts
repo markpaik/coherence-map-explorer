@@ -665,6 +665,30 @@ export function installChromeLayout(): () => void {
       if (docked && railLaid && shown(q("#search-bar"))) railBox = restingBox(rail);
     }
 
+    // -- pose caption: the transient line over the band -------------------------
+    // It shows for a few seconds after a pose change and while a pose segment is
+    // hovered or focused. It is placed whether or not it shows (it fades in), so
+    // it never appears over the style card or the pose control and then jumps:
+    // it rises clear of everything in the band, the search rail included. With
+    // no room left under the title it steps aside (its words also reach
+    // assistive tech through its aria-live region).
+    const caption = q(".view-caption");
+    if (caption && laidOut(caption)) {
+      caption.classList.remove("caption-cramped");
+      // Measure it at rest: without the 6px rise it fades in on (style.css).
+      const tf = getComputedStyle(caption).transform;
+      const rise = tf && tf !== "none" ? new DOMMatrixReadOnly(tf).m42 : 0;
+      const def = shiftBox(restingBox(caption), 0, cur("--lift-caption") - rise);
+      const lift = liftClear(def, floor, GAP_STACK);
+      const placed = shiftBox(def, 0, -lift);
+      const cramped = placed.t < 12 || (!!tInk && overlaps(placed, tInk, 0));
+      setVar("--lift-caption", cramped ? 0 : lift);
+      caption.classList.toggle("caption-cramped", cramped);
+      // While it shows, the depth scale keeps off it too (on a phone the lifted
+      // caption reaches the scale's bottom caption).
+      if (!cramped && caption.classList.contains("view-caption-on")) floor.push(placed);
+    }
+
     // -- depth scale: the column left between the title and the band ----------
     const depth = q(".depth-scale");
     if (depth && laidOut(depth)) {
@@ -722,6 +746,7 @@ export function installChromeLayout(): () => void {
     ".filters-rail",
     ".view-toggle",
     ".style-toggle",
+    ".view-caption",
     "#nav-hints",
     ".depth-scale",
     ".panel",
