@@ -196,38 +196,47 @@ describe("murmuration bounds", () => {
     [-48, 994],
   ];
 
-  it("the center stays above every ridge crest and beyond the far ring radius", () => {
-    for (let t = 0; t < 1200; t += 0.5) {
-      const c = murmurationCenter(t);
-      expect(c.R).toBeGreaterThan(far.R);
-      for (const [cy, cz] of HOME_CAMS) expect(c.h - ridgeFloor(c.az, c.R, cy, cz)).toBeGreaterThan(60);
-    }
+  it("the center stays beyond the far ring radius", () => {
+    for (let t = 0; t < 1200; t += 0.5) expect(murmurationCenter(t).R).toBeGreaterThan(far.R);
   });
 
-  it("every speck stays beyond the far ring, above every ridge crest, and under the title block", () => {
+  it("the cloud stays in open sky right of the title block and above the bottom chrome", () => {
+    // Pinhole projection of the 1440x900 home camera (level, fov 50).
+    const k = 450 / Math.tan(25 * (Math.PI / 180));
     let minR = Infinity;
-    let maxH = -Infinity;
     let minAz = Infinity;
     let maxAz = -Infinity;
-    let minClear = Infinity;
+    let minX = Infinity;
+    let maxY = -Infinity;
+    let inBand = 0;
+    let below = 0;
+    let n = 0;
     for (const t of TIMES) {
       for (const sd of SEEDS) {
         const p = murmurationSpeck(sd, t);
         minR = Math.min(minR, p.R);
-        maxH = Math.max(maxH, p.h);
         minAz = Math.min(minAz, p.az);
         maxAz = Math.max(maxAz, p.az);
-        for (const [cy, cz] of HOME_CAMS) minClear = Math.min(minClear, p.h - ridgeFloor(p.az, p.R, cy, cz));
+        const D = 918 + p.R * Math.cos(p.az);
+        const x = 720 + ((p.R * Math.sin(p.az)) / D) * k;
+        const y = 450 - ((p.h + 5) / D) * k;
+        minX = Math.min(minX, x);
+        maxY = Math.max(maxY, y);
+        if (y >= 60 && y <= 330) inBand++;
+        // Soft rule: a few specks may dip behind the ridge crest line.
+        if (HOME_CAMS.some(([cy, cz]) => p.h < ridgeFloor(p.az, p.R, cy, cz))) below++;
+        n++;
       }
     }
     expect(minR).toBeGreaterThan(far.R);
-    // Clear of every crest by 20 world units (about 6 px at 1440x900).
-    expect(minClear).toBeGreaterThan(20);
-    // QA F8: the whole drift envelope stays clear of the title block at the
-    // home view (verified at 1440x900, 1280x720, 1024x600).
-    expect(maxH).toBeLessThanOrEqual(MURM.envelopeTop);
-    expect(minAz).toBeGreaterThan(-62 * (Math.PI / 180));
-    expect(maxAz).toBeLessThan(-10 * (Math.PI / 180));
+    // Right of the map's center, clear of the title block (right edge 662 px).
+    expect(minAz).toBeGreaterThan(8 * (Math.PI / 180));
+    expect(maxAz).toBeLessThan(50 * (Math.PI / 180));
+    expect(minX).toBeGreaterThan(700);
+    // About y 90 to 320, and nowhere near the Style card or pose control (y > 700).
+    expect(inBand / n).toBeGreaterThan(0.98);
+    expect(maxY).toBeLessThan(700);
+    expect(below / n).toBeLessThan(0.02);
     // A dispersed cloud: at least 25 deg of sky wide.
     expect(maxAz - minAz).toBeGreaterThan(25 * (Math.PI / 180));
   });

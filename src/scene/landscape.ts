@@ -272,35 +272,34 @@ export const smooth01 = (x: number): number => {
 // and merge over 30 to 60 s. Inside each sub-flock a seed ball, flattened to a
 // sheet, is folded by bounded sums of sines. Every speck adds its own slow
 // jitter (periods 20 to 40 s), so no two specks share a path. Part of the time
-// a thin band of specks streams between sub-flocks 0 and 1. All of it runs in
+// a thin band of specks streams between sub-flocks 0 and 2. All of it runs in
 // the vertex shader. The functions below mirror it one for one.
 
 export const MURM = {
   count: 880,
-  // Left of the map at the home view, low over the far ridges, under the moon
-  // and against the peak's flank, spreading right behind the lower left of the
-  // map. The whole drift envelope stays clear of the title block at 1440x900,
-  // 1280x720, and 1024x600 (QA F8) and above every ridge crest seen from the
-  // home cameras (tests/landscape.test.ts).
-  az: -36 * DEG,
+  // In open sky above and right of the map's center (the moon is at -40 deg),
+  // at the home view about y 90 to 320 of 1440x900: clear of the title block
+  // on the left and of the Style card and pose control at the bottom right
+  // (tests/landscape.test.ts and the viewport screenshots).
+  az: 28 * DEG,
   azSwing: 2 * DEG,
   R: 3440,
   RSwing: 90,
-  h: 50,
-  hSwing: 8,
-  /** The highest any speck may rise (title block clearance at 1024x600). */
-  envelopeTop: 165,
-  /** Sub-flock half-axes in world units: along the azimuth, up, radial. */
-  ax: 220,
-  ay: 34,
-  az3: 70,
+  h: 990,
+  hSwing: 20,
+  /** Sub-flock half-axes in world units: along the azimuth, up, radial. The
+   *  half-height is half the half-length, and the tilt leans it further, so
+   *  each sub-flock reads round and turning. */
+  ax: 290,
+  ay: 175,
+  az3: 80,
   /** The seed ball is flattened to a sheet, so the warp folds it into ribbons. */
   sheet: 0.7,
   /** Warp amplitudes and periods (seconds). */
   warp1: 0.3,
   warp2: 0.15,
   stretch: 0.2,
-  tilt: 0.06,
+  tilt: 0.25,
   pW1: 31,
   pW2: 23,
   pW3: 26,
@@ -312,21 +311,25 @@ export const MURM = {
   pH: 59,
   /** Sub-flock home azimuths sit subBase apart; each swings by subAz, so two
    *  can merge while the three rarely meet. Then height and radius swings. */
-  subBase: 12 * DEG,
-  subAz: 3.5 * DEG,
-  subH: 34,
+  subBase: 4 * DEG,
+  subAz: 2.5 * DEG,
+  /** Home heights: sub-flock 0 sits subHBase higher, 1 lower, 2 level. */
+  subHBase: 55,
+  subH: 45,
   subR: 140,
   /** Per-speck jitter amplitudes (world units) and period range (seconds). */
-  jitX: 140,
-  jitY: 12,
+  jitX: 150,
+  jitY: 90,
   jitZ: 40,
   jitP0: 20,
   jitP1: 40,
   /** Share of specks that can join the streaming band, its period, and its
    *  half-thickness in height. */
-  streamFrac: 0.18,
+  streamFrac: 0.12,
   pStream: 90,
-  streamTh: 8,
+  streamTh: 20,
+  /** The band's least length in azimuth (rad). */
+  streamLen: 7 * DEG,
   /** Speck size range in CSS px (by seed). */
   px0: 1.5,
   px1: 3,
@@ -354,7 +357,7 @@ export function murmurationSub(k: number, t: number): [number, number, number] {
   const s = MURM_SUBS[k];
   return [
     (k - 1) * MURM.subBase + MURM.subAz * Math.sin((t * TAU) / s[0] + s[1]),
-    MURM.subH * Math.sin((t * TAU) / s[2] + s[3]),
+    [1, -1, 0][k] * MURM.subHBase + MURM.subH * Math.sin((t * TAU) / s[2] + s[3]),
     MURM.subR * Math.sin((t * TAU) / s[4] + s[5]),
   ];
 }
@@ -423,8 +426,8 @@ export const murmurationStream = (t: number): number =>
 /** Where one speck is at time t: azimuth (rad), radius, height. */
 export function murmurationSpeck(seed: SpeckSeed, t: number): { az: number; R: number; h: number } {
   const c = murmurationCenter(t);
-  // Stream specks live in the sub-flock at their end of the band (0 or 1).
-  const k = seed.g < MURM.streamFrac ? (seed.u < 0.5 ? 0 : 1) : Math.min(2, Math.floor(seed.j * 3));
+  // Stream specks live in the sub-flock at their end of the band (0 or 2).
+  const k = seed.g < MURM.streamFrac ? (seed.u < 0.5 ? 0 : 2) : Math.min(2, Math.floor(seed.j * 3));
   const sub = murmurationSub(k, t);
   const loc = murmurationLocal(seed.p, t + k * 17.3);
   const pj = MURM.jitP0 + (MURM.jitP1 - MURM.jitP0) * seed.s;
@@ -437,11 +440,13 @@ export function murmurationSpeck(seed: SpeckSeed, t: number): { az: number; R: n
   let h = c.h + sub[1] + loc[1] + jy;
   if (seed.g < MURM.streamFrac) {
     const s0 = murmurationSub(0, t);
-    const s1 = murmurationSub(1, t);
+    const s1 = murmurationSub(2, t);
     const st = murmurationStream(t);
-    const sAz = c.az + s0[0] + (s1[0] - s0[0]) * seed.u + (0.25 * jx) / c.R;
-    const sH = c.h + s0[1] + (s1[1] - s0[1]) * seed.u + MURM.streamTh * Math.sin(seed.s * 40.0 + (t * TAU) / pj);
-    const sR = c.R + s0[2] + (s1[2] - s0[2]) * seed.u + 0.3 * jz;
+    // The band runs past both sub-flocks and is never shorter than streamLen.
+    const v = seed.u * 1.8 - 0.4;
+    const sAz = c.az + s0[0] + (s1[0] - s0[0]) * v + (seed.u - 0.5) * MURM.streamLen + (0.6 * jx) / c.R;
+    const sH = c.h + s0[1] + (s1[1] - s0[1]) * v + MURM.streamTh * Math.sin(seed.s * 40.0 + (t * TAU) / pj);
+    const sR = c.R + s0[2] + (s1[2] - s0[2]) * v + 0.3 * jz;
     az += (sAz - az) * st;
     h += (sH - h) * st;
     R += (sR - R) * st;
@@ -535,8 +540,9 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     haloOp: 0.2,
     discScale: 0.62,
     haloScale: 4.6,
-    bird: 0x0b1324,
-    birdOp: 0.46,
+    // Mid slate ink: it shows against the deep aizuri band and the lighter sky.
+    bird: 0x7d8ea8,
+    birdOp: 0.5,
   },
 };
 
@@ -1002,14 +1008,14 @@ const MURM_VERT = /* glsl */ `
     vec3 b = k < 0.5 ? vec3(${[MURM_SUBS[0][1], MURM_SUBS[0][3], MURM_SUBS[0][5]].map(f).join(", ")})
            : (k < 1.5 ? vec3(${[MURM_SUBS[1][1], MURM_SUBS[1][3], MURM_SUBS[1][5]].map(f).join(", ")})
                       : vec3(${[MURM_SUBS[2][1], MURM_SUBS[2][3], MURM_SUBS[2][5]].map(f).join(", ")}));
-    return vec3((k - 1.0) * ${f(MURM.subBase)}, 0.0, 0.0)
+    return vec3((k - 1.0) * ${f(MURM.subBase)}, (k < 0.5 ? 1.0 : (k < 1.5 ? -1.0 : 0.0)) * ${f(MURM.subHBase)}, 0.0)
       + vec3(${f(MURM.subAz)}, ${f(MURM.subH)}, ${f(MURM.subR)}) * sin(t * TAU / a + b);
   }
   void main() {
     float t = uTime;
     float g = aSeed.x;
     float u = aSeed.y;
-    float k = g < ${f(MURM.streamFrac)} ? (u < 0.5 ? 0.0 : 1.0) : min(2.0, floor(aSeed.z * 3.0));
+    float k = g < ${f(MURM.streamFrac)} ? (u < 0.5 ? 0.0 : 2.0) : min(2.0, floor(aSeed.z * 3.0));
     float sz = aSeed.w;
     float caz = ${f(MURM.az)} + ${f(MURM.azSwing)} * (0.65 * sin(t * TAU / ${f(MURM.pAz1)}) + 0.35 * sin(t * TAU / ${f(MURM.pAz2)} + 1.3));
     float cR = ${f(MURM.R)} + ${f(MURM.RSwing)} * sin(t * TAU / ${f(MURM.pR)} + 0.4);
@@ -1026,11 +1032,12 @@ const MURM_VERT = /* glsl */ `
     float h = ch + so.y + lo.y + jy;
     if (g < ${f(MURM.streamFrac)}) {
       vec3 s0 = sub(0.0, t);
-      vec3 s1 = sub(1.0, t);
+      vec3 s1 = sub(2.0, t);
       float st = smoothstep(0.1, 0.9, 0.5 + 0.5 * sin(t * TAU / ${f(MURM.pStream)}));
-      float sAz = caz + s0.x + (s1.x - s0.x) * u + 0.25 * jx / cR;
-      float sH = ch + s0.y + (s1.y - s0.y) * u + ${f(MURM.streamTh)} * sin(sz * 40.0 + t * TAU / pj);
-      float sR = cR + s0.z + (s1.z - s0.z) * u + 0.3 * jz;
+      float v = u * 1.8 - 0.4;
+      float sAz = caz + s0.x + (s1.x - s0.x) * v + (u - 0.5) * ${f(MURM.streamLen)} + 0.6 * jx / cR;
+      float sH = ch + s0.y + (s1.y - s0.y) * v + ${f(MURM.streamTh)} * sin(sz * 40.0 + t * TAU / pj);
+      float sR = cR + s0.z + (s1.z - s0.z) * v + 0.3 * jz;
       az = mix(az, sAz, st);
       h = mix(h, sH, st);
       R = mix(R, sR, st);
