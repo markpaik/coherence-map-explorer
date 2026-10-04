@@ -42,8 +42,9 @@ offers only Constellation and Ascent. The Blueprint (pose 2) and Transit
 choices in the story-HUD Formation pin are all ON HOLD (removed from the UI,
 "for now"). The poses/shaders/stories underneath stay intact and dormant:
 poses 2/3 still live in the driver, and any story authored into them still
-plays. Style is pinned to 0 (the galaxy) — the `?style=` deep-link is disabled
-too. And the Ascent reverted to the dark constellation baseline with its
+plays. **Update (2026-10-03):** a Style control is back with three choices,
+Galaxy / Washi / Dusk (the two Hanga skins below). Ringers and Fidenza stay
+dormant with no entry point. And the Ascent reverted to the dark constellation baseline with its
 elevation isolines (see the Environments note below); the Sierra dawn is held
 off, not deleted. Restoring any of these is re-adding a segment / re-mounting a
 control / flipping a single flag.
@@ -474,11 +475,67 @@ metadata 11.5 · section caps 11.
 
 ## Art styles
 
-**ON HOLD (2026-07-24).** The "Style overrides" switcher and the `?style=`
-deep-link are removed from the UI for now, so style is pinned to 0 (the galaxy).
-The two skins below (Ringers / Fidenza) and the whole `applyArtStyle` fan-out
-are kept intact and dormant — re-mount `createStyleToggle` and the boot deep-
-link to bring them back. Everything below describes the skins as designed.
+**Status (2026-10-03).** The Style control (src/ui/styletoggle.ts) is mounted
+again with three choices: Galaxy (0), Washi (3), and Dusk (4). It is a radio
+group beside the pose control, and a Style row in the story card during a
+story. `?style=washi` and `?style=dusk` deep-link a skin; the last choice is
+kept in `localStorage` (`cme.style`), and an explicit `?style=` wins over it.
+`galaxy`, `ringers`, `fidenza`, and unknown values load style 0. Ringers (1)
+and Fidenza (2) stay dormant: no control names them, and only the `?debug=1`
+hook (`__cme.art.set`) reaches them. Their design notes below are unchanged.
+
+### Hanga skins (styles 3 Washi and 4 Dusk)
+
+Two woodblock-print skins after Wada Sanzo (pigment combinations), Oda Kazuma
+(calm dusk tones), and Utagawa Hiroshige (bokashi gradients, flat colour under
+key-block lines). Both share one shader branch and differ in palette, field,
+and ink (`HANGA` in src/scene/artstyle.ts). Previews: scripts/hanga-previews.mjs
+and docs/previews/hanga-*.svg, which are the acceptance sheets.
+
+- **Fields.** Washi is warm unbleached paper (#efe6d2) with a fine grain.
+  Dusk is deep aizuri blue grading to slate (#12233f to #4a6185). Both carry a
+  top bokashi band that belongs to the SHEET, not the sky: it is screen-fixed
+  (`uBandBottom` from the layout pass), runs deep from the top of the window
+  to just below the last title line, then fades over 18% of the height. The
+  title prints in paper ink directly on the band, with no box, no mist, and no
+  halo (Mark rejected both a cartouche and a blurred wash, 2026-10-03).
+- **Pigments.** Strand hue families stay so nothing a reader learned moves:
+  number = yamabuki gold, algebra = fuji/murasaki violet, geometry = asagi
+  blue-green, data = beni vermilion-rose. Each pigment holds 3:1 or more
+  against its field (a test). On Washi the gold is a deep ochre (#ad7408) for
+  that reason. Strand dots on dark glass cards use the Dusk set under both
+  skins, because the Washi set falls under 3:1 on dark glass.
+- **Edges are brush strokes.** One tapered stroke per prerequisite: a pooled
+  head at the prerequisite (about 2.4 CSS px), a long whisked tail toward the
+  dependent standard (the taper shows direction, as the comets do in Galaxy),
+  and a dry-brush split (kasure) that opens toward the tail. Hover, focus, and
+  chain strokes widen 1.6x. Related pairs are a row of soft sumi dabs. A slow
+  wet-ink sheen moves down lit chain strokes (4.5 s period, 8% swing, opacity
+  only, off under reduced motion). Constants are at the top of the branch in
+  src/scene/edges.ts. The edge program keeps exactly 16 attributes, so the
+  pigment comes from `aStrand` through `uHanga[4]`.
+- **Nodes are printed discs.** Flat pigment with a bokashi fade inside the
+  disc and a sumi key-block ring (the inverted-hull outline). Discs print 1.4x
+  the Galaxy orb radius. An edgeless standard is a bare-paper disc. The focus
+  ring is a vermilion seal (#c8372d) that holds still; damage rings are sumi
+  with the usual 4.5 s breath.
+- **Stories play in the skin.** Lit = full pigment and full ring; story lift
+  shows as a larger disc and heavier stroke, never brightness. Unlit = a faint
+  sumi underdrawing (about 0.12 alpha). Damage washes toward the field and
+  sheds opacity; on Dusk it also desaturates and darkens
+  (`HANGA_DUSK_DAMAGE`), so damaged and lit discs differ by 45 or more of 255
+  in luminance (a test; QA measured 63 to 70 in the three worst scenes).
+- **Chrome.** Light paper ink on both fields. Nav hints and depth captions
+  print on small slips; glass cards stay dark. Credit line while active:
+  "After Wada Sanzo, Oda Kazuma, and Utagawa Hiroshige".
+- **Anti-aliasing.** The composer stays on with bloom at 0 and vignette off,
+  so 4x MSAA survives (the Ringers/Fidenza bypass drops it).
+- **Galaxy is byte-identical.** Every Hanga branch sits behind
+  `uArtStyle >= 2.5`; QA compared the Galaxy canvas against b8b44ad at rest,
+  focus, Ascent, and a story scene: 0 differing pixels.
+
+The landscape that surrounds the map under both skins is described under
+"Hanga landscape" below.
 
 The scene ships three render skins, switchable live from the bottom-right
 toggle and deep-linkable by URL. A style is a LOOK, not a layout: all four
@@ -542,9 +599,9 @@ because the styles are homages and should say so in the room where they hang:
 - Ringers (Dmitri Cherniak): https://www.curated.xyz/editorial/collecting-ringers
 - Fidenza (Tyler Hobbs): https://www.curated.xyz/editorial/collecting-fidenza
 
-`?style=ringers` or `?style=fidenza` deep-links a skin on load (session only,
-not persisted); `?style=galaxy` or no param loads the default. Galaxy carries
-no credit line.
+The Ringers and Fidenza deep links are disabled: `?style=ringers` and
+`?style=fidenza` load style 0 (see the status note above). Galaxy carries no
+credit line.
 
 ### Distilled artist principles (stay true to each)
 

@@ -104,11 +104,12 @@ map. What changed in the UI, all reversible ("for now"):
   poses stay in the driver and still render — any story authored into Blueprint
   or Transit still plays its authored pose untouched; there is just no toggle or
   pin entry for a reader to reach them cold. Restoring is re-adding the two rows.
-- **Art styles (Ringers / Fidenza) + the "Style overrides" tab** — the switcher
-  (src/ui/styletoggle.ts) is unmounted and the `?style=` deep-link is disabled,
-  so style is pinned to 0 (the galaxy). The `applyArtStyle` fan-out and both
-  skins stay intact and dormant (src/scene/artstyle.ts and the per-scene
-  `setArtStyle` handles are unchanged).
+- **Art styles (Ringers / Fidenza)** — dormant with no entry point. The
+  switcher (src/ui/styletoggle.ts) came back on 2026-10-03 with three choices,
+  Galaxy / Washi / Dusk (the Hanga skins, see DESIGN.md "Hanga skins");
+  `?style=ringers` and `?style=fidenza` load style 0. The `applyArtStyle`
+  fan-out and both old skins stay intact (src/scene/artstyle.ts and the
+  per-scene `setArtStyle` handles).
 - **Ascent reverted to the galaxy design.** The Sierra dawn environment
   (src/scene/environs.ts) is held off at its gate (`DAWN_HELD` in `update()`),
   so the Ascent reads as the dark constellation baseline again — full
