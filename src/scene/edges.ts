@@ -654,7 +654,7 @@ const VERT = /* glsl */ `
       // Splatter strokes (about 1 in 6, hashed) widen near the head so the
       // dots beside the stroke have pixels to land on.
       bool splat = aKind < 0.5 && fract(seed * 91.7) < HT_SPLAT_RATE;
-      if (splat && u < HT_SPLAT_U_MAX + 0.08) halfGeo += HT_SPLAT_REACH_PX;
+      if (splat && u < HT_SPLAT_U_MAX + 0.08) halfGeo += HT_SPLAT_FAR_PX;
       vec2 offsetNdc = normalPx * (halfGeo * side) / (uViewport * 0.5);
       clip.xy += offsetNdc * clip.w;
       gl_Position = clip;
@@ -1060,7 +1060,25 @@ const FRAG = /* glsl */ `
         // head and more broken toward the tail.
         float pn = hNoise2(vec2(vT * HT_UNEVEN_K + seed * 41.0, xs * 1.6 + seed * 9.0));
         float swing = mix(HT_UNEVEN_HEAD, HT_UNEVEN_TAIL, smoothstep(0.0, 1.0, u));
-        alpha *= 1.0 - 0.5 * swing + swing * pn;
+        alpha = clamp(alpha * (1.0 - 0.5 * swing + swing * pn), 0.0, 1.0);
+
+        // Dry streaks in the body: 2 or 3 thin lanes of lower opacity run along
+        // t (bristle marks), each at a hashed place across the stroke and broken
+        // by its own noise along the length. A lane narrower than ~1.5 px cannot
+        // resolve, so on a thin stroke it fades to its mean (a lighter body).
+        float nLanes = 2.0 + step(0.5, fract(seed * 17.3));
+        float streak = 0.0;
+        for (int k = 0; k < 3; k++) {
+          float fk = float(k);
+          if (fk >= nLanes) break;
+          float c = 0.18 + 0.64 * hHash(vec2(seed * 31.0 + fk * 3.7, fk + 1.0));
+          float lane = 1.0 - smoothstep(0.5 * HT_STREAK_WIDTH, HT_STREAK_WIDTH, abs(xs - c));
+          float run = smoothstep(0.42, 0.62, hNoise(vec2(vT * 9.0 + fk * 5.3, seed * 23.0 + fk)));
+          streak = max(streak, lane * run);
+        }
+        float laneRes = smoothstep(0.6, 1.4, 4.0 * halfTrue * HT_STREAK_WIDTH); // lane width, device px
+        streak = mix(HT_STREAK_WIDTH * 0.8 * 0.5, streak, laneRes);
+        alpha *= 1.0 - HT_STREAK_ALPHA * streak;
 
         // Ink splatter (rare, static): on about 1 in 6 strokes, two to four
         // tiny dots and one small fleck near the head, beside or on the
@@ -1076,7 +1094,9 @@ const FRAG = /* glsl */ `
             float h3 = hHash(vec2(seed * 71.0 + fk * 2.9, fk + 9.0));
             float uk = 0.02 + h1 * HT_SPLAT_U_MAX;
             float sgn = h2 < 0.5 ? -1.0 : 1.0;
-            float off = sgn * (halfTrue + 0.4 + fract(h2 * 7.0) * (HT_SPLAT_REACH_PX - 0.6));
+            // The first one or two dots may fly farther (up to HT_SPLAT_FAR_PX).
+            float reach = fk < 1.0 + step(0.5, h3) ? HT_SPLAT_FAR_PX : HT_SPLAT_REACH_PX;
+            float off = sgn * (halfTrue + 0.4 + fract(h2 * 7.0) * (reach - 0.6));
             float r = 0.5 * mix(HT_SPLAT_MIN_PX, HT_SPLAT_MAX_PX, h3);
             vec2 dd = vec2((u - uk) * lenPx, sidePx - off);
             // The last one is a fleck: stretched along the stroke.

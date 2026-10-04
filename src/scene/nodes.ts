@@ -422,6 +422,12 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         vec2 rel = (gl_FragCoord.xy - vHCenter) / max(vHRpx, 1e-3);
         float dn = hnNoise2(rel * 2.4 + vPhase * 7.0);
         col = mix(col, uField, ${glf(HANGA_TEXTURE.DISC_UNEVEN)} * dn);
+        // Baren: the low swirl a hand-rubbed print leaves in a flat colour, as
+        // slightly lighter pigment (the disc's own light tone), per node.
+        float rr = length(rel);
+        float sw = sin(atan(rel.y, rel.x) * 2.0 + rr * 5.5 + vPhase * 3.0
+                       + 2.5 * hnNoise(rel * 1.3 + vPhase * 11.0));
+        col = mix(col, uHLight[hIdx], ${glf(HANGA_TEXTURE.DISC_BAREN)} * smoothstep(0.2, 1.0, sw) * (1.0 - smoothstep(0.35, 1.0, rr)));
         // Unlit: faint sumi underdrawing.
         col = mix(col, uHSumi, under);
         a = mix(a, ${glf(HANGA_NODE.UNDER_ALPHA)}, under);

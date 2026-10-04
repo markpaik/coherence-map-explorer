@@ -268,21 +268,40 @@ describe("Dusk damage reads darker than lit (QA F3)", () => {
 });
 
 describe("Hanga hand-made texture", () => {
-  it("keeps every amplitude inside the designer brief", () => {
+  it("keeps every amplitude inside the designer brief (round 2)", () => {
     const T = HANGA_TEXTURE;
     expect(T.ROUGH_PERIOD).toBeGreaterThanOrEqual(0.04);
-    expect(T.ROUGH_PERIOD).toBeLessThanOrEqual(0.08);
-    expect(T.ROUGH_AMP).toBeLessThanOrEqual(0.15);
+    expect(T.ROUGH_PERIOD).toBeLessThanOrEqual(0.1);
+    expect(T.ROUGH_AMP).toBeLessThanOrEqual(0.3);
     expect(T.BLEED_MIN_PX).toBeGreaterThanOrEqual(0.8);
     expect(T.BLEED_MAX_PX).toBeLessThanOrEqual(1.2); // more and thin strokes turn to haze
     expect(T.UNEVEN_HEAD).toBeGreaterThanOrEqual(0.15);
-    expect(T.UNEVEN_TAIL).toBeLessThanOrEqual(0.25);
+    expect(T.UNEVEN_TAIL).toBeLessThanOrEqual(0.5);
     expect(T.UNEVEN_HEAD).toBeLessThanOrEqual(T.UNEVEN_TAIL); // denser at the head
-    expect(T.DISC_UNEVEN).toBeLessThanOrEqual(0.12);
-    expect(T.SPLAT_RATE).toBeLessThanOrEqual(1 / 6 + 1e-9);
+    expect(T.STREAK_ALPHA).toBeLessThan(0.6); // a bristle mark, never a gap
+    expect(T.DISC_UNEVEN).toBeLessThanOrEqual(0.18);
+    expect(T.DISC_BAREN).toBeLessThanOrEqual(0.2);
+    expect(T.SPLAT_RATE).toBeLessThanOrEqual(1 / 3 + 1e-9);
     expect(T.SPLAT_MIN_PX).toBeGreaterThanOrEqual(0.5);
     expect(T.SPLAT_MAX_PX).toBeLessThanOrEqual(2);
+    expect(T.SPLAT_FAR_PX).toBeLessThanOrEqual(5);
     expect(T.FLECK_RATE).toBeLessThan(0.005);
+  });
+
+  it("keeps the paper overlay inside its luminance budget, fibres above the mottle", () => {
+    const T = HANGA_TEXTURE;
+    const washi = T.PAPER_MOTTLE_WASHI + T.PAPER_FIBRE_WASHI + T.PAPER_LAID_WASHI;
+    const dusk = T.PAPER_MOTTLE_DUSK + T.PAPER_FIBRE_DUSK + T.PAPER_LAID_DUSK;
+    expect(T.PAPER_MOTTLE_WASHI).toBeGreaterThanOrEqual(0.1);
+    expect(T.PAPER_FIBRE_WASHI).toBeLessThanOrEqual(0.14);
+    expect(T.PAPER_MOTTLE_DUSK).toBeGreaterThanOrEqual(0.07);
+    expect(T.PAPER_FIBRE_DUSK).toBeLessThanOrEqual(0.1);
+    expect(T.PAPER_FIBRE_WASHI).toBeGreaterThan(T.PAPER_MOTTLE_WASHI);
+    expect(T.PAPER_FIBRE_DUSK).toBeGreaterThan(T.PAPER_MOTTLE_DUSK);
+    expect(T.PAPER_LAID_DUSK).toBe(0); // laid lines are a Washi feature
+    // Worst-case total swing stays a texture, not a veil.
+    expect(washi).toBeLessThan(0.3);
+    expect(dusk).toBeLessThan(0.2);
   });
 
   it("generates the texture constants into both edge shaders", () => {
