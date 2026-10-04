@@ -162,6 +162,28 @@ export const HANGA: { washi: HangaPalette; dusk: HangaPalette } = {
  */
 export const HANGA_DISC_SCALE = 1.4;
 
+/**
+ * Damage on a dark field (Dusk). A wash toward the dark field plus an opacity
+ * loss barely moves a light pigment, so on Dusk a damaged mark also drains of
+ * colour and loses luminance, and its key-block line dims toward the field.
+ * Washi keeps the plain wash (a pale stain on paper already reads). `RAMP` is
+ * the display damage at which the darkening is full; the story display floor
+ * (0.35) already lands most of the way there.
+ */
+export const HANGA_DUSK_DAMAGE = {
+  RAMP: 0.45,
+  /** Desaturation at full ramp (0 keeps the pigment, 1 is grey). */
+  DESAT: 0.55,
+  /** LINEAR luminance multiplier at full ramp (about 0.6 in sRGB). */
+  DARKEN: 0.28,
+  /** How far the disc then washes toward the field, times the damage. */
+  WASH: 0.35,
+  /** Opacity the disc sheds, times the damage (less than Washi: a dark disc, not a hole). */
+  ALPHA: 0.2,
+  /** How far the key-block line dims toward the field at full ramp. */
+  LINE_DIM: 0.7,
+} as const;
+
 /** True for the two woodblock styles (3 Washi, 4 Dusk). */
 export function isHanga(style: number): boolean {
   return style === 3 || style === 4;
