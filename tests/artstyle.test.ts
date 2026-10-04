@@ -17,6 +17,7 @@ import {
   ART_STYLE_SLUGS,
   HANGA,
   HANGA_DUSK_DAMAGE,
+  HANGA_TEXTURE,
   hangaPalette,
   isHanga,
   strandSwatch,
@@ -263,5 +264,45 @@ describe("Dusk damage reads darker than lit (QA F3)", () => {
   it("keeps a husk lighter than the bare field (a stain, not a hole)", () => {
     const fieldLum = shown(HANGA.dusk.bg, 0);
     for (const sid of STRAND_ORDER) expect(shown(HANGA.dusk.pigment[sid], 1)).toBeGreaterThan(fieldLum);
+  });
+});
+
+describe("Hanga hand-made texture", () => {
+  it("keeps every amplitude inside the designer brief", () => {
+    const T = HANGA_TEXTURE;
+    expect(T.ROUGH_PERIOD).toBeGreaterThanOrEqual(0.04);
+    expect(T.ROUGH_PERIOD).toBeLessThanOrEqual(0.08);
+    expect(T.ROUGH_AMP).toBeLessThanOrEqual(0.15);
+    expect(T.BLEED_MIN_PX).toBeGreaterThanOrEqual(0.8);
+    expect(T.BLEED_MAX_PX).toBeLessThanOrEqual(1.2); // more and thin strokes turn to haze
+    expect(T.UNEVEN_HEAD).toBeGreaterThanOrEqual(0.15);
+    expect(T.UNEVEN_TAIL).toBeLessThanOrEqual(0.25);
+    expect(T.UNEVEN_HEAD).toBeLessThanOrEqual(T.UNEVEN_TAIL); // denser at the head
+    expect(T.DISC_UNEVEN).toBeLessThanOrEqual(0.12);
+    expect(T.SPLAT_RATE).toBeLessThanOrEqual(1 / 6 + 1e-9);
+    expect(T.SPLAT_MIN_PX).toBeGreaterThanOrEqual(0.5);
+    expect(T.SPLAT_MAX_PX).toBeLessThanOrEqual(2);
+    expect(T.FLECK_RATE).toBeLessThan(0.005);
+  });
+
+  it("generates the texture constants into both edge shaders", () => {
+    const core: GraphCore = JSON.parse(
+      readFileSync(resolvePath(HERE, "..", "public/data/graph-core.json"), "utf8"),
+    );
+    const radii = computeNodeRadii(core);
+    const idx = new Map(core.nodes.map((n, i) => [n.id, i]));
+    const edges = createEdges(
+      core.edges,
+      new Map(core.nodes.map((n) => [n.id, n])),
+      (id) => radii[idx.get(id) ?? 0],
+    );
+    const mat = edges.mesh.material as unknown as { vertexShader: string; fragmentShader: string };
+    for (const [k, v] of Object.entries(HANGA_TEXTURE)) {
+      expect(mat.fragmentShader).toContain(`const float HT_${k} = ${v.toFixed(4)};`);
+    }
+    // No texture term reads the screen pixel: nothing crawls on a camera move.
+    const hanga = mat.fragmentShader.slice(mat.fragmentShader.indexOf("HANGA (3 Washi | 4 Dusk) ===="));
+    expect(hanga).not.toContain("gl_FragCoord");
+    edges.dispose();
   });
 });

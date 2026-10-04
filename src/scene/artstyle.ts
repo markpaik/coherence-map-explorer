@@ -184,6 +184,42 @@ export const HANGA_DUSK_DAMAGE = {
   LINE_DIM: 0.7,
 } as const;
 
+/**
+ * Hanga hand-made texture (styles 3 and 4): the stroke and disc read as ink on
+ * fibrous paper, not a vector line. Every noise term is a function of the
+ * stroke's own coordinates (t, side, per-edge seed), of the disc's own
+ * coordinates, or of the field direction, never of the screen pixel alone, so
+ * nothing crawls when the camera moves. Nothing here animates.
+ */
+export const HANGA_TEXTURE = {
+  /** Edge roughness: wobble period along t, and amplitude as a fraction of the half-width. */
+  ROUGH_PERIOD: 0.06,
+  ROUGH_AMP: 0.12,
+  /** Ink bleed: the silhouette feather in device px, varied by the roughness noise. */
+  BLEED_MIN_PX: 0.8,
+  BLEED_MAX_PX: 1.2,
+  /** Pigment unevenness along the stroke (noise cells per unit t), and its */
+  /** peak-to-peak swing at the head (dense) and the tail (broken). */
+  UNEVEN_K: 26,
+  UNEVEN_HEAD: 0.2,
+  UNEVEN_TAIL: 0.25,
+  /** Disc pigment unevenness (paper showing through), and ring edge roughness. */
+  DISC_UNEVEN: 0.1,
+  RING_ROUGH: 0.3,
+  /** Splatter near the head: share of strokes, reach along the stroke (in u), */
+  /** reach beside the stroke (device px), dot diameter range (device px), opacity. */
+  SPLAT_RATE: 1 / 6,
+  SPLAT_U_MAX: 0.22,
+  SPLAT_REACH_PX: 3,
+  SPLAT_MIN_PX: 0.5,
+  SPLAT_MAX_PX: 2,
+  SPLAT_ALPHA: 0.55,
+  /** Sumi flecks on the paper: share of field cells holding one, and their opacity per field. */
+  FLECK_RATE: 0.0012,
+  FLECK_ALPHA_WASHI: 0.32,
+  FLECK_ALPHA_DUSK: 0.2,
+} as const;
+
 /** True for the two woodblock styles (3 Washi, 4 Dusk). */
 export function isHanga(style: number): boolean {
   return style === 3 || style === 4;

@@ -30,7 +30,16 @@
 import * as THREE from "three";
 import type { GraphEdge, GraphNode } from "../data";
 import { STRAND_COLORS, STRAND_VIVID, STRAND_ORDER, restRadius } from "./palette";
-import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE, HANGA_DUSK_DAMAGE } from "./artstyle";
+import {
+  RINGERS,
+  FIDENZA,
+  artHash,
+  isHanga,
+  hangaPalette,
+  HANGA_DISC_SCALE,
+  HANGA_DUSK_DAMAGE,
+  HANGA_TEXTURE,
+} from "./artstyle";
 
 const SEGMENTS = 24;
 
@@ -203,6 +212,7 @@ const glf = (x: number): string => x.toFixed(4);
 const HANGA_GLSL_CONSTS = [
   ...Object.entries(HANGA_STROKE).map(([k, v]) => `const float H_${k} = ${glf(v)};`),
   ...Object.entries(HANGA_DAB).map(([k, v]) => `const float HD_${k} = ${glf(v)};`),
+  ...Object.entries(HANGA_TEXTURE).map(([k, v]) => `const float HT_${k} = ${glf(v)};`),
 ].join("\n      ");
 
 // Edge emphasis is the full 6-state scale (fractional values blend adjacent
@@ -639,13 +649,20 @@ const VERT = /* glsl */ `
       // The strip is at least one device px wide plus a feather margin; the
       // fragment cuts the true silhouette inside it (sub-pixel tails become
       // partial coverage instead of aliasing).
-      float halfGeo = max(halfTrue, 0.5 * uPxRatio) + 0.75;
+      // Room for the texture: the roughness wobble and the widest ink bleed.
+      float halfGeo = max(halfTrue, 0.5 * uPxRatio) * (1.0 + HT_ROUGH_AMP) + 0.5 + 0.5 * HT_BLEED_MAX_PX;
+      // Splatter strokes (about 1 in 6, hashed) widen near the head so the
+      // dots beside the stroke have pixels to land on.
+      bool splat = aKind < 0.5 && fract(seed * 91.7) < HT_SPLAT_RATE;
+      if (splat && u < HT_SPLAT_U_MAX + 0.08) halfGeo += HT_SPLAT_REACH_PX;
       vec2 offsetNdc = normalPx * (halfGeo * side) / (uViewport * 0.5);
       clip.xy += offsetNdc * clip.w;
       gl_Position = clip;
 
       vT = t;
-      vSide = side;
+      // Hanga: vSide carries the SIGNED distance from the centreline in device
+      // px (exact under interpolation even where halfGeo steps at the head).
+      vSide = side * halfGeo;
       vHalfPx = halfGeo;
       vHanga = vec4(u, seed, lenPx, halfTrue);
       vColor = mix(aColorA.rgb, aColorB, t);
@@ -712,6 +729,9 @@ const FRAG = /* glsl */ `
     return mix(mix(hHash(i), hHash(i + vec2(1.0, 0.0)), w.x),
                mix(hHash(i + vec2(0.0, 1.0)), hHash(i + vec2(1.0, 1.0)), w.x), w.y);
   }
+
+  // Two-octave value noise in 0..1 (texture only, never animated).
+  float hNoise2(vec2 p) { return 0.65 * hNoise(p) + 0.35 * hNoise(p * 2.13 + 17.0); }
 
   // Soft round dab (hangaDabAlpha in TS): 1 in the core, a smooth fall to 0 at
   // the ellipse edge. No hard step anywhere, so a dab never aliases into a dash.
@@ -970,7 +990,8 @@ const FRAG = /* glsl */ `
       float under = max(dimd, 1.0 - litness);
       // Story lift (healthy lit strokes): full pigment, like a chain stroke.
       float story = uStory * (1.0 - clamp(vDamage * 3.0, 0.0, 1.0)) * litness;
-      float distPx = abs(vSide) * vHalfPx; // device px from the centreline
+      float sidePx = vSide; // signed device px from the centreline (Hanga vertex)
+      float distPx = abs(sidePx);
       int i0 = int(floor(e));
       int i1 = int(min(floor(e) + 1.0, 5.0));
       float f = fract(e);
@@ -980,12 +1001,20 @@ const FRAG = /* glsl */ `
       if (vKind < 0.5) {
         // Silhouette: a one-px feather on the true half-width. A tail thinner
         // than a pixel keeps partial coverage instead of aliasing.
-        float cover = clamp(halfTrue - distPx + 0.5, 0.0, 1.0);
+        // Texture (HANGA_TEXTURE): each edge of the stroke wobbles on its own
+        // noise lane along t (a brush on fibrous paper), and the feather (the
+        // ink bleed) varies with the same noise. All of it rides the stroke's
+        // own coordinates, so nothing crawls when the camera moves.
+        float laneSeed = sidePx > 0.0 ? seed * 13.0 : seed * 29.0 + 7.0;
+        float rough = hNoise2(vec2(vT / HT_ROUGH_PERIOD, laneSeed));
+        float halfEff = halfTrue * (1.0 + HT_ROUGH_AMP * (2.0 * rough - 1.0));
+        float bleed = mix(HT_BLEED_MIN_PX, HT_BLEED_MAX_PX, rough);
+        float cover = clamp((halfEff - distPx) / bleed + 0.5, 0.0, 1.0);
         // Round head inside the prerequisite's disc (seen only when the disc
         // is translucent, for example in the underdrawing).
         if (u < 0.0) {
           float back = -u * lenPx;
-          cover = clamp(halfTrue - length(vec2(back, distPx)) + 0.5, 0.0, 1.0);
+          cover = clamp((halfEff - length(vec2(back, distPx))) / bleed + 0.5, 0.0, 1.0);
         }
         // The tail lifts off just short of the dependent's rim.
         cover *= 1.0 - smoothstep(0.97, 1.0, u);
@@ -995,7 +1024,7 @@ const FRAG = /* glsl */ `
         // each lane breaks at hashed points along its length.
         float dry = smoothstep(H_KASURE_START, 1.0, u);
         float nb = seed < 0.5 ? 2.0 : 3.0;
-        float xs = clamp(vSide * vHalfPx / max(halfTrue, 1e-3) * 0.5 + 0.5, 0.0, 1.0);
+        float xs = clamp(sidePx / max(halfTrue, 1e-3) * 0.5 + 0.5, 0.0, 1.0);
         float lc = xs * nb;
         float lane = floor(min(lc, nb - 0.001));
         float lf = lc - lane;
@@ -1026,6 +1055,37 @@ const FRAG = /* glsl */ `
         col = mix(col, uHangaSumi, under);
         alpha = mix(alpha, H_UNDER_ALPHA, under);
         alpha *= cover * ink;
+        // Pigment unevenness: the paper shows through the ink. A two-octave
+        // noise over (t, side) and the seed, mean-preserving, denser at the
+        // head and more broken toward the tail.
+        float pn = hNoise2(vec2(vT * HT_UNEVEN_K + seed * 41.0, xs * 1.6 + seed * 9.0));
+        float swing = mix(HT_UNEVEN_HEAD, HT_UNEVEN_TAIL, smoothstep(0.0, 1.0, u));
+        alpha *= 1.0 - 0.5 * swing + swing * pn;
+
+        // Ink splatter (rare, static): on about 1 in 6 strokes, two to four
+        // tiny dots and one small fleck near the head, beside or on the
+        // stroke, in its own pigment at reduced opacity.
+        if (fract(seed * 91.7) < HT_SPLAT_RATE && u < HT_SPLAT_U_MAX + 0.08) {
+          float spl = 0.0;
+          float nDots = 2.0 + floor(hHash(vec2(seed * 3.3, 5.1)) * 3.0);
+          for (int k = 0; k < 5; k++) {
+            float fk = float(k);
+            if (fk > nDots) break;
+            float h1 = hHash(vec2(seed * 57.0 + fk * 11.3, fk));
+            float h2 = hHash(vec2(seed * 23.0 + fk * 5.7, fk + 3.0));
+            float h3 = hHash(vec2(seed * 71.0 + fk * 2.9, fk + 9.0));
+            float uk = 0.02 + h1 * HT_SPLAT_U_MAX;
+            float sgn = h2 < 0.5 ? -1.0 : 1.0;
+            float off = sgn * (halfTrue + 0.4 + fract(h2 * 7.0) * (HT_SPLAT_REACH_PX - 0.6));
+            float r = 0.5 * mix(HT_SPLAT_MIN_PX, HT_SPLAT_MAX_PX, h3);
+            vec2 dd = vec2((u - uk) * lenPx, sidePx - off);
+            // The last one is a fleck: stretched along the stroke.
+            if (fk == nDots) dd.x *= 0.45;
+            spl = max(spl, (1.0 - smoothstep(r - 0.5, r + 0.5, length(dd))) * (0.65 + 0.35 * h3));
+          }
+          float splA = HT_SPLAT_ALPHA * spl * (1.0 - under) * mix(H_REST_ALPHA, H_LIT_ALPHA, max(lit, story));
+          alpha = max(alpha, splA);
+        }
       } else {
         // Related pair: a row of soft round sumi dabs, anchored at the source
         // rim, each with a hashed size, offset, and ink load.

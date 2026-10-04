@@ -40,7 +40,7 @@
 // back in.
 
 import * as THREE from "three";
-import { HANGA, isHanga } from "./artstyle";
+import { HANGA, isHanga, HANGA_TEXTURE } from "./artstyle";
 
 // ---------------------------------------------------------------------------
 // Pure window + gate math (exported for tests — no THREE, no DOM).
@@ -219,6 +219,19 @@ export const HANGA_FIELD_GLSL = /* glsl */ `
     float g = vnoise(gd * vec2(380.0, 640.0) + 21.0) * 0.65 + vnoise(gd * vec2(900.0, 1500.0) - 5.0) * 0.35;
     vec3 grainTint = dusk ? vec3(0.93, 0.89, 0.81) : vec3(0.42, 0.34, 0.22);
     col = mix(col, grainTint, clamp((g - 0.45) * 2.0, 0.0, 1.0) * (dusk ? 0.035 : 0.06));
+    // Sumi flecks (HANGA_TEXTURE): a very sparse, static scatter of tiny ink
+    // specks caught in the sheet, fixed to the field direction like the grain.
+    vec2 fc = gd * 160.0;
+    vec2 fi = floor(fc);
+    if (hash(fi + 31.7) < ${HANGA_TEXTURE.FLECK_RATE.toFixed(5)}) {
+      vec2 fp = vec2(hash(fi + 3.1), hash(fi + 8.9)) * 0.6 + 0.2;
+      float fd = length(fract(fc) - fp);
+      float fr = 0.03 + 0.05 * hash(fi + 1.3);
+      float fw = max(fwidth(fd), 1e-4);
+      float fleck = 1.0 - smoothstep(fr - fw, fr + fw, fd);
+      vec3 fcol = dusk ? vec3(0.925, 0.890, 0.812) : vec3(0.110, 0.102, 0.090);
+      col = mix(col, fcol, fleck * (dusk ? ${HANGA_TEXTURE.FLECK_ALPHA_DUSK.toFixed(3)} : ${HANGA_TEXTURE.FLECK_ALPHA_WASHI.toFixed(3)}));
+    }
     return col;
   }
 

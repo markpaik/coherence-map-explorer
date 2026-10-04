@@ -15,7 +15,16 @@
 import * as THREE from "three";
 import type { GraphNode } from "../data";
 import { EMPHASIS, STRAND_COLORS, STRAND_VIVID, restRadius } from "./palette";
-import { RINGERS, FIDENZA, artHash, isHanga, hangaPalette, HANGA_DISC_SCALE, HANGA_DUSK_DAMAGE } from "./artstyle";
+import {
+  RINGERS,
+  FIDENZA,
+  artHash,
+  isHanga,
+  hangaPalette,
+  HANGA_DISC_SCALE,
+  HANGA_DUSK_DAMAGE,
+  HANGA_TEXTURE,
+} from "./artstyle";
 import { STRAND_ORDER } from "./palette";
 
 const DIM_TARGET = 0x0a0a18; // dimmed nodes lerp toward this (factor 0.82)
@@ -340,7 +349,15 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         varying float vPhase;
         varying vec2 vHCenter;
         varying float vHRpx;
-        varying float vHOlPx;`
+        varying float vHOlPx;
+        // Texture noise (HANGA_TEXTURE), over the disc's own coordinates.
+        float hnHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float hnNoise(vec2 p) {
+          vec2 i = floor(p); vec2 f = fract(p); vec2 w = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hnHash(i), hnHash(i + vec2(1.0, 0.0)), w.x),
+                     mix(hnHash(i + vec2(0.0, 1.0)), hnHash(i + vec2(1.0, 1.0)), w.x), w.y);
+        }
+        float hnNoise2(vec2 p) { return 0.65 * hnNoise(p) + 0.35 * hnNoise(p * 2.13 + 17.0); }`
     : "";
   // Shared Hanga opacity terms: the underdrawing amount and the struggle breath
   // (struggleFlickMul in TS, applied to opacity). A steady husk never breathes.
@@ -366,8 +383,13 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
         // disc whatever the draw order. rho is the screen distance (device px)
         // from the disc centre; both edges feather over one px.
         float rho = distance(gl_FragCoord.xy, vHCenter);
+        // A hand-cut line: the outer edge wobbles a little with the angle
+        // around the disc (noise over the disc's own unit circle, per node).
+        vec2 dirR = (gl_FragCoord.xy - vHCenter) / max(rho, 1e-3);
+        float rn = hnNoise2(dirR * 2.2 + vPhase * 5.0);
+        float olEff = vHOlPx * (1.0 + ${glf(HANGA_TEXTURE.RING_ROUGH)} * (2.0 * rn - 1.0));
         float band = smoothstep(vHRpx - 0.5, vHRpx + 0.5, rho)
-                   * (1.0 - smoothstep(vHRpx + vHOlPx - 0.5, vHRpx + vHOlPx + 0.5, rho));
+                   * (1.0 - smoothstep(vHRpx + olEff - 0.6, vHRpx + olEff + 0.6, rho));
         if (band < 0.002) discard;
         float lineA = hIdx == 4 ? uHBareOutlineA : 1.0;
         float a = mix(lineA, ${glf(HANGA_NODE.UNDER_OUTLINE_ALPHA)}, under);
@@ -395,6 +417,11 @@ function patchArtNodeMaterial(material: THREE.MeshBasicMaterial, opts: ArtNodeMa
           ? mix(uHDeep[hIdx], base, clamp((o - 0.08) / 0.37, 0.0, 1.0))
           : mix(base, uHLight[hIdx], clamp((o - 0.45) / 0.55, 0.0, 1.0));
         float a = hIdx == 4 ? uHBareA : 1.0;
+        // Pigment unevenness: paper showing through the print, over the disc's
+        // own coordinates (it rides the disc, never the screen).
+        vec2 rel = (gl_FragCoord.xy - vHCenter) / max(vHRpx, 1e-3);
+        float dn = hnNoise2(rel * 2.4 + vPhase * 7.0);
+        col = mix(col, uField, ${glf(HANGA_TEXTURE.DISC_UNEVEN)} * dn);
         // Unlit: faint sumi underdrawing.
         col = mix(col, uHSumi, under);
         a = mix(a, ${glf(HANGA_NODE.UNDER_ALPHA)}, under);
