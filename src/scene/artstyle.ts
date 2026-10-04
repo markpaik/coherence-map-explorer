@@ -193,24 +193,32 @@ export const HANGA_DUSK_DAMAGE = {
  */
 export const HANGA_TEXTURE = {
   /** Edge roughness: wobble period along t, and amplitude as a fraction of the half-width. */
-  ROUGH_PERIOD: 0.06,
-  ROUGH_AMP: 0.12,
+  ROUGH_PERIOD: 0.09,
+  ROUGH_AMP: 0.3,
   /** Ink bleed: the silhouette feather in device px, varied by the roughness noise. */
   BLEED_MIN_PX: 0.8,
   BLEED_MAX_PX: 1.2,
   /** Pigment unevenness along the stroke (noise cells per unit t), and its */
   /** peak-to-peak swing at the head (dense) and the tail (broken). */
   UNEVEN_K: 26,
-  UNEVEN_HEAD: 0.2,
-  UNEVEN_TAIL: 0.25,
+  UNEVEN_HEAD: 0.35,
+  UNEVEN_TAIL: 0.5,
+  /** Dry streaks in the body: lane width (fraction of the stroke width), and */
+  /** the opacity a lane takes out where it runs. 2 or 3 lanes per stroke. */
+  STREAK_WIDTH: 0.16,
+  STREAK_ALPHA: 0.45,
   /** Disc pigment unevenness (paper showing through), and ring edge roughness. */
-  DISC_UNEVEN: 0.1,
+  DISC_UNEVEN: 0.18,
+  /** Baren swirl: a low-frequency swirl of lighter pigment inside the disc. */
+  DISC_BAREN: 0.14,
   RING_ROUGH: 0.3,
   /** Splatter near the head: share of strokes, reach along the stroke (in u), */
   /** reach beside the stroke (device px), dot diameter range (device px), opacity. */
-  SPLAT_RATE: 1 / 6,
+  SPLAT_RATE: 1 / 3,
   SPLAT_U_MAX: 0.22,
   SPLAT_REACH_PX: 3,
+  /** One or two dots may land this far beside the head (device px). */
+  SPLAT_FAR_PX: 5,
   SPLAT_MIN_PX: 0.5,
   SPLAT_MAX_PX: 2,
   SPLAT_ALPHA: 0.55,
@@ -218,6 +226,22 @@ export const HANGA_TEXTURE = {
   FLECK_RATE: 0.0012,
   FLECK_ALPHA_WASHI: 0.32,
   FLECK_ALPHA_DUSK: 0.2,
+  /**
+   * Paper overlay (bloom.ts, styles 3 and 4 only): the final frame is
+   * multiplied by a screen-fixed procedural paper, like a real sheet under the
+   * print. Peak-to-peak luminance modulation per term (sRGB), per field: the
+   * mottle (4 octaves of value noise), the long fibre streaks, and the faint
+   * laid lines (Washi only). Feature sizes are in CSS px (scaled by DPR).
+   */
+  PAPER_MOTTLE_WASHI: 0.1,
+  PAPER_FIBRE_WASHI: 0.13,
+  PAPER_LAID_WASHI: 0.025,
+  PAPER_MOTTLE_DUSK: 0.07,
+  PAPER_FIBRE_DUSK: 0.09,
+  PAPER_LAID_DUSK: 0,
+  PAPER_MOTTLE_PX: 150,
+  PAPER_FIBRE_LEN_PX: 70,
+  PAPER_LAID_PX: 6,
 } as const;
 
 /** True for the two woodblock styles (3 Washi, 4 Dusk). */

@@ -404,7 +404,7 @@ function start(graph: GraphCore): void {
     // Ringers / Fidenza bypass the composer (flat direct render). The Hanga
     // styles keep it for its MSAA, printing with no bloom and no vignette.
     bloom.setArtPaper(style === 1 || style === 2);
-    bloom.setArtInk(isHanga(style));
+    bloom.setArtInk(isHanga(style), style === 4);
     const sky = style === 0;
     stars.points.visible = sky;
     nebula.group.visible = sky;

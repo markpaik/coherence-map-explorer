@@ -2,14 +2,78 @@
 // buffers so >1.0 colors survive to the bloom pass. luminanceThreshold 1.0
 // means only HDR (hover/focus/shimmer-peak) colors glow — per DESIGN.md.
 
-import { HalfFloatType, type Camera, type Scene, type WebGLRenderer } from "three";
+import { HalfFloatType, Uniform, type Camera, type Scene, type WebGLRenderer } from "three";
 import {
+  BlendFunction,
   BloomEffect,
+  Effect,
   EffectComposer,
   EffectPass,
   RenderPass,
   VignetteEffect,
 } from "postprocessing";
+import { HANGA_TEXTURE } from "./artstyle";
+
+const glf = (x: number): string => x.toFixed(4);
+
+// Paper overlay (Hanga styles 3 and 4 only). The final frame is multiplied by
+// a procedural sheet fixed to the SCREEN, like real paper under a print, so it
+// never moves with the scene and cannot shimmer. Static: no time term. Feature
+// sizes are in CSS px (gl px divided by the device pixel ratio), so 1x and 2x
+// screens show the same paper. The modulation is authored as a peak-to-peak
+// sRGB luminance swing and applied as its LINEAR equivalent (pow 2.2).
+const PAPER_FRAG = /* glsl */ `
+  uniform float uDpr;
+  uniform vec3 uStrength; // x mottle, y fibre, z laid lines (peak-to-peak, sRGB)
+  uniform float uFibreSign; // -1 dark fibres (Washi), +1 pale fibres (Dusk)
+
+  float pHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float pNoise(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p); vec2 w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(pHash(i), pHash(i + vec2(1.0, 0.0)), w.x),
+               mix(pHash(i + vec2(0.0, 1.0)), pHash(i + vec2(1.0, 1.0)), w.x), w.y);
+  }
+
+  void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+    vec2 px = uv * resolution / max(uDpr, 0.5); // CSS px, screen-fixed
+    // Mottle: four octaves of value noise.
+    vec2 q = px / ${glf(HANGA_TEXTURE.PAPER_MOTTLE_PX)};
+    float m = 0.5 * pNoise(q) + 0.25 * pNoise(q * 2.03 + 11.0)
+            + 0.125 * pNoise(q * 4.11 + 23.0) + 0.0625 * pNoise(q * 8.27 + 37.0);
+    m = m / 0.9375 - 0.5; // -0.5 .. 0.5
+    // Fibres: thin streaks, mostly horizontal, each patch of paper turned a
+    // little (a slow rotation field) so they wander instead of ruling lines.
+    // Two layers at different lengths keep only their highest ridges, so the
+    // fibres stay sparse, the way kozo strands sit in a sheet.
+    float ang = (pNoise(px / 320.0 + 5.0) - 0.5) * 0.7;
+    float ca = cos(ang); float sa = sin(ang);
+    vec2 r = vec2(ca * px.x + sa * px.y, -sa * px.x + ca * px.y);
+    float bend = (pNoise(px / 90.0 + 41.0) - 0.5) * 4.0;
+    float f1 = pNoise(vec2(r.x / ${glf(HANGA_TEXTURE.PAPER_FIBRE_LEN_PX)}, (r.y + bend) / 1.5));
+    float f2 = pNoise(vec2(r.x / ${glf(HANGA_TEXTURE.PAPER_FIBRE_LEN_PX * 0.45)} + 71.0, (r.y - bend) / 1.1 + 13.0));
+    float fib = max(smoothstep(0.8, 0.96, f1), 0.8 * smoothstep(0.82, 0.97, f2));
+    // Laid lines: faint close horizontal lines that come and go in patches,
+    // and a wide vertical chain line.
+    float laid = (0.5 + 0.5 * sin(px.y * 6.2831853 / ${glf(HANGA_TEXTURE.PAPER_LAID_PX)})) * pNoise(px / 60.0 + 3.0);
+    float chain = 1.0 - smoothstep(0.0, 1.6, abs(mod(px.x, 140.0) - 70.0));
+    float lum = 1.0 + uStrength.x * m + uFibreSign * uStrength.y * fib
+              - uStrength.z * (0.6 * laid + 0.4 * chain - 0.3);
+    outputColor = vec4(inputColor.rgb * pow(max(lum, 0.0), 2.2), inputColor.a);
+  }
+`;
+
+class PaperEffect extends Effect {
+  constructor() {
+    super("HangaPaperEffect", PAPER_FRAG, {
+      blendFunction: BlendFunction.NORMAL,
+      uniforms: new Map<string, Uniform>([
+        ["uDpr", new Uniform(1)],
+        ["uStrength", new Uniform([0, 0, 0])],
+        ["uFibreSign", new Uniform(-1)],
+      ]),
+    });
+  }
+}
 
 export interface BloomRig {
   composer: EffectComposer;
@@ -28,7 +92,7 @@ export interface BloomRig {
    * vignette would grime the field). The paper bypass of styles 1 and 2 is
    * unchanged. Off restores the Galaxy chain.
    */
-  setArtInk(on: boolean): void;
+  setArtInk(on: boolean, dusk?: boolean): void;
   /**
    * Concrete-daylight dimmer (Galaxy, Transit pose): scale bloom intensity by
    * (1 − daylight) so the glow bleeds out as the city surfaces into daylight.
@@ -91,7 +155,20 @@ export function createBloom(
   const vignette = new VignetteEffect({ offset: 0.28, darkness: 0.55 });
 
   composer.addPass(new RenderPass(scene, camera));
-  composer.addPass(new EffectPass(camera, bloom, vignette));
+  const bloomPass = new EffectPass(camera, bloom, vignette);
+  composer.addPass(bloomPass);
+  // Hanga paper overlay: a separate pass, disabled outside styles 3 and 4.
+  // addPass hands renderToScreen to the newest pass, so give it back to the
+  // bloom pass at once: off-Hanga the chain is exactly the shipped one.
+  const paper = new PaperEffect();
+  const paperPass = new EffectPass(camera, paper);
+  composer.addPass(paperPass);
+  paperPass.enabled = false;
+  paperPass.renderToScreen = false;
+  bloomPass.renderToScreen = true;
+  const paperStrength = paper.uniforms.get("uStrength")!.value as number[];
+  const paperDpr = paper.uniforms.get("uDpr")!;
+  const paperSign = paper.uniforms.get("uFibreSign")!;
 
   let artPaper = false;
   let artInk = false;
@@ -108,9 +185,9 @@ export function createBloom(
         return;
       }
       if (artInk) {
-        // Ink mode: the composer runs for its MSAA, with no glow and no vignette.
-        bloom.intensity = 0;
-        vignette.darkness = 0;
+        // Ink mode: the composer runs for its MSAA. The bloom pass is off (no
+        // glow, no vignette) and the paper pass prints the frame on the sheet.
+        paperDpr.value = renderer.getPixelRatio();
         composer.render(deltaSeconds);
         return;
       }
@@ -124,8 +201,21 @@ export function createBloom(
     setArtPaper(on) {
       artPaper = on;
     },
-    setArtInk(on) {
+    setArtInk(on, dusk = false) {
       artInk = on;
+      const T = HANGA_TEXTURE;
+      paperStrength[0] = dusk ? T.PAPER_MOTTLE_DUSK : T.PAPER_MOTTLE_WASHI;
+      paperStrength[1] = dusk ? T.PAPER_FIBRE_DUSK : T.PAPER_FIBRE_WASHI;
+      paperStrength[2] = dusk ? T.PAPER_LAID_DUSK : T.PAPER_LAID_WASHI;
+      paperSign.value = dusk ? 1 : -1;
+      // Swap which pass prints to the screen. Off-Hanga this restores the
+      // shipped chain (bloom pass to screen, paper pass skipped).
+      if (paperPass.enabled !== on) {
+        paperPass.enabled = on;
+        bloomPass.enabled = !on;
+        paperPass.renderToScreen = on;
+        bloomPass.renderToScreen = !on;
+      }
     },
     setDaylight(daylight01) {
       daylight = daylight01 < 0 ? 0 : daylight01 > 1 ? 1 : daylight01;
