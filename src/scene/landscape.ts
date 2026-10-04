@@ -281,7 +281,7 @@ export const MURM = {
   // at the home view about y 90 to 320 of 1440x900: clear of the title block
   // on the left and of the Style card and pose control at the bottom right
   // (tests/landscape.test.ts and the viewport screenshots).
-  az: 28 * DEG,
+  az: 31 * DEG,
   azSwing: 2 * DEG,
   R: 3440,
   RSwing: 90,
@@ -311,14 +311,14 @@ export const MURM = {
   pH: 59,
   /** Sub-flock home azimuths sit subBase apart; each swings by subAz, so two
    *  can merge while the three rarely meet. Then height and radius swings. */
-  subBase: 4 * DEG,
+  subBase: 3 * DEG,
   subAz: 2.5 * DEG,
   /** Home heights: sub-flock 0 sits subHBase higher, 1 lower, 2 level. */
   subHBase: 55,
   subH: 45,
   subR: 140,
   /** Per-speck jitter amplitudes (world units) and period range (seconds). */
-  jitX: 150,
+  jitX: 120,
   jitY: 90,
   jitZ: 40,
   jitP0: 20,
