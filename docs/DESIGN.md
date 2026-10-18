@@ -475,6 +475,10 @@ metadata 11.5 · section caps 11.
 
 ## Art styles
 
+**Status (2026-10-18).** The Style control (src/ui/styletoggle.ts) offers four
+choices: Galaxy (0), Washi (3), Dusk (4), and Bulguksa (5, see "Bulguksa"
+below). The 2026-10-03 notes that follow still hold for the first three.
+
 **Status (2026-10-03).** The Style control (src/ui/styletoggle.ts) is mounted
 again with three choices: Galaxy (0), Washi (3), and Dusk (4). It is a radio
 group beside the pose control, and a Style row in the story card during a
@@ -655,3 +659,100 @@ the preview sheet's colors (the designer chose the stronger ridges), with the
 crest ink capped on the two near rings to hold that gate. Motion keeps the project rules: every period is
 several seconds or longer, a story or a focus fades the birds out over 2 s,
 and reduced motion freezes the water, mist, and waterfall and hides the birds.
+
+### Bulguksa (style 5)
+
+A monumental Korean ink landscape of Bulguksa under snow, after Park Dae-sung
+and the Joseon ink tradition, with the map floating above the temple.
+`?style=bulguksa` deep-links it, and `cme.style` stores it like the others.
+Credit line: "After Park Dae-sung and the Joseon ink tradition". The world
+lives in `src/scene/bulguksa/` (params, shaders, temple, pines, index). It is
+invisible, with no draw calls, in every other style, and the Hanga field and
+landscape stay off at style 5 (`isHangaField`).
+
+- **Grammar of the map.** The Hanga brush strokes and printed discs
+  (`isHanga(5)` is true), on hanji. Obangsaek pigments, each 3:1 or more on the
+  paper and on every massif fill tone (tests/bulguksa.test.ts): number =
+  vermilion #d3382a, algebra = azurite #2b4fa8, geometry = malachite #2a7d52
+  (the brief's #2f8a5a, darkened to pass), data = orpiment #9c6c08 (the brief's
+  #d9a21b is 2.0:1 on the paper, so it prints deep). Measured: vermilion 4.19,
+  azurite 6.56, malachite 4.40, orpiment 4.01 on #f2efe8. Card swatches on dark
+  glass use light washes of the same hues (BULGUKSA_CARD, 5.6 to 8.0:1). Lit
+  strokes are keyed in sumi (`uHangaKey`, style 5 only): sumi edges hold the
+  pigment. The focus mark is a sumi enso (beacons `uSeal` 2): a heavy start, a
+  thinning dry tail, a lift before it closes. Unlit is the faint sumi
+  underdrawing. Damage washes toward the paper and sheds opacity, with the
+  struggle breath unchanged (4.5 s); lit and damaged discs differ by 45 or more
+  of 255 in median luminance (a test).
+- **Field and sky.** Hanji #f2efe8. The paper pass prints a hanji sheet
+  (HANJI_PAPER: long fibres, little mottle, no laid lines). The sky shell is a
+  grey wash darkest just above the ridge line (oehun, #b9b3a8) and lighter
+  above (#e4e0d8), so the snow on the peaks reads as bare paper. The title band
+  is screen-fixed (`uBandBottom`, shared with Washi and Dusk) in a pale ink wash
+  #c4beb3, and the title prints in SUMI: #1c1a17 on the band is 9.4:1 and the
+  lightest line ink (#4a4339) is 5.3:1. Paper ink on a dark band was rejected
+  because the dark band would have to fall below L 0.09 to carry it, and the
+  sumi birds and inscription in the band would then vanish. No box, scrim,
+  mist, or halo.
+- **Massifs.** Four concentric walls (R 1750 to 3300). The crest is the Hanga
+  ridge noise, sharpened, times an envelope that is low in front of and behind
+  the map and tall at the sides, so no crest prints above 52% of the frame
+  height inside the map's central 40% of width at the home view (a test, three
+  viewports). Snow on the upper faces is reserved paper. Inner fold lines carry
+  shade washes and a dark tide line where the wash dried. Jun strokes (pressed
+  head, dry tail) gather in patches on the steep faces, moss dots sit under the
+  near crests, and the crest contour is a dry hairline, heavier near. Far walls
+  are paler. Line marks are hairlines, so only the fills enter the contrast
+  gate.
+- **Snow slope.** A gentle dome of paper under the map with faint wind drifts
+  toward the rim, and ink marks (small pines, reed tufts, rocks) along its far
+  edge.
+- **Temple.** Low-poly geometry in plan units (front terrace 100 wide), drawn
+  in ink line (EdgesGeometry plus ruled ashlar, posts, railings, step nosings)
+  on paper fills shaded by one light. The terrace has its boulder base and
+  ashlar grid; Cheongungyo (16 steps) and Baegungyo (18) climb to Jahamun, with
+  the arch under the lower flight; Yeonhwagyo (10) and Chilbogyo (8) climb to
+  Anyangmun; Beomyeongnu is raised on its stacked stone pillar; corridors enclose
+  the court; Daeungjeon is raised on its platform with Seokgatap (plain, three
+  stories) to the west and Dabotap (stair base, pillars, octagonal balcony,
+  lotus tier) to the east; Museoljeon closes the back; Geungnakjeon sits in the
+  west court. Every roof is snow: hipped-and-gabled roofs with lifted corners,
+  ridge heaps, hip-end heaps, a dark row of tile ends under the eave lip, a
+  soffit in shadow, and a faint muted dancheong band. The raised viewpoint of
+  the ink tradition is literal: heights print at 0.7 and depths at 0.65 of the
+  width scale, so the complex spans about 55% of the frame width at the home
+  view and its highest ridge prints under the map's lowest standard (a test).
+  Two draw calls.
+- **Pines.** Korean red pines with leaning S trunks, ink-ruled bark plates,
+  limbs, ragged needle pads (dark ink masses), and a snow pillow on each pad
+  with a soft grey wash where it meets the needles. Two framing pines stand at
+  the left and right edges of the home view, low enough that their crowns sit
+  near eye level; smaller pines stand outside the map's footprint and behind the
+  camera for the orbit. A pine inside about 22 degrees of the view axis ghosts
+  out, so an orbit never walls the map off behind a crown.
+- **Cranes.** One flight of 4 to 6 red-crowned cranes on the Hanga schedule
+  (`craneScheduleInto`: a 40 s crossing, then 50 to 90 s of empty sky) across
+  the right half of the sky, clear of the title block. Wings spread below and
+  above the body line in one slow stroke (3.4 s), each bird at its own phase;
+  white primaries, black secondaries and tertials on the arm's trailing half,
+  black neck, red crown, legs past the tail. About 18 to 21 px across at the
+  home view.
+- **Murmuration.** 2000 starlings in one draw call, moved in the vertex
+  shader: a thin sheet leaning about 75 degrees from face-on, folded through its
+  thickness, with a sharp edge, uniform interior density, and a 5% straggler
+  fringe. Periods 29 to 61 s. Chevrons at 2x. It stays clear of the title block
+  and the map at 1440x900, 1280x720, and 1024x600 (a test).
+- **Falling snow.** 900 flakes in a box around the camera target, one draw
+  call, never under 1.6 CSS px and faded at the box faces, so nothing pops or
+  twinkles.
+- **Inscription.** "佛國雪中數理圖" in a vertical column with a vermilion seal,
+  written to a canvas at boot (no image file), on the sky at a fixed world
+  azimuth, so it moves with orbit like ink on the sheet.
+- **Motion.** Quiet (a story or a focus) fades the birds over 2 s. Reduced
+  motion freezes the snow and hides the birds. Nothing pulses in brightness.
+- **Cost.** At the 1440x900 home view Bulguksa draws 104 calls and 322,529
+  triangles (Washi: 101 and 269,177); the world alone is 15 draws.
+- **Study.** Open-access study only (Commons CC0, PD, and Creative Commons
+  photographs and the site plan; Cleveland CC0 paintings; exhibition text for
+  Park Dae-sung). Nothing from the study is embedded; everything is procedural.
+

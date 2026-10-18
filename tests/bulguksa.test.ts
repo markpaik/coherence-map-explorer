@@ -151,7 +151,7 @@ describe("massifs keep the map's center region clear at the home view", () => {
     const front = Math.max(...MASSIFS.map((m) => massifCrest(m, 0)));
     expect(side - front).toBeGreaterThan(300);
   });
-  it("stand on the snow slope (the bases fade above the floor rim)", () => {
+  it("rise from the snow slope (the bases fade above the floor rim)", () => {
     for (const m of MASSIFS) expect(m.top - m.fadeSpan).toBeGreaterThan(floorY(FLOOR.R) - 120);
   });
 });
@@ -176,7 +176,7 @@ describe("temple", () => {
     // And its terrace foot is still on screen, above the bottom chrome.
     expect(project([0, TEMPLE.y, TEMPLE.z], v)[1]).toBeLessThan(860);
   });
-  it("sits on the snow slope", () => {
+  it("has its terrace foot at the snow slope", () => {
     expect(Math.abs(floorY(TEMPLE.z) - TEMPLE.y)).toBeLessThan(2);
   });
 });
