@@ -55,6 +55,8 @@ const FOCUS_RING_SCALE = 3.2;
 // Under Hanga the seal stamps wider (the discs print larger, HANGA_DISC_SCALE),
 // so it encloses the focused disc and the sub-standard discs stacked on it.
 const SEAL_RING_SCALE = 4.8;
+// The Bulguksa enso is a looser brush circle: it stands wider than the seal.
+const ENSO_RING_SCALE = 6.2;
 
 const VERT = /* glsl */ `
   attribute vec3 aCenter;
@@ -371,6 +373,7 @@ export function createBeacons(
   // True under a Hanga style: the focus ring is the vermilion seal, so the
   // strand tint the machine passes is ignored.
   let sealMode = false;
+  let ensoMode = false; // Bulguksa (5): the enso's own scale
   // The last strand tint the machine asked for, restored when the seal lifts.
   let focusTint = 0xffffff;
 
@@ -432,7 +435,7 @@ export function createBeacons(
         return;
       }
       focusIndex = nodeIndex;
-      fScaleAttr.array[0] = radii[nodeIndex] * (sealMode ? SEAL_RING_SCALE : FOCUS_RING_SCALE);
+      fScaleAttr.array[0] = radii[nodeIndex] * (ensoMode ? ENSO_RING_SCALE : sealMode ? SEAL_RING_SCALE : FOCUS_RING_SCALE);
       fScaleAttr.needsUpdate = true;
       fPhaseAttr.array[0] = (nodeIndex * 2.399963) % (Math.PI * 2);
       fPhaseAttr.needsUpdate = true;
@@ -534,10 +537,11 @@ export function createBeacons(
         fUniforms.uColor.value.setHex(focusTint);
       }
       sealMode = hanga;
+      ensoMode = style === 5;
       // Bulguksa (5) marks the focus with a sumi enso (uSeal 2) instead.
       fUniforms.uSeal.value = hanga ? (style === 5 ? 2 : 1) : 0;
       if (focusIndex !== null) {
-        fScaleAttr.array[0] = radii[focusIndex] * (hanga ? SEAL_RING_SCALE : FOCUS_RING_SCALE);
+        fScaleAttr.array[0] = radii[focusIndex] * (ensoMode ? ENSO_RING_SCALE : hanga ? SEAL_RING_SCALE : FOCUS_RING_SCALE);
         fScaleAttr.needsUpdate = true;
       }
       // A stamped seal holds still: the focus ring's radius breath is off under
