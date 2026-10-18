@@ -687,9 +687,10 @@ them, so importers keep one path.
   flap angle: only the span foreshortens, by the sine of the flap angle seen
   from below. The hand lags the arm and swings further, so the downstroke
   bows. The strokes are signed-distance shapes anti-aliased with `fwidth`,
-  about 23 px from wingtip to wingtip at the home view. Washi prints white
+  about 20 to 23 px from wingtip to wingtip at the home view. Both fly the open
+  sky right of the title block. Washi prints white
   plumage, which reads on the Prussian band. Dusk prints pale moonlit plumage
-  and flies the moon's side of the sky, left of the flock.
+  and flies higher, at one height, above the flock.
 - Dusk: one murmuration as a thin folded sheet of 2000 birds in one draw,
   moved in the vertex shader. Each bird is a small chevron aligned to the
   sheet's local flow. The sheet is uniform inside and twice as dense or more
