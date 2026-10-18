@@ -171,21 +171,30 @@ export const MASSIF_FRAG = /* glsl */ `
     }
     // Jun strokes: short dry strokes that follow the slope, where the face is
     // steep enough that snow does not hold (rock shows through).
-    float rock = smoothstep(0.35, 1.1, abs(slope)) * (1.0 - smoothstep(30.0, 300.0, d));
+    float rock = smoothstep(0.3, 1.0, abs(slope)) * (1.0 - smoothstep(20.0, 240.0, d));
     if (rock > 0.01) {
       float ang = atan(slope);
       vec2 q = vec2(X, y);
       vec2 dirS = vec2(cos(ang), sin(ang));
       vec2 r2 = vec2(dot(q, dirS), dot(q, vec2(-dirS.y, dirS.x)));
-      vec2 cell = vec2(46.0, 13.0);
+      vec2 cell = vec2(58.0, 11.0);
+      // Stagger the rows, so the strokes never line up in a grid.
+      float row = floor(r2.y / cell.y);
+      r2.x += cell.x * h21(vec2(row, 3.0 + float(uSeed)));
       vec2 ci = floor(r2 / cell);
       vec2 cf = fract(r2 / cell) - 0.5;
-      float on = step(0.45, h21(ci + float(uSeed)));
-      float len = 0.3 + 0.18 * h21(ci + 7.0);
-      float along = 1.0 - smoothstep(len - 0.06, len, abs(cf.x));
+      // Strokes gather in patches (the painter's hand), not an even field.
+      float clump = smoothstep(0.45, 0.7, vn(vec2(X / 160.0, y / 110.0) + float(uSeed)));
+      float on = step(0.5, h21(ci + float(uSeed))) * clump;
+      float len = 0.28 + 0.2 * h21(ci + 7.0);
+      float off = (h21(ci + 11.0) - 0.5) * 0.3;
+      float sx = (cf.x - off) / len; // -1..1 along the stroke
+      float along = 1.0 - smoothstep(0.85, 1.0, abs(sx));
+      // A pressed head that tapers to a dry tail.
+      float wdt = mix(0.16, 0.04, clamp(sx * 0.5 + 0.5, 0.0, 1.0));
       float wpx = fwidth(r2.y / cell.y);
-      float jun = (1.0 - smoothstep(0.08, 0.08 + wpx * 1.2, abs(cf.y))) * along * on;
-      ink = max(ink, jun * rock * 0.5);
+      float jun = (1.0 - smoothstep(wdt, wdt + wpx * 1.2, abs(cf.y))) * along * on;
+      ink = max(ink, jun * rock * (0.45 + 0.4 * h21(ci + 5.0)));
     }
     // Moss dots (near massifs): a row of small dark dots just under the crest.
     if (uInk > 0.9) {
@@ -202,7 +211,7 @@ export const MASSIF_FRAG = /* glsl */ `
     }
     // The crest contour itself: a dry hairline, heavier on near massifs.
     float brkC = mix(0.55, 1.0, smoothstep(0.25, 0.55, vn(vec2(X / 34.0, 2.0))));
-    ink = max(ink, hair(d - 0.6 * w, 0.9, w) * brkC * 0.9);
+    ink = max(ink, hair(d - 0.6 * w, 0.6 + 1.2 * uInk * uInk, w) * brkC * 0.95);
     col = mix(col, uSumi, ink * uInk);
     // The base fades into the mist (the field is paper below).
     float mist = smoothstep(uTop - uFadeSpan, uTop + 10.0, y);
@@ -378,10 +387,13 @@ export const CRANE_VERT = /* glsl */ `
     float az = mix(uAz0, uAz1, p);
     return vec3(uR * sin(az), uR * tan(uEl) + rise, -uR * cos(az));
   }
-  vec4 wing(float A, float lag, float len) {
-    vec2 arm = 0.44 * len * vec2(-cos(A) * 0.35, sin(A));
-    float H = 0.6 * A + lag;
-    vec2 hand = arm + 0.62 * len * vec2(-cos(H) * 0.45, sin(H));
+  // A wing seen from below and to the side, as ink paintings show a crane in
+  // flight: theta is the arm's angle from the backward axis (+ up). The hand
+  // bends back toward the horizontal and lags the beat.
+  vec4 wing(float th, float lag, float len) {
+    vec2 arm = 0.3 * len * vec2(-cos(th), sin(th));
+    float H = th * 0.72 + lag;
+    vec2 hand = arm + 0.42 * len * vec2(-cos(H), sin(H));
     return vec4(arm, hand);
   }
   void main() {
@@ -405,9 +417,11 @@ export const CRANE_VERT = /* glsl */ `
     float w = 0.5 + 0.5 * beat;
     float lag = -0.35 * cos(ph);
     float len = 0.8 + 0.2 * abs(beat);
-    float A = mix(-0.95, 1.25, w);
-    vNear = wing(A, lag, len);
-    vFar = wing(min(A + 0.45, 1.6), lag, len * 0.9);
+    // Both wings ride one stroke: the near wing sweeps below the body line,
+    // the far wing above it, so the spread reads at every phase.
+    float e = mix(-0.5, 1.0, w);
+    vNear = wing(-1.3 + 0.55 * e, lag, len);
+    vFar = wing(1.25 + 0.5 * e, -lag, len * 0.92);
   }
 `;
 export const CRANE_FRAG = /* glsl */ `
@@ -433,7 +447,10 @@ export const CRANE_FRAG = /* glsl */ `
     vec2 p = vUv;
     float px = max(fwidth(p.x) + fwidth(p.y), 1e-4) * 0.7071;
     float s;
-    vec2 sh = vec2(0.06, 0.03);
+    vec2 sh = vec2(0.05, 0.02);
+    // The body prints at 0.8 of the wing scale (a crane's span is about twice its length).
+    vec2 pq = p;
+    p = p * 1.25;
     // Distances (negative inside) for each part.
     float dBody = cap(p, vec2(0.26, 0.02), vec2(-0.24, -0.01), 0.075, 0.05, s);
     float dTail = cap(p, vec2(-0.2, -0.005), vec2(-0.36, -0.03), 0.05, 0.02, s);
@@ -443,13 +460,17 @@ export const CRANE_FRAG = /* glsl */ `
     float sL;
     float dLegs = min(cap(p, vec2(-0.18, -0.03), vec2(-0.8, -0.07), 0.014, 0.008, sL),
                       cap(p, vec2(-0.18, -0.035), vec2(-0.78, -0.105), 0.012, 0.007, sL));
+    // Back to wing space; body distances shrink with the body.
+    dBody *= 0.8; dTail *= 0.8; dNeck *= 0.8; dHead *= 0.8; dBeak *= 0.8; dLegs *= 0.8;
+    vec2 pHead = p;
+    p = pq;
     // Wings: arm (shoulder to wrist) and hand (wrist to tip). The trailing half
     // of the arm is black (secondaries and tertials); the hand is white (primaries).
     float sN; float sNh; float sF; float sFh;
-    float dNArm = cap(p, sh, sh + vNear.xy, 0.1, 0.085, sN);
-    float dNHand = cap(p, sh + vNear.xy, sh + vNear.zw, 0.085, 0.012, sNh);
-    float dFArm = cap(p, sh, sh + vFar.xy, 0.085, 0.07, sF);
-    float dFHand = cap(p, sh + vFar.xy, sh + vFar.zw, 0.07, 0.01, sFh);
+    float dNArm = cap(p, sh, sh + vNear.xy, 0.13, 0.115, sN);
+    float dNHand = cap(p, sh + vNear.xy, sh + vNear.zw, 0.115, 0.014, sNh);
+    float dFArm = cap(p, sh, sh + vFar.xy, 0.11, 0.095, sF);
+    float dFHand = cap(p, sh + vFar.xy, sh + vFar.zw, 0.095, 0.012, sFh);
     // The trailing edge faces backward (-x): pick the side of the bone that does.
     vec2 nb = normalize(vNear.xy + vec2(1e-5));
     float trailN = (nb.y >= 0.0 ? 1.0 : -1.0) * sN; // > 0 on the trailing side
@@ -465,7 +486,7 @@ export const CRANE_FRAG = /* glsl */ `
     // Black: neck, the trailing half of each arm, a dark beak and legs.
     float black = 0.0;
     black = max(black, clamp(-dNeck / px + 0.5, 0.0, 1.0));
-    float armN = clamp(-dNArm / px + 0.5, 0.0, 1.0) * step(0.0, trailN) * step(dNHand, 0.0 + 1e9);
+    float armN = clamp(-dNArm / px + 0.5, 0.0, 1.0) * step(0.0, trailN);
     float armF = clamp(-dFArm / px + 0.5, 0.0, 1.0) * step(0.0, trailF);
     black = max(black, max(armN, armF * 0.9));
     float legs = clamp(-dLegs / px + 0.5, 0.0, 1.0) * (1.0 - clamp(-dBody / px + 0.5, 0.0, 1.0));
@@ -476,7 +497,7 @@ export const CRANE_FRAG = /* glsl */ `
     black *= 1.0 - overBlack * (1.0 - clamp(-dNeck / px + 0.5, 0.0, 1.0));
     col = mix(col, uInk, black);
     // The red crown on top of the head.
-    float crown = clamp((-(length(p - vec2(0.675, 0.11)) - 0.022)) / px + 0.5, 0.0, 1.0);
+    float crown = clamp((-(length(pHead - vec2(0.675, 0.11)) - 0.024) * 0.8) / px + 0.5, 0.0, 1.0);
     col = mix(col, uRed, crown);
     float a = max(cover, outline * 0.6) * vA;
     col = mix(uLine, col, cover / max(cover + outline * 0.6 * (1.0 - cover), 1e-4));

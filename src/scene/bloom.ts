@@ -43,13 +43,13 @@ const PAPER_FRAG = /* glsl */ `
       // catches the light along them) with a few darker ones. Static.
       vec2 hq = px / ${glf(HANGA_TEXTURE.PAPER_MOTTLE_PX * 1.6)};
       float hm = 0.6 * pNoise(hq) + 0.4 * pNoise(hq * 2.07 + 19.0) - 0.5;
-      float hAng = (pNoise(px / 420.0 + 7.0) - 0.5) * 1.1;
+      float hAng = (pNoise(px / 900.0 + 7.0) - 0.5) * 0.5;
       float hc = cos(hAng); float hs = sin(hAng);
       vec2 hr = vec2(hc * px.x + hs * px.y, -hs * px.x + hc * px.y);
-      float hBend = (pNoise(px / 140.0 + 3.0) - 0.5) * 7.0;
+      float hBend = (pNoise(px / 160.0 + 3.0) - 0.5) * 3.0;
       float h1 = pNoise(vec2(hr.x / ${glf(HANJI_PAPER.FIBRE_LEN_PX)}, (hr.y + hBend) / ${glf(HANJI_PAPER.FIBRE_W_PX)}));
       float h2 = pNoise(vec2(hr.x / ${glf(HANJI_PAPER.FIBRE_LEN_PX * 0.6)} + 31.0, (hr.y - hBend) / ${glf(HANJI_PAPER.FIBRE_W_PX * 0.8)} + 57.0));
-      float pale = smoothstep(0.82, 0.97, h1);
+      float pale = smoothstep(0.86, 0.98, h1);
       float dark = smoothstep(0.86, 0.98, h2);
       float hl = 1.0 + ${glf(HANJI_PAPER.MOTTLE)} * hm + ${glf(HANJI_PAPER.FIBRE)} * (0.55 * pale - 0.45 * dark);
       outputColor = vec4(inputColor.rgb * pow(max(hl, 0.0), 2.2), inputColor.a);

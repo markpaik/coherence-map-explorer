@@ -61,8 +61,16 @@ function limb(curve: THREE.Curve<THREE.Vector3>, r0: number, r1: number, seg: nu
 /** One needle pad (a flat fan) with its snow pillow on top. */
 function pad(cx: number, cy: number, cz: number, rx: number, rz: number, rot: number, seed: number): THREE.BufferGeometry[] {
   const out: THREE.BufferGeometry[] = [];
-  const n = new THREE.IcosahedronGeometry(1, 1);
-  n.scale(rx, rx * 0.26, rz);
+  const n = new THREE.IcosahedronGeometry(1, 2);
+  // A ragged needle rim: each rim vertex pushed in or out a little.
+  const R0 = n.getAttribute("position");
+  for (let v = 0; v < R0.count; v++) {
+    const x = R0.getX(v);
+    const z = R0.getZ(v);
+    const k = 0.82 + 0.3 * lhash(seed + 77, Math.round((Math.atan2(z, x) + 3.2) * 9));
+    R0.setXYZ(v, x * k, R0.getY(v), z * k);
+  }
+  n.scale(rx, rx * 0.22, rz);
   n.rotateY(rot);
   n.translate(cx, cy, cz);
   n.deleteAttribute("uv");
@@ -129,7 +137,7 @@ function pine(spec: PineSpec, fills: THREE.BufferGeometry[], lines: THREE.Buffer
   lines.push(new THREE.EdgesGeometry(tg, 20));
   // Limbs from the upper trunk, mostly toward the reach side, ending in pads.
   const nLimbs = 5 + Math.floor(lhash(sd, 3) * 3);
-  const dirSide = Math.sign(Math.sin(spec.lean)) || 1;
+  const dirSide = spec.limbSide ?? (Math.sign(Math.sin(spec.lean)) || 1);
   for (let k = 0; k < nLimbs; k++) {
     const t = 0.5 + (0.5 * (k + 0.5)) / nLimbs;
     const o = trunk.getPointAt(t);
@@ -144,11 +152,11 @@ function pine(spec: PineSpec, fills: THREE.BufferGeometry[], lines: THREE.Buffer
     const mid = o.clone().lerp(end, 0.5);
     mid.y -= len * 0.08;
     const curve = new THREE.CatmullRomCurve3([o, mid, end]);
-    const lg = limb(curve, rBase * 0.4, rBase * 0.12, 8, sd + k);
+    const lg = limb(curve, rBase * 0.26, rBase * 0.08, 8, sd + k);
     fills.push(lg);
     lines.push(new THREE.EdgesGeometry(lg, 20));
     // Pads: a main fan at the tip, one or two smaller along the limb.
-    const pr = spec.reach * (0.2 + 0.08 * lhash(sd, 40 + k));
+    const pr = spec.reach * (0.16 + 0.07 * lhash(sd, 40 + k));
     fills.push(...pad(end.x, end.y + pr * 0.1, end.z, pr, pr * 0.72, ang, sd * 7 + k));
     const p2 = curve.getPointAt(0.55);
     fills.push(...pad(p2.x, p2.y + pr * 0.18, p2.z, pr * 0.62, pr * 0.5, ang + 0.6, sd * 9 + k));

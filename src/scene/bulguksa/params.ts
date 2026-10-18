@@ -183,13 +183,15 @@ export interface PineSpec {
   lean: number;
   reach: number;
   seed: number;
+  /** Which side most limbs reach toward (+1 = +x). Defaults to the lean side. */
+  limbSide?: number;
 }
 // The framing pines stand low enough that the home camera looks DOWN onto
 // their crowns (the snow on the pads shows); the small ones stand outside the
 // map's footprint at the home view, or behind the camera for the orbit.
 export const PINES: readonly PineSpec[] = [
-  { x: -560, z: 430, h: 190, lean: 0.55, reach: 170, seed: 3 },
-  { x: 540, z: 420, h: 250, lean: -0.4, reach: 150, seed: 11 },
+  { x: -335, z: 468, h: 225, lean: 0.22, reach: 120, seed: 3, limbSide: -1 },
+  { x: 345, z: 438, h: 290, lean: -0.2, reach: 115, seed: 11, limbSide: 1 },
   { x: -850, z: -420, h: 150, lean: 0.12, reach: 80, seed: 23 },
   { x: 900, z: -440, h: 170, lean: -0.1, reach: 85, seed: 31 },
   { x: -1260, z: -1000, h: 160, lean: 0.08, reach: 80, seed: 41 },
@@ -212,7 +214,7 @@ export const BCRANE = {
   az0: 46 * DEG,
   az1: 8 * DEG,
   /** Quad half-size in world units: about 18 px wingspan at the home view. */
-  size: 40,
+  size: 48,
   /** One slow, deep stroke (seconds). */
   wingPeriod: 3.4,
   maxCount: 6,
@@ -242,18 +244,18 @@ export const BMURM = {
   /** Share of birds in the straggler fringe. */
   fringe: 0.05,
   az: 14 * DEG,
-  el: 18.5 * DEG,
+  el: 20 * DEG,
   R: 3400,
   /** Sheet half-extents (world units): along, across, and thickness. */
-  a: 520,
-  b: 330,
+  a: 540,
+  b: 520,
   th: 12,
   /** The sheet leans this far from face-on (radians), and swings by tiltSwing. */
-  tilt: 1.05,
-  tiltSwing: 0.22,
+  tilt: 1.3,
+  tiltSwing: 0.16,
   pTilt: 53,
   /** Fold amplitude (world units) and the slow periods (seconds). */
-  fold: 150,
+  fold: 210,
   pFold: 29,
   pTurn: 61,
   pDrift: 47,
@@ -339,8 +341,8 @@ export const SNOW = {
   pDrift0: 9,
   pDrift1: 16,
   /** Flake diameter range, CSS px at 900 units. */
-  px0: 3,
-  px1: 6.5,
+  px0: 2.6,
+  px1: 5,
 } as const;
 
 /** Where flake i sits at time t, relative to the box center (mirrors the vertex shader). */
