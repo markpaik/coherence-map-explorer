@@ -587,6 +587,9 @@ const FLOOR_FRAG = /* glsl */ `
       lines = max(lines, crestRow(r, phi, rr, 31 + k * 7, drift, keep) * fade);
     }
     lines *= far * smoothstep(${f(RINGS[0].R - 360)}, ${f(RINGS[0].R - 200)}, r);
+    // The strokes are a grazing-view convention: seen from steeply above they
+    // would print as large hooks, so they fade there.
+    lines *= 1.0 - smoothstep(0.55, 0.75, abs(normalize(vWorld - cameraPosition).y));
     vec3 ink = mix(uWave, uGlint, onPath);
     float inkOp = mix(uWaveOp, uGlintOp, onPath);
     col = mix(col, ink, lines * inkOp);
