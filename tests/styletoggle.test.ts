@@ -26,7 +26,10 @@ import type { StrandId } from "../src/data";
 // Deep link and persistence.
 
 describe("styleFromSlug: only the three user choices resolve", () => {
-  it("galaxy, washi, and dusk map to 0, 3, and 4", () => {
+  it("galaxy, washi, dusk, and bulguksa map to 0, 3, 4, and 5", () => {
+    expect(styleFromSlug("bulguksa")).toBe(5);
+    expect(resolveBootStyle("bulguksa", "dusk")).toBe(5);
+    expect(resolveBootStyle(null, "bulguksa")).toBe(5);
     expect(styleFromSlug("galaxy")).toBe(0);
     expect(styleFromSlug("washi")).toBe(3);
     expect(styleFromSlug("dusk")).toBe(4);
@@ -87,6 +90,8 @@ describe("stored choice: cme.style, wrapped in try/catch", () => {
     expect(readStoredStyle(() => m)).toBe("dusk");
     writeStoredStyle(() => m, 0);
     expect(m.map.get("cme.style")).toBe("galaxy");
+    writeStoredStyle(() => m, 5);
+    expect(m.map.get("cme.style")).toBe("bulguksa");
   });
   it("never stores a dormant style", () => {
     const m = new MemStorage();
@@ -198,7 +203,7 @@ class FakeDoc {
   }
 }
 
-describe("createStyleToggle: a three-choice radio group", () => {
+describe("createStyleToggle: a four-choice radio group", () => {
   let doc: FakeDoc;
   const g = globalThis as unknown as { document?: unknown };
   let saved: unknown;
@@ -225,14 +230,15 @@ describe("createStyleToggle: a three-choice radio group", () => {
   const checked = (radios: FakeEl[]) => radios.map((r) => r.getAttribute("aria-checked"));
   const tabs = (radios: FakeEl[]) => radios.map((r) => r.tabIndex);
 
-  it("offers exactly Galaxy, Washi, Dusk, in that order, for styles 0, 3, 4", () => {
+  it("offers exactly Galaxy, Washi, Dusk, Bulguksa, in that order, for styles 0, 3, 4, 5", () => {
     expect(STYLE_CHOICES.map((c) => [c.label, c.style])).toEqual([
       ["Galaxy", 0],
       ["Washi", 3],
       ["Dusk", 4],
+      ["Bulguksa", 5],
     ]);
     const { radios, root } = mount(0);
-    expect(radios.map((r) => r.textContent)).toEqual(["Galaxy", "Washi", "Dusk"]);
+    expect(radios.map((r) => r.textContent)).toEqual(["Galaxy", "Washi", "Dusk", "Bulguksa"]);
     expect(root.parent).toBe(doc.body);
     expect(root.className).toBe("style-toggle");
   });
@@ -246,22 +252,24 @@ describe("createStyleToggle: a three-choice radio group", () => {
 
   it("aria-checked and the roving tabindex follow the active style", () => {
     const { radios, handle } = mount(3);
-    expect(checked(radios)).toEqual(["false", "true", "false"]);
-    expect(tabs(radios)).toEqual([-1, 0, -1]);
+    expect(checked(radios)).toEqual(["false", "true", "false", "false"]);
+    expect(tabs(radios)).toEqual([-1, 0, -1, -1]);
     handle.reflect(4);
-    expect(checked(radios)).toEqual(["false", "false", "true"]);
-    expect(tabs(radios)).toEqual([-1, -1, 0]);
+    expect(checked(radios)).toEqual(["false", "false", "true", "false"]);
+    expect(tabs(radios)).toEqual([-1, -1, 0, -1]);
+    handle.reflect(5);
+    expect(checked(radios)).toEqual(["false", "false", "false", "true"]);
     // A dormant debug style checks nothing; the first radio keeps Tab.
     handle.reflect(1);
-    expect(checked(radios)).toEqual(["false", "false", "false"]);
-    expect(tabs(radios)).toEqual([0, -1, -1]);
+    expect(checked(radios)).toEqual(["false", "false", "false", "false"]);
+    expect(tabs(radios)).toEqual([0, -1, -1, -1]);
   });
 
   it("a click chooses that style; clicking the checked one is quiet", () => {
     const { radios, chosen } = mount(0);
     radios[2].click();
     expect(chosen).toEqual([4]);
-    expect(checked(radios)).toEqual(["false", "false", "true"]);
+    expect(checked(radios)).toEqual(["false", "false", "true", "false"]);
     radios[2].click();
     expect(chosen).toEqual([4]);
     radios[0].click();
@@ -277,17 +285,19 @@ describe("createStyleToggle: a three-choice radio group", () => {
     expect(chosen).toEqual([3]);
     radios[1].fire("keydown", { key: "ArrowDown" });
     expect(doc.activeElement).toBe(radios[2]);
-    radios[2].fire("keydown", { key: "ArrowRight" }); // wraps to Galaxy
+    radios[2].fire("keydown", { key: "ArrowRight" });
+    expect(doc.activeElement).toBe(radios[3]);
+    radios[3].fire("keydown", { key: "ArrowRight" }); // wraps to Galaxy
     expect(doc.activeElement).toBe(radios[0]);
-    radios[0].fire("keydown", { key: "ArrowLeft" }); // wraps to Dusk
-    expect(doc.activeElement).toBe(radios[2]);
-    radios[2].fire("keydown", { key: "Home" });
+    radios[0].fire("keydown", { key: "ArrowLeft" }); // wraps to Bulguksa
+    expect(doc.activeElement).toBe(radios[3]);
+    radios[3].fire("keydown", { key: "Home" });
     expect(doc.activeElement).toBe(radios[0]);
     radios[0].fire("keydown", { key: "End" });
-    expect(doc.activeElement).toBe(radios[2]);
-    expect(chosen).toEqual([3, 4, 0, 4, 0, 4]);
-    expect(checked(radios)).toEqual(["false", "false", "true"]);
-    expect(tabs(radios)).toEqual([-1, -1, 0]);
+    expect(doc.activeElement).toBe(radios[3]);
+    expect(chosen).toEqual([3, 4, 5, 0, 5, 0, 5]);
+    expect(checked(radios)).toEqual(["false", "false", "false", "true"]);
+    expect(tabs(radios)).toEqual([-1, -1, -1, 0]);
   });
 
   it("other keys are left alone (Tab leaves the group; Enter and Space click)", () => {
@@ -311,6 +321,9 @@ describe("createStyleToggle: a three-choice radio group", () => {
     expect(credit.children.length).toBe(0);
     handle.reflect(4);
     expect(credit.hidden).toBe(false);
+    handle.reflect(5);
+    expect(credit.hidden).toBe(false);
+    expect(credit.textContent).toBe("After Park Dae-sung and the Joseon ink tradition");
     handle.reflect(0);
     expect(credit.hidden).toBe(true);
   });
@@ -358,7 +371,7 @@ describe("chrome swatches on dark cards", () => {
     expect(worst).toBeLessThan(3);
   });
   it("every card swatch clears 3:1 on every dark card, in all three user styles", () => {
-    for (const style of [0, 3, 4] as ArtStyle[])
+    for (const style of [0, 3, 4, 5] as ArtStyle[])
       for (const s of STRANDS)
         for (const [, bg] of CARDS) expect(ratio(rgb(cardSwatch(s, style)), bg)).toBeGreaterThanOrEqual(3);
   });

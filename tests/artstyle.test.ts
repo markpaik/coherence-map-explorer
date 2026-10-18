@@ -50,8 +50,8 @@ function contrast(a: number, b: number): number {
 }
 
 describe("art-style registry", () => {
-  it("keeps names, slugs, and credits index-aligned for all five styles", () => {
-    expect(ART_STYLE_NAMES.length).toBe(5);
+  it("keeps names, slugs, and credits index-aligned for all six styles", () => {
+    expect(ART_STYLE_NAMES.length).toBe(6);
     expect(ART_STYLE_SLUGS.length).toBe(ART_STYLE_NAMES.length);
     expect(ART_CREDITS.length).toBe(ART_STYLE_NAMES.length);
     expect(ART_STYLE_SLUGS[3]).toBe("washi");

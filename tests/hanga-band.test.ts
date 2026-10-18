@@ -59,7 +59,7 @@ describe("inert at style 0 (source guards)", () => {
   });
 
   it("the Hanga shell shows only for styles 3 and 4", () => {
-    expect(env).toContain("const on = isHanga(style);\n    hangaGroup.visible = on;");
+    expect(env).toContain("const on = isHangaField(style);\n    hangaGroup.visible = on;");
   });
 
   it("the landscape, the chunk's other user, starts hidden and shares the same uniform objects", () => {

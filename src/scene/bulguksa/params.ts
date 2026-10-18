@@ -209,10 +209,10 @@ export const BCRANE = {
   R: 3300,
   RSpan: 120,
   /** Elevation band (radians) and the arc in azimuth. */
-  el: 21.5 * DEG,
-  elSpan: 1.2 * DEG,
+  el: 25 * DEG,
+  elSpan: 1 * DEG,
   az0: 46 * DEG,
-  az1: 8 * DEG,
+  az1: 18 * DEG,
   /** Quad half-size in world units: about 18 px wingspan at the home view. */
   size: 48,
   /** One slow, deep stroke (seconds). */
@@ -243,19 +243,19 @@ export const BMURM = {
   count: 2000,
   /** Share of birds in the straggler fringe. */
   fringe: 0.05,
-  az: 14 * DEG,
-  el: 20 * DEG,
+  az: 28 * DEG,
+  el: 21 * DEG,
   R: 3400,
   /** Sheet half-extents (world units): along, across, and thickness. */
-  a: 540,
-  b: 520,
+  a: 420,
+  b: 440,
   th: 12,
   /** The sheet leans this far from face-on (radians), and swings by tiltSwing. */
   tilt: 1.3,
   tiltSwing: 0.16,
   pTilt: 53,
   /** Fold amplitude (world units) and the slow periods (seconds). */
-  fold: 210,
+  fold: 170,
   pFold: 29,
   pTurn: 61,
   pDrift: 47,
@@ -366,7 +366,7 @@ export function snowOffset(i: number, t: number): [number, number, number] {
 // on the sky at a fixed world azimuth (it moves with orbit like ink on the sheet).
 export const INSCRIPTION = {
   text: "佛國雪中數理圖",
-  az: 30.5 * DEG,
+  az: 40 * DEG,
   /** Elevation of the top and bottom of the column (seal included). */
   el0: 23 * DEG,
   el1: 12.5 * DEG,
