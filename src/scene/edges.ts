@@ -691,6 +691,7 @@ const FRAG = /* glsl */ `
   uniform float uPose; // eased pose value 0..3; 3 = Transit (opaque metro lines)
   uniform vec3 uHangaSumi; // Hanga key-block ink (LINEAR): related dabs + the unlit underdrawing
   uniform float uHangaDmgDark; // 1 on Dusk: damaged strokes darken and desaturate
+  uniform float uHangaKey; // 1 on Bulguksa (style 5): lit strokes keyed in sumi
   uniform float uPxRatio; // device px per CSS px (the Hanga dab sizes)
   uniform vec3 uField; // active art-style field color (damage fades toward it)
   uniform float uEnvLight; // 0..1 light-environment amount (Ascent dawn OR Transit daylight)
@@ -1041,6 +1042,13 @@ const FRAG = /* glsl */ `
 
         col = vArtColor;
         alpha = mix(H_REST_ALPHA, H_LIT_ALPHA, max(lit, story));
+        // Bulguksa only (uHangaKey 1): a lit stroke is keyed in sumi, the
+        // pigment held between two sumi edges, the way a key line holds a
+        // colour. Washi and Dusk keep uHangaKey 0 and skip this.
+        if (uHangaKey > 0.5) {
+          float keyRim = smoothstep(0.4, 0.8, distPx / max(halfEff, 1e-3));
+          col = mix(col, uHangaSumi, keyRim * max(lit, story));
+        }
 
         // Wet-ink sheen: a slow band of denser pigment travels down a lit chain
         // stroke from prerequisite to dependent (cometPulse, end-faded at both
@@ -1210,8 +1218,9 @@ export interface EdgesHandle {
   /**
    * Swap the render skin: 0 Galaxy (additive light ribbons, exactly the
    * shipped look) | 1 Ringers (taut pure-color strings, normal blending) |
-   * 2 Fidenza (thin screen-facing round pipes with striped caps) | 3 Washi and
-   * 4 Dusk (tapered woodblock brush strokes and sumi dabs). Emphasis /
+   * 2 Fidenza (thin screen-facing round pipes with striped caps) | 3 Washi,
+   * 4 Dusk, and 5 Bulguksa (tapered brush strokes and sumi dabs; Bulguksa
+   * keys its lit strokes in sumi). Emphasis /
    * visibility / damage attributes keep their meaning; art styles express
    * dimness as opacity.
    */
@@ -1391,6 +1400,7 @@ export function createEdges(
     uHanga: { value: hangaVecs },
     uHangaSumi: { value: new THREE.Color(0x000000) },
     uHangaDmgDark: { value: 0 },
+    uHangaKey: { value: 0 },
     // Opener per-edge crystallization. uOpenerClock = ms since the opener started
     // (−1 = inactive ⇒ every ribbon fully present, byte-identical); uEdgeFadeMs =
     // each ribbon's ghost-in length. Appear-times ride in aColorA.w.
@@ -1505,12 +1515,14 @@ export function createEdges(
         uniforms.uField.value.setHex(pal.bg);
         uniforms.uHangaSumi.value.setHex(pal.sumi);
         uniforms.uHangaDmgDark.value = style === 4 ? 1 : 0;
+        uniforms.uHangaKey.value = style === 5 ? 1 : 0;
         STRAND_ORDER.forEach((sid, i) => {
           const cc = scratchColor.setHex(pal.pigment[sid]);
           hangaVecs[i].set(cc.r, cc.g, cc.b);
         });
       } else {
         uniforms.uField.value.setHex(style === 1 ? RINGERS.bg : FIDENZA.bg);
+        uniforms.uHangaKey.value = 0;
       }
     },
     dispose() {

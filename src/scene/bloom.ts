@@ -12,11 +12,11 @@ import {
   RenderPass,
   VignetteEffect,
 } from "postprocessing";
-import { HANGA_TEXTURE } from "./artstyle";
+import { HANGA_TEXTURE, HANJI_PAPER } from "./artstyle";
 
 const glf = (x: number): string => x.toFixed(4);
 
-// Paper overlay (Hanga styles 3 and 4 only). The final frame is multiplied by
+// Paper overlay (Hanga styles 3 and 4, and the hanji sheet of style 5). The final frame is multiplied by
 // a procedural sheet fixed to the SCREEN, like real paper under a print, so it
 // never moves with the scene and cannot shimmer. Static: no time term. Feature
 // sizes are in CSS px (gl px divided by the device pixel ratio), so 1x and 2x
@@ -26,6 +26,7 @@ const PAPER_FRAG = /* glsl */ `
   uniform float uDpr;
   uniform vec3 uStrength; // x mottle, y fibre, z laid lines (peak-to-peak, sRGB)
   uniform float uFibreSign; // -1 dark fibres (Washi), +1 pale fibres (Dusk)
+  uniform float uHanji; // 1 on Bulguksa (style 5): the hanji sheet below
 
   float pHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float pNoise(vec2 p) {
@@ -36,6 +37,24 @@ const PAPER_FRAG = /* glsl */ `
 
   void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
     vec2 px = uv * resolution / max(uDpr, 0.5); // CSS px, screen-fixed
+    if (uHanji > 0.5) {
+      // Hanji (Bulguksa): Korean mulberry paper. Little mottle, and long
+      // fibres that wander through the sheet: mostly pale strands (the sheet
+      // catches the light along them) with a few darker ones. Static.
+      vec2 hq = px / ${glf(HANGA_TEXTURE.PAPER_MOTTLE_PX * 1.6)};
+      float hm = 0.6 * pNoise(hq) + 0.4 * pNoise(hq * 2.07 + 19.0) - 0.5;
+      float hAng = (pNoise(px / 420.0 + 7.0) - 0.5) * 1.1;
+      float hc = cos(hAng); float hs = sin(hAng);
+      vec2 hr = vec2(hc * px.x + hs * px.y, -hs * px.x + hc * px.y);
+      float hBend = (pNoise(px / 140.0 + 3.0) - 0.5) * 7.0;
+      float h1 = pNoise(vec2(hr.x / ${glf(HANJI_PAPER.FIBRE_LEN_PX)}, (hr.y + hBend) / ${glf(HANJI_PAPER.FIBRE_W_PX)}));
+      float h2 = pNoise(vec2(hr.x / ${glf(HANJI_PAPER.FIBRE_LEN_PX * 0.6)} + 31.0, (hr.y - hBend) / ${glf(HANJI_PAPER.FIBRE_W_PX * 0.8)} + 57.0));
+      float pale = smoothstep(0.82, 0.97, h1);
+      float dark = smoothstep(0.86, 0.98, h2);
+      float hl = 1.0 + ${glf(HANJI_PAPER.MOTTLE)} * hm + ${glf(HANJI_PAPER.FIBRE)} * (0.55 * pale - 0.45 * dark);
+      outputColor = vec4(inputColor.rgb * pow(max(hl, 0.0), 2.2), inputColor.a);
+      return;
+    }
     // Mottle: four octaves of value noise.
     vec2 q = px / ${glf(HANGA_TEXTURE.PAPER_MOTTLE_PX)};
     float m = 0.5 * pNoise(q) + 0.25 * pNoise(q * 2.03 + 11.0)
@@ -70,6 +89,7 @@ class PaperEffect extends Effect {
         ["uDpr", new Uniform(1)],
         ["uStrength", new Uniform([0, 0, 0])],
         ["uFibreSign", new Uniform(-1)],
+        ["uHanji", new Uniform(0)],
       ]),
     });
   }
@@ -90,9 +110,10 @@ export interface BloomRig {
    * still antialiases the brush strokes and disc silhouettes, but print with
    * bloom intensity 0 and vignette darkness 0 (ink on paper never glows, and a
    * vignette would grime the field). The paper bypass of styles 1 and 2 is
-   * unchanged. Off restores the Galaxy chain.
+   * unchanged. Off restores the Galaxy chain. `hanji` (Bulguksa, style 5)
+   * prints the frame on the hanji sheet (HANJI_PAPER) instead of washi.
    */
-  setArtInk(on: boolean, dusk?: boolean): void;
+  setArtInk(on: boolean, dusk?: boolean, hanji?: boolean): void;
   /**
    * Concrete-daylight dimmer (Galaxy, Transit pose): scale bloom intensity by
    * (1 − daylight) so the glow bleeds out as the city surfaces into daylight.
@@ -169,6 +190,7 @@ export function createBloom(
   const paperStrength = paper.uniforms.get("uStrength")!.value as number[];
   const paperDpr = paper.uniforms.get("uDpr")!;
   const paperSign = paper.uniforms.get("uFibreSign")!;
+  const paperHanji = paper.uniforms.get("uHanji")!;
 
   let artPaper = false;
   let artInk = false;
@@ -201,8 +223,9 @@ export function createBloom(
     setArtPaper(on) {
       artPaper = on;
     },
-    setArtInk(on, dusk = false) {
+    setArtInk(on, dusk = false, hanji = false) {
       artInk = on;
+      paperHanji.value = hanji ? 1 : 0;
       const T = HANGA_TEXTURE;
       paperStrength[0] = dusk ? T.PAPER_MOTTLE_DUSK : T.PAPER_MOTTLE_WASHI;
       paperStrength[1] = dusk ? T.PAPER_FIBRE_DUSK : T.PAPER_FIBRE_WASHI;

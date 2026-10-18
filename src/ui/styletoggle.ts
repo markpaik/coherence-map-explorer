@@ -1,4 +1,5 @@
-// Style switcher: Galaxy (style 0), Washi (style 3), Dusk (style 4).
+// Style switcher: Galaxy (style 0), Washi (style 3), Dusk (style 4), and
+// Bulguksa (style 5).
 //
 // Two copies of one control. The free copy is a glass card in the bottom-right
 // stack, directly above the pose control (chromelayout.ts places it). The story
@@ -17,21 +18,22 @@
 // pointers (style.css).
 //
 // While Washi or Dusk is active, the free card carries a one-line credit to the
-// artists the woodblock styles are after. No link.
+// artists the woodblock styles are after; Bulguksa carries its own. No link.
 //
-// Boot: ?style=washi or ?style=dusk deep-links a style for the session. The
+// Boot: ?style=washi, ?style=dusk, or ?style=bulguksa deep-links a style for the session. The
 // reader's own last choice persists in localStorage (cme.style). An explicit
 // ?style= wins over the stored choice and is never written back.
 
-import { strandSwatch, type ArtStyle } from "../scene/artstyle";
+import { BULGUKSA_CARD, strandSwatch, type ArtStyle } from "../scene/artstyle";
 import { rovingIndex } from "./chipgroup";
 import type { StrandId } from "../data";
 
-/** The three user-facing choices, in switcher order. */
+/** The four user-facing choices, in switcher order. */
 export const STYLE_CHOICES: readonly { style: ArtStyle; label: string; slug: string }[] = [
   { style: 0, label: "Galaxy", slug: "galaxy" },
   { style: 3, label: "Washi", slug: "washi" },
   { style: 4, label: "Dusk", slug: "dusk" },
+  { style: 5, label: "Bulguksa", slug: "bulguksa" },
 ];
 
 /** localStorage key for the reader's last choice (the slug). */
@@ -39,6 +41,9 @@ export const STYLE_STORAGE_KEY = "cme.style";
 
 /** The credit line shown while a woodblock style is active (plain text). */
 export const HANGA_CREDIT = "After Wada Sanzo, Oda Kazuma, and Utagawa Hiroshige";
+
+/** The credit line shown while Bulguksa is active (plain text). */
+export const BULGUKSA_CREDIT = "After Park Dae-sung and the Joseon ink tradition";
 
 /**
  * A slug to a user-reachable style, or null when the slug names nothing a user
@@ -95,10 +100,12 @@ export function writeStoredStyle(storage: () => StyleStorage | null | undefined,
 // filter legend all print on dark glass (or the opaque dark Browse field). The
 // Washi pigments are deep tones made for bare paper and fall under 3:1 on that
 // glass (tests/styletoggle.test.ts measures it), so on a dark card Washi uses
-// the Dusk pigment set: the same four hue families, printed light. Every other
-// style shows its own swatch.
+// the Dusk pigment set: the same four hue families, printed light. Bulguksa
+// does the same with light obangsaek washes (BULGUKSA_CARD). Every other style
+// shows its own swatch.
 
 export function cardSwatch(strand: StrandId, style: ArtStyle): number {
+  if (style === 5) return BULGUKSA_CARD[strand];
   return strandSwatch(strand, style === 3 ? 4 : style);
 }
 
@@ -201,7 +208,7 @@ export function createStyleToggle(deps: StyleToggleDeps): StyleToggleHandle {
       // checked (a dormant debug style), the first one does.
       btn.tabIndex = i === (on < 0 ? 0 : on) ? 0 : -1;
     });
-    const text = style === 3 || style === 4 ? HANGA_CREDIT : "";
+    const text = style === 3 || style === 4 ? HANGA_CREDIT : style === 5 ? BULGUKSA_CREDIT : "";
     credit.textContent = text;
     credit.hidden = !text;
     root.classList.toggle("style-credited", !!text);

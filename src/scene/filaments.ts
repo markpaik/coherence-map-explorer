@@ -39,6 +39,8 @@ const LIT_WASHI = new THREE.Color(HANGA.washi.sumi);
 const DIM_WASHI = new THREE.Color(HANGA.washi.bg).lerp(LIT_WASHI, 0.16);
 const LIT_DUSK = new THREE.Color(HANGA.dusk.sumi);
 const DIM_DUSK = new THREE.Color(HANGA.dusk.bg).lerp(LIT_DUSK, 0.16);
+const LIT_BULGUKSA = new THREE.Color(HANGA.bulguksa.sumi);
+const DIM_BULGUKSA = new THREE.Color(HANGA.bulguksa.bg).lerp(LIT_BULGUKSA, 0.16);
 
 export interface FilamentsHandle {
   /** The single LineSegments draw call — add it to the scene. */
@@ -108,9 +110,9 @@ export function createFilaments(graph: GraphCore, nodes: NodesHandle): Filaments
 
   function update(): void {
     const dim =
-      style === 1 ? DIM_RING : style === 2 ? DIM_FID : style === 3 ? DIM_WASHI : style === 4 ? DIM_DUSK : DIM;
+      style === 1 ? DIM_RING : style === 2 ? DIM_FID : style === 3 ? DIM_WASHI : style === 4 ? DIM_DUSK : style === 5 ? DIM_BULGUKSA : DIM;
     const lit =
-      style === 1 ? LIT_RING : style === 2 ? LIT_FID : style === 3 ? LIT_WASHI : style === 4 ? LIT_DUSK : LIT;
+      style === 1 ? LIT_RING : style === 2 ? LIT_FID : style === 3 ? LIT_WASHI : style === 4 ? LIT_DUSK : style === 5 ? LIT_BULGUKSA : LIT;
     for (let s = 0; s < segCount; s++) {
       const pi = pairs[s][0];
       const ci = pairs[s][1];

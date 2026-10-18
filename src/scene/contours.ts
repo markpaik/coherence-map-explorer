@@ -30,7 +30,9 @@ const PAD = 20; // world units the isoline overshoots the level's x-extent each 
 // graphite on cream. Fidenza: cream on teal. Washi: pale indigo isolines, read as
 // Hiroshige's distance layers. Dusk: pale paper on aizuri. All read as a faint
 // ruled line at the module's low opacities, never a glow (normal blending, colors < 1).
-const INK: readonly number[] = [0xaec4e6, RINGERS.ink, 0xe8e0cd, 0x5a6f96, HANGA.dusk.sumi];
+// Style 5 (Bulguksa): a pale ink grey, so the isolines read as faint
+// underdrawing on the hanji and the snow slope.
+const INK: readonly number[] = [0xaec4e6, RINGERS.ink, 0xe8e0cd, 0x5a6f96, HANGA.dusk.sumi, 0x6d675e];
 
 export interface ContourLevel {
   /** Dependency-chain depth this isoline marks. */
@@ -183,7 +185,8 @@ export function createContours(nodes: GraphNode[]): ContoursHandle {
       // Hanga prints its isolines as visible distance layers: a 1-px line at
       // the Galaxy's 8% vanishes into paper grain. Other styles keep the
       // shipped opacities.
-      const [base, index] = style === 3 ? [0.2, 0.34] : style === 4 ? [0.13, 0.24] : [0.08, 0.14];
+      const [base, index] =
+        style === 3 ? [0.2, 0.34] : style === 4 ? [0.13, 0.24] : style === 5 ? [0.22, 0.36] : [0.08, 0.14];
       uniforms.uBase.value = base;
       uniforms.uIndex.value = index;
     },

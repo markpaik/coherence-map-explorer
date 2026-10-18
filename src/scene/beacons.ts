@@ -124,6 +124,41 @@ const FRAG = /* glsl */ `
     float amp = 0.06 * mix(0.35, 1.0, vIntensity);
     float breath = 0.74 + amp * sin(uTime * uBreathRate + vPhase);
     float w = mix(0.42, 1.0, vIntensity); // band half-width scale (thinner when faint)
+    if (uSeal > 1.5) {
+      // Enso (Bulguksa, uSeal 2): one sumi brush circle. The brush lands heavy
+      // at the start (a round, pooled head), runs counterclockwise, thins and
+      // dries as it goes, and lifts before it closes, leaving a gap of about
+      // 25 degrees. The path spirals out a little, so start and end do not meet.
+      // Every term rides the ring's own angle and radius: nothing reads the
+      // screen, and nothing moves.
+      float ang = atan(vP.y, vP.x);
+      float prog = fract((ang - 1.95) / 6.2831853); // 0 at the head, 1 back at it
+      float span = 0.93;                            // the brush lifts here
+      float u = prog / span;
+      float aa = max(fwidth(r), 1e-4);
+      float rr = breath * (0.96 + 0.06 * u + 0.012 * sin(u * 9.0 + 0.8));
+      // Half-width: a full body that thins toward the lift.
+      float hw = mix(0.105, 0.03, smoothstep(0.05, 1.0, u)) * (1.0 + 0.12 * sin(u * 23.0 + 1.7));
+      float body = (1.0 - smoothstep(hw - aa, hw + aa, abs(r - rr))) * step(u, 1.0);
+      // Lift: the tail tapers to nothing in the last 6% of the stroke.
+      body *= 1.0 - smoothstep(0.94, 1.0, u);
+      // Head: a round pooled cap just before the start angle.
+      vec2 headP = vec2(cos(1.95), sin(1.95)) * breath * 0.96;
+      float head = 1.0 - smoothstep(0.115 - aa, 0.115 + aa, length(vP - headP));
+      // Dry brush: bristle lanes across the stroke open up toward the tail.
+      float across = clamp((r - rr) / max(hw, 1e-3) * 0.5 + 0.5, 0.0, 1.0);
+      float lane = fract(across * 4.0);
+      float dry = smoothstep(0.35, 1.0, u);
+      float gapW = 0.08 + 0.32 * dry;
+      float bristle = smoothstep(0.0, gapW, lane) * (1.0 - smoothstep(1.0 - gapW, 1.0, lane));
+      float brk = fract(sin(dot(vec2(floor(across * 4.0), floor(u * 38.0)), vec2(12.9898, 78.233))) * 43758.5453);
+      float keep = mix(1.0, bristle * step(dry * 0.55, brk), dry);
+      float load = 0.86 + 0.14 * cos(u * 3.1);
+      float enso = max(body * keep * load, head);
+      if (enso < 0.003) discard;
+      gl_FragColor = vec4(uColor, enso * uAlpha * appear);
+      return;
+    }
     if (uSeal > 0.5) {
       // Stamped seal: the radius wobbles a little with angle, the ink is
       // uneven, and one short dry break interrupts the band.
@@ -212,7 +247,8 @@ export interface BeaconsHandle {
   setViewportHeight(cssHeight: number): void;
   /**
    * 0 Galaxy (gold, additive, HDR graze) | 1 Ringers (ink) | 2 Fidenza (ink) |
-   * 3 Washi and 4 Dusk (sumi damage rings, a vermilion seal for the focus).
+   * 3 Washi and 4 Dusk (sumi damage rings, a vermilion seal for the focus) |
+   * 5 Bulguksa (sumi damage rings, a sumi enso for the focus).
    */
   setArtStyle(style: number): void;
   dispose(): void;
@@ -498,7 +534,8 @@ export function createBeacons(
         fUniforms.uColor.value.setHex(focusTint);
       }
       sealMode = hanga;
-      fUniforms.uSeal.value = hanga ? 1 : 0;
+      // Bulguksa (5) marks the focus with a sumi enso (uSeal 2) instead.
+      fUniforms.uSeal.value = hanga ? (style === 5 ? 2 : 1) : 0;
       if (focusIndex !== null) {
         fScaleAttr.array[0] = radii[focusIndex] * (hanga ? SEAL_RING_SCALE : FOCUS_RING_SCALE);
         fScaleAttr.needsUpdate = true;

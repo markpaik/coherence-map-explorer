@@ -951,6 +951,80 @@ body.art-dusk .search-bar:focus-within {
   box-shadow: 0 0 0 6px #1c1a17;
 }
 
+/* -- Bulguksa (style 5): sumi chrome on the hanji ------------------------------
+   The title band is a pale ink wash (#c4beb3, scene/bulguksa), screen-fixed
+   like the woodblock bands, so the title prints in SUMI, not paper ink:
+   #1c1a17 on the band is 9.4:1 and the lightest line ink here (#4a4339) is
+   5.3:1 (tests/bulguksa.test.ts). No box, no scrim, no halo. The nav hints and
+   the depth captions lie over the graph, so they print on paper slips, as on
+   Washi. Glass cards stay dark; the ghost buttons join them. */
+body.art-bulguksa {
+  background: #f2efe8;
+  --ink-3: #9894b6;
+}
+body.art-bulguksa .headline {
+  color: #1c1a17;
+  text-shadow: none;
+}
+body.art-bulguksa .headline-art {
+  color: #1c1a17;
+  --tag-ink: #1c1a17;
+  opacity: 1;
+}
+body.art-bulguksa .tagline,
+body.art-bulguksa .subline {
+  color: #24211d;
+  opacity: 1;
+}
+body.art-bulguksa .statline {
+  color: #36322c;
+}
+body.art-bulguksa .provline,
+body.art-bulguksa .licline,
+body.art-bulguksa .provline a,
+body.art-bulguksa .licline a {
+  color: #4a4339;
+}
+body.art-bulguksa .nav-hints {
+  padding: 4px 10px;
+  color: #4a4339;
+  background: #f8f6f1;
+  border-radius: 9px;
+}
+body.art-bulguksa .nav-hints span {
+  color: #1c1a17;
+}
+body.art-bulguksa .depth-scale,
+body.art-bulguksa .depth-scale-axis,
+body.art-bulguksa .depth-scale-mark {
+  color: #4a4339;
+}
+body.art-bulguksa .depth-scale-mark,
+body.art-bulguksa .depth-scale-axis {
+  padding: 3px 7px;
+  background: #f8f6f1;
+  border-radius: 7px;
+  opacity: 1;
+}
+body.art-bulguksa .depth-scale-sep {
+  color: #1c1a17;
+}
+body.art-bulguksa .ghost-btn {
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+body.art-bulguksa .ghost-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+body.art-bulguksa :focus-visible:not(input),
+body.art-bulguksa .search-bar:focus-within {
+  outline: 2px solid #f6efdf;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px #1c1a17;
+}
+
 /* -- light environments (Galaxy dawn / daylight): dark-ink chrome ------------ */
 /* Style 0 raises a LIGHT field behind two of its formations — the Sierra dawn
    (Ascent) and the concrete daylight (Transit). The studio behind the Blueprint

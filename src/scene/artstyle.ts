@@ -10,8 +10,14 @@
 //               flat pigment discs under a sumi key-block line.
 //   4 Dusk:   the same woodblock grammar on an indigo dusk field (aizuri
 //               blue grading to slate), with the key block printed pale.
-// Styles 3 and 4 share every shader branch; they differ only in the HANGA
-// palette entry below (field, pigments, sumi ink, seal treatment).
+//   5 Bulguksa: a Korean ink landscape of Bulguksa under snow, after Park
+//               Dae-sung and the Joseon ink tradition: hanji paper, obangsaek
+//               pigments, sumi key lines, an enso for the focus.
+// Styles 3, 4, and 5 share every map shader branch; they differ in the HANGA
+// palette entry below (field, pigments, sumi ink, seal treatment) and in a few
+// uniforms that only style 5 sets (the sumi key on lit strokes, the enso).
+// Style 5 draws its own world (scene/bulguksa) instead of the Hanga field and
+// landscape.
 //
 // A style is a LOOK, not a layout: all three poses (Constellation / Ascent /
 // Blueprint) work under every style, and the state machine, filters, and
@@ -29,16 +35,16 @@
 import type { StrandId } from "../data";
 import { STRAND_COLORS } from "./palette";
 
-export type ArtStyle = 0 | 1 | 2 | 3 | 4;
+export type ArtStyle = 0 | 1 | 2 | 3 | 4 | 5;
 
 // User-facing option labels. Style 0's label is "Let it Ride" (round 11): with
 // per-pose environments, style 0 no longer reads as "galaxy" — it lets each
 // formation wear its own designed look, while Ringers/Fidenza are the true
 // overrides. The INTERNAL identifier / slug stays `galaxy` (ART_STYLE_SLUGS).
-export const ART_STYLE_NAMES: readonly string[] = ["Let it Ride", "Ringers", "Fidenza", "Washi", "Dusk"];
+export const ART_STYLE_NAMES: readonly string[] = ["Let it Ride", "Ringers", "Fidenza", "Washi", "Dusk", "Bulguksa"];
 
 // URL param values (?style=ringers) — index-aligned with the names.
-export const ART_STYLE_SLUGS: readonly string[] = ["galaxy", "ringers", "fidenza", "washi", "dusk"];
+export const ART_STYLE_SLUGS: readonly string[] = ["galaxy", "ringers", "fidenza", "washi", "dusk", "bulguksa"];
 
 // ---------------------------------------------------------------------------
 // Ringers (Cherniak) — cream board, primary pegs, black ink.
@@ -108,7 +114,7 @@ export interface HangaPalette {
   paperAlpha: number;
 }
 
-export const HANGA: { washi: HangaPalette; dusk: HangaPalette } = {
+export const HANGA: { washi: HangaPalette; dusk: HangaPalette; bulguksa: HangaPalette } = {
   washi: {
     bg: 0xefe6d2, // bare washi; the bokashi band has faded to paper by 30% height
     top: 0x1f3a5f, // Prussian blue
@@ -153,6 +159,46 @@ export const HANGA: { washi: HangaPalette; dusk: HangaPalette } = {
     paper: 0xe6dcc6,
     paperAlpha: 0.22, // a faint hollow disc
   },
+  // Bulguksa (style 5): hanji paper and the obangsaek pigments. Each pigment
+  // holds 3:1 against the paper and against every massif tone
+  // (tests/bulguksa.test.ts), so the pigments print a little deeper than the
+  // design brief's starting hexes (number #d3382a, algebra #2b4fa8, geometry
+  // #2f8a5a, data #d9a21b): malachite and orpiment were darkened until they
+  // pass. The strand hue families change for this style only, by design.
+  bulguksa: {
+    bg: 0xf2efe8, // hanji
+    top: 0xc4beb3, // the screen-fixed band behind the title: a pale ink wash
+    bottom: 0xf2efe8,
+    warm: 0xf2efe8,
+    pigment: {
+      number: 0xd3382a, // vermilion (jusa)
+      algebra: 0x2b4fa8, // azurite blue (seokcheong)
+      geometry: 0x2a7d52, // malachite green (seokrok)
+      data: 0x9c6c08, // orpiment yellow (seokwang), printed deep for the paper
+    },
+    deep: { number: 0x8e1c14, algebra: 0x14285e, geometry: 0x0f4a2e, data: 0x5e3f00 },
+    light: { number: 0xf08672, algebra: 0x8ea6ec, geometry: 0x6cc596, data: 0xebbd4e },
+    deepMix: 0.26,
+    lightMix: 0.4,
+    sumi: 0x1c1a17,
+    seal: 0x1c1a17, // the focus mark is a sumi enso, not a seal
+    sealUnder: 0xf2efe8,
+    sealUnderAlpha: 0,
+    paper: 0xf8f6f1,
+    paperAlpha: 1,
+  },
+};
+
+/**
+ * Bulguksa strand swatches on dark glass cards: the same obangsaek hue
+ * families as light washes, because the deep paper pigments fall under 3:1 on
+ * the glass (tests/styletoggle.test.ts measures both).
+ */
+export const BULGUKSA_CARD: Record<StrandId, number> = {
+  number: 0xf08672,
+  algebra: 0x8ea6ec,
+  geometry: 0x6cc596,
+  data: 0xebbd4e,
 };
 
 /**
@@ -244,14 +290,42 @@ export const HANGA_TEXTURE = {
   PAPER_LAID_PX: 6,
 } as const;
 
-/** True for the two woodblock styles (3 Washi, 4 Dusk). */
+/**
+ * Hanji paper overlay (bloom.ts, style 5 only): the same screen-fixed paper
+ * pass, set for Korean mulberry paper: long fibres, little mottle, no laid
+ * lines. Kept apart from HANGA_TEXTURE so the Washi and Dusk programs do not
+ * change. Peak-to-peak sRGB luminance swing per term; lengths in CSS px.
+ */
+export const HANJI_PAPER = {
+  MOTTLE: 0.045,
+  FIBRE: 0.12,
+  LAID: 0,
+  FIBRE_LEN_PX: 180,
+  /** Fibre thickness across the strand, CSS px (Washi uses 1.5). */
+  FIBRE_W_PX: 1.2,
+} as const;
+
+/**
+ * True for the styles that print the map in the brush-and-disc grammar: the
+ * two woodblock styles (3 Washi, 4 Dusk) and the ink style (5 Bulguksa).
+ */
 export function isHanga(style: number): boolean {
+  return style === 3 || style === 4 || style === 5;
+}
+
+/** True for the two woodblock fields (3 Washi, 4 Dusk): the Hanga sky shell and landscape. */
+export function isHangaField(style: number): boolean {
   return style === 3 || style === 4;
 }
 
-/** The Hanga palette for a style (Dusk for 4, Washi otherwise). */
+/** True for the Bulguksa ink style (5). */
+export function isBulguksa(style: number): boolean {
+  return style === 5;
+}
+
+/** The Hanga palette for a style (Dusk for 4, Bulguksa for 5, Washi otherwise). */
 export function hangaPalette(style: number): HangaPalette {
-  return style === 4 ? HANGA.dusk : HANGA.washi;
+  return style === 4 ? HANGA.dusk : style === 5 ? HANGA.bulguksa : HANGA.washi;
 }
 
 // In-app credit lines (shown while an art style is active). Linked to the
@@ -268,6 +342,7 @@ export const ART_CREDITS: readonly { html: string }[] = [
   },
   { html: "After Wada Sanzo, Oda Kazuma, and Utagawa Hiroshige" },
   { html: "After Wada Sanzo, Oda Kazuma, and Utagawa Hiroshige" },
+  { html: "After Park Dae-sung and the Joseon ink tradition" },
 ];
 
 /**

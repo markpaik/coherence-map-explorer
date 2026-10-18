@@ -40,7 +40,7 @@
 // back in.
 
 import * as THREE from "three";
-import { HANGA, isHanga, HANGA_TEXTURE } from "./artstyle";
+import { HANGA, isHangaField, HANGA_TEXTURE } from "./artstyle";
 
 // ---------------------------------------------------------------------------
 // Pure window + gate math (exported for tests — no THREE, no DOM).
@@ -549,7 +549,8 @@ export function createEnvirons(deps: EnvironsDeps): EnvironsHandle {
   let hangaStyle = 0; // the field the Hanga shell last painted (0 = none)
 
   function applyHanga(style: number): void {
-    const on = isHanga(style);
+    // Washi and Dusk only: Bulguksa (5) paints its own sky (scene/bulguksa).
+    const on = isHangaField(style);
     hangaGroup.visible = on;
     if (!on || style === hangaStyle) return;
     hangaStyle = style;

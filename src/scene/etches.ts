@@ -45,6 +45,7 @@ const MARKER_INK: readonly { face: number; side: number }[] = [
   { face: 0x14332c, side: 0x2a6355 }, // 2 Fidenza — deep teal-ink face, teal relief on the field
   { face: 0x1c1a17, side: 0x8f7a55 }, // 3 Washi: sumi face, warm fiber-brown relief on the paper
   { face: 0xece3cf, side: 0x6f86a0 }, // 4 Dusk: pale key-block face, slate relief on aizuri
+  { face: 0x1c1a17, side: 0x8c867b }, // 5 Bulguksa: sumi face, pale ink-grey relief on hanji
 ];
 const GRADE_SIZE = 26;
 // Sized so the longest same-rank neighbors (GEOMETRY / ADVANCED) clear each
