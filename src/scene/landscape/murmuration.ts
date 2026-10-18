@@ -21,30 +21,30 @@ export const SHEET = {
   azSwing: 2 * DEG,
   R: 3560,
   RSwing: 60,
-  h: 800,
+  h: 950,
   hSwing: 20,
   pAz1: 97,
   pAz2: 41,
   pR: 73,
   pH: 59,
   /** Half-length (along the azimuth), half-width, half-thickness. */
-  L: 500,
-  W: 165,
+  L: 560,
+  W: 125,
   T: 12,
   /** The tail is this share of the full width; the head is full width. */
   tailW: 0.42,
   /** Centerline bend (up, radial) and the head's curl (back, up). */
-  bendY: 35,
+  bendY: 25,
   bendZ: 60,
   curlX: 0.34,
-  curlY: 60,
+  curlY: 40,
   /** Twist along the length: a base angle and a rate per unit length. */
   twist0: 0.5,
   twistRate: 1.3,
   twistSwing: 0.7,
   /** Whole-sheet yaw and pitch (radians). */
   yaw: 0.32,
-  pitch: 0.12,
+  pitch: 0.08,
   /** Periods (seconds), all 20 s or longer. */
   pTwist0: 29,
   pTwist1: 41,

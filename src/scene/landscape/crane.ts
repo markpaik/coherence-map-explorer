@@ -136,7 +136,7 @@ export const CRANE_SKY = {
   washi: { mul: 0.35, add: 28 * DEG, hAdd: 0, hMul: 1, rMul: 1, riseMul: 1 },
   // Higher, at one height, and in a tighter V, so the whole flight passes
   // above the flock at the home view and stays on screen.
-  dusk: { mul: 0.25, add: 20 * DEG, hAdd: 276, hMul: 0.2, rMul: 1, riseMul: 0.4 },
+  dusk: { mul: 0.25, add: 20 * DEG, hAdd: 335, hMul: 0.1, rMul: 1, riseMul: 0.3 },
 } as const;
 
 // ---------------------------------------------------------------------------
