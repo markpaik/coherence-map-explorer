@@ -145,7 +145,7 @@ export const WATER = {
    *  the crest's rise (sagitta) and the stroke's half-thickness. */
   cell: 90,
   sag: 7,
-  thick: 3,
+  thick: 4,
   /** Drift along the shore (radians per second): about a cell a minute. */
   drift: 0.0006,
 } as const;
@@ -249,7 +249,7 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     floor: 0x9fb2bf,
     floorOp: 0.18,
     wave: 0x2b4a70,
-    waveOp: 0.5,
+    waveOp: 0.75,
     glint: 0xf8f6f1,
     glintOp: 0,
     mistLine: 0x6d889f,
@@ -305,7 +305,7 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     floor: 0x1b2b4a,
     floorOp: 0.22,
     wave: 0xb8c7de,
-    waveOp: 0.32,
+    waveOp: 0.45,
     glint: 0xf1ead8,
     glintOp: 0.7,
     mistLine: 0x0e182e,
@@ -569,7 +569,7 @@ const FLOOR_FRAG = /* glsl */ `
     vec3 col = mix(field, uFloor, tint);
     // The moon path (Dusk): from the camera toward the moon's azimuth, the
     // strokes thicken in number and print pale.
-    vec3 camL = cameraPosition - (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    vec3 camL = cameraPosition - (vWorld - vLocal); // the group only translates
     vec2 toF = vLocal.xz - camL.xz;
     float onPath = smoothstep(0.988, 0.9985, dot(normalize(toF), uMoonXZ)) * step(0.001, uGlintOp);
     float lines = 0.0;
