@@ -966,6 +966,7 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       uAzAdd: { value: 0 },
       uHAdd: { value: 0 },
       uRiseMul: { value: 1 },
+      uHMul: { value: 1 },
       uR: { value: CRANE.R },
       uH0: { value: CRANE.h },
       uH1: { value: CRANE.h },
@@ -1087,6 +1088,7 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     cu.uAzAdd.value = sky.add;
     cu.uHAdd.value = sky.hAdd;
     cu.uRiseMul.value = sky.riseMul;
+    cu.uHMul.value = sky.hMul;
     craneRMul = sky.rMul;
     hex(murmMat.uniforms.uInk, pal.bird);
     const tu = trunkMat.uniforms;

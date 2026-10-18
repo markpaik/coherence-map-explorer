@@ -130,13 +130,13 @@ export const CRANE_SLOTS: readonly [number, number, number][] = [
 ];
 /** Where each style flies the crossing (the schedule is shared): the path
  *  azimuth is mapped az * mul + add, and hAdd raises the flight. The mapped
- *  arcs run from about 0 to 80 deg, the open sky right of the title block at
+ *  arcs run from about 0 to 56 deg, the open sky right of the title block at
  *  the home view. Dusk flies higher, above the murmuration. */
 export const CRANE_SKY = {
-  washi: { mul: 0.5, add: 40 * DEG, hAdd: 0, rMul: 1, riseMul: 1 },
-  // Higher, a little farther, and in a tighter V, so the whole flight clears
-  // the flock's highest bird and stays on screen.
-  dusk: { mul: 0.5, add: 40 * DEG, hAdd: 330, rMul: 1.15, riseMul: 0.6 },
+  washi: { mul: 0.35, add: 28 * DEG, hAdd: 0, hMul: 1, rMul: 1, riseMul: 1 },
+  // Higher, at one height, and in a tighter V, so the whole flight passes
+  // above the flock at the home view and stays on screen.
+  dusk: { mul: 0.25, add: 20 * DEG, hAdd: 276, hMul: 0.2, rMul: 1, riseMul: 0.4 },
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -188,6 +188,7 @@ export const CRANE_VERT = /* glsl */ `
   uniform float uAzAdd;
   uniform float uHAdd;
   uniform float uRiseMul;
+  uniform float uHMul;
   uniform float uR;
   uniform float uH0;
   uniform float uH1;
@@ -201,7 +202,7 @@ export const CRANE_VERT = /* glsl */ `
   varying vec4 vWing;
   vec3 pathAt(float p, float rise) {
     float az = mix(uAz0, uAz1, p) * uAzMul + uAzAdd;
-    float h = mix(uH0, uH1, p) + rise + uHAdd;
+    float h = ${f(CRANE.h)} + (mix(uH0, uH1, p) - ${f(CRANE.h)}) * uHMul + rise + uHAdd;
     return vec3(uR * sin(az), h, -uR * cos(az));
   }
   void main() {

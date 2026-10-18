@@ -210,22 +210,37 @@ describe("crane schedule", () => {
         }
       }
     }
-    // Dusk: the lowest crane clears the highest bird of the murmuration.
+    // Dusk, at the home view: the lowest crane flies above the flock's highest
+    // bird, and the highest crane stays on screen.
     const seeds = Array.from({ length: SHEET.count }, (_, i) => murmSheetSeed(i));
-    let top = -Infinity;
+    let flockTop = Infinity;
     const b = { az: 0, R: 0, h: 0 };
-    for (let t = 0; t < 400; t += 11.3) for (const sd of seeds) top = Math.max(top, murmSheetBird(sd, t, b).h);
+    for (let t = 0; t < 600; t += 6.7) {
+      for (const sd of seeds) {
+        murmSheetBird(sd, t, b);
+        flockTop = Math.min(flockTop, 450 - ((b.h + 5) / (918 + b.R * Math.cos(b.az))) * K);
+      }
+    }
     const D = CRANE_SKY.dusk;
     const lowRise = Math.min(...CRANE_SLOTS.map((s) => s[1])) * D.riseMul - 10;
     const highRise = Math.max(...CRANE_SLOTS.map((s) => s[1])) * D.riseMul + 10;
-    expect(minRise).toBeLessThan(0);
-    expect(CRANE.h - CRANE.hSpan + lowRise + D.hAdd - CRANE.size).toBeGreaterThan(top);
-    // And the highest bird stays on screen at home, at every azimuth on screen.
-    const hi = CRANE.h + CRANE.hSpan + highRise + D.hAdd + CRANE.size;
-    for (const az of [0, 20 * DEG, 40 * DEG]) {
-      const Dd = 918 + CRANE.R * D.rMul * Math.cos(az);
-      expect(450 - ((hi + 5) / Dd) * K).toBeGreaterThan(0);
+    let lowest = -Infinity;
+    let highest = Infinity;
+    for (let k = 0; k < 300; k++) {
+      cranePathInto(k, p);
+      for (let i = 0; i <= 40; i++) {
+        const q = 0.08 + (0.84 * i) / 40;
+        const az = (p.az0 + (p.az1 - p.az0) * q) * D.mul + D.add;
+        const R = p.R * D.rMul;
+        const Dd = 918 + R * Math.cos(az);
+        const h = CRANE.h + (p.h0 + (p.h1 - p.h0) * q - CRANE.h) * D.hMul + D.hAdd;
+        lowest = Math.max(lowest, 450 - ((h + lowRise - CRANE.size + 5) / Dd) * K);
+        highest = Math.min(highest, 450 - ((h + highRise + CRANE.size + 5) / Dd) * K);
+      }
     }
+    expect(minRise).toBeLessThan(0);
+    expect(lowest).toBeLessThan(flockTop);
+    expect(highest).toBeGreaterThan(0);
   });
 
   it("the wingspan is 18 to 24 px at the home view", () => {
