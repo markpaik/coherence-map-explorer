@@ -36,6 +36,7 @@ import { createSheet } from "./scene/sheet";
 import { createContours } from "./scene/contours";
 import { bandBottomFrac, createEnvirons, endpointOwns } from "./scene/environs";
 import { createLandscape } from "./scene/landscape";
+import { createBulguksa } from "./scene/bulguksa";
 import { computeNodeRadii } from "./scene/reach";
 import { mulberry32 } from "./scene/evolve";
 import { createAside } from "./ui/aside";
@@ -244,6 +245,10 @@ function start(graph: GraphCore): void {
   // centered on the pose-0 map. Invisible, with no draw calls, in every other style.
   const landscape = createLandscape(nodes.boundsBox.getCenter(new THREE.Vector3()));
   scene.add(landscape.group);
+  // Bulguksa world (style 5 only): sky, massifs, snow slope, temple, pines,
+  // birds, falling snow. Invisible, with no draw calls, in every other style.
+  const bulguksa = createBulguksa(nodes.boundsBox.getCenter(new THREE.Vector3()));
+  scene.add(bulguksa.group);
   scene.add(
     environs.group,
     sheet.object,
@@ -388,7 +393,7 @@ function start(graph: GraphCore): void {
   // The switcher offers Galaxy, Washi, and Dusk (ui/styletoggle.ts). Ringers and
   // Fidenza have no entry point: only the ?debug=1 hook reaches them.
   let artStyle: ArtStyle = 0;
-  const ART_BG: readonly number[] = [BG, RINGERS.bg, FIDENZA.bg, HANGA.washi.bg, HANGA.dusk.bg];
+  const ART_BG: readonly number[] = [BG, RINGERS.bg, FIDENZA.bg, HANGA.washi.bg, HANGA.dusk.bg, HANGA.bulguksa.bg];
   function applyArtStyle(style: ArtStyle): void {
     artStyle = style;
     nodes.setArtStyle(style);
@@ -400,11 +405,12 @@ function start(graph: GraphCore): void {
     sheet.setArtStyle(style);
     contours.setArtStyle(style);
     landscape.setArtStyle(style);
+    bulguksa.setArtStyle(style);
     etches.setArtStyle(style);
     // Ringers / Fidenza bypass the composer (flat direct render). The Hanga
     // styles keep it for its MSAA, printing with no bloom and no vignette.
     bloom.setArtPaper(style === 1 || style === 2);
-    bloom.setArtInk(isHanga(style), style === 4);
+    bloom.setArtInk(isHanga(style), style === 4, style === 5);
     const sky = style === 0;
     stars.points.visible = sky;
     nebula.group.visible = sky;
@@ -414,6 +420,7 @@ function start(graph: GraphCore): void {
     document.body.classList.toggle("art-fidenza", style === 2);
     document.body.classList.toggle("art-washi", style === 3);
     document.body.classList.toggle("art-dusk", style === 4);
+    document.body.classList.toggle("art-bulguksa", style === 5);
     // The strand legend mirrors the scene: repaint its swatches to this skin's
     // colorway (galaxy palette / Ringers pegs / Fidenza nodes).
     filters.setArtStyle(style);
@@ -607,7 +614,7 @@ function start(graph: GraphCore): void {
   };
 
   const sceneClock = createSceneClock();
-  let landTime = 0; // the scene clock, read by the Hanga landscape
+  let landTime = 0; // the scene clock, read by the Hanga landscape and the Bulguksa world
   let last = performance.now();
   let revealed = false;
   let wasStoryHolding = false; // rising-edge detector for story-hold drift resume
@@ -727,11 +734,13 @@ function start(graph: GraphCore): void {
       const envSlewing = environs.update(pose, gate, storyPlayer.running, artStyle);
       // Hanga landscape: the birds go quiet during a story or a focus. It rides the
       // continuous ambient render above, so it requests no frames of its own.
-      landscape.update(landTime, {
+      const worldOpts = {
         quiet: storyPlayer.running || machine.focusedIndex !== null ? 1 : 0,
         reducedMotion,
         pose: Math.max(0, 1 - Math.abs(pose - 1)),
-      });
+      };
+      landscape.update(landTime, worldOpts);
+      bulguksa.update(landTime, worldOpts);
       // Light-environment chrome (round-12): the Sierra dawn and concrete daylight
       // are LIGHT fields (the studio behind the Blueprint is a DARK shell, so it is
       // excluded). When their combined amount owns the frame — Galaxy only, no story
@@ -974,11 +983,11 @@ function start(graph: GraphCore): void {
       // Dual-pose morph driver, for automation (drive setPose, read pose/target).
       pose: { driver: poseDriver },
       // Art styles, for automation (0 Galaxy | 1 Ringers | 2 Fidenza | 3 Washi |
-      // 4 Dusk). The only way to reach styles 1 and 2: the switcher offers 0, 3,
-      // and 4. Not persisted.
+      // 4 Dusk | 5 Bulguksa). The only way to reach styles 1 and 2: the switcher
+      // offers 0, 3, 4, and 5. Not persisted.
       art: {
         set(style: number): void {
-          if (style !== 0 && style !== 1 && style !== 2 && style !== 3 && style !== 4) return;
+          if (style !== 0 && style !== 1 && style !== 2 && style !== 3 && style !== 4 && style !== 5) return;
           applyArtStyle(style);
         },
         get(): number {
@@ -1002,6 +1011,7 @@ function start(graph: GraphCore): void {
       contours,
       environs,
       landscape,
+      bulguksa,
       planets,
       stars,
       graph,
