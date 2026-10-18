@@ -128,9 +128,16 @@ export const CRANE_SLOTS: readonly [number, number, number][] = [
   [0.025, 78, 0.12],
   [0.03, -70, 0.83],
 ];
-/** Dusk flies the same schedule over the moon's side of the sky: the path
- *  azimuth is mapped az * mul + add, so the flight stays left of the flock. */
-export const CRANE_DUSK_AZ = { mul: 0.4, add: -26 * DEG } as const;
+/** Where each style flies the crossing (the schedule is shared): the path
+ *  azimuth is mapped az * mul + add, and hAdd raises the flight. The mapped
+ *  arcs run from about 0 to 80 deg, the open sky right of the title block at
+ *  the home view. Dusk flies higher, above the murmuration. */
+export const CRANE_SKY = {
+  washi: { mul: 0.5, add: 40 * DEG, hAdd: 0, rMul: 1, riseMul: 1 },
+  // Higher, a little farther, and in a tighter V, so the whole flight clears
+  // the flock's highest bird and stays on screen.
+  dusk: { mul: 0.5, add: 40 * DEG, hAdd: 330, rMul: 1.15, riseMul: 0.6 },
+} as const;
 
 // ---------------------------------------------------------------------------
 // Planform mirror (the GLSL below computes the same numbers).
@@ -179,6 +186,8 @@ export const CRANE_VERT = /* glsl */ `
   uniform float uAz1;
   uniform float uAzMul;
   uniform float uAzAdd;
+  uniform float uHAdd;
+  uniform float uRiseMul;
   uniform float uR;
   uniform float uH0;
   uniform float uH1;
@@ -192,12 +201,12 @@ export const CRANE_VERT = /* glsl */ `
   varying vec4 vWing;
   vec3 pathAt(float p, float rise) {
     float az = mix(uAz0, uAz1, p) * uAzMul + uAzAdd;
-    float h = mix(uH0, uH1, p) + rise;
+    float h = mix(uH0, uH1, p) + rise + uHAdd;
     return vec3(uR * sin(az), h, -uR * cos(az));
   }
   void main() {
     float p = uProg - aSlot.x;
-    float rise = aSlot.y + 5.0 * sin(uTime * 6.28318 / 9.0 + aSlot.z * 6.28318);
+    float rise = aSlot.y * uRiseMul + 5.0 * sin(uTime * 6.28318 / 9.0 + aSlot.z * 6.28318);
     vec3 local = pathAt(p, rise);
     vec4 v1 = modelViewMatrix * vec4(local, 1.0);
     vec4 v2 = modelViewMatrix * vec4(pathAt(p + 0.004, rise), 1.0);

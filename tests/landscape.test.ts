@@ -11,7 +11,7 @@ import {
   CRANE,
   CRANE_FORM,
   CRANE_SLOTS,
-  CRANE_DUSK_AZ,
+  CRANE_SKY,
   SHEET,
   LAND,
   QUIET_EASE,
@@ -190,15 +190,41 @@ describe("crane schedule", () => {
     }
   });
 
-  it("Dusk flies the moon's side of the sky, left of the murmuration", () => {
+  it("flies the open sky right of the title block, and above the flock on Dusk", () => {
     const p: CranePath = { az0: 0, az1: 0, R: 0, h0: 0, h1: 0, count: 0 };
-    for (let k = 0; k < 300; k++) {
-      cranePathInto(k, p);
-      for (const az of [p.az0, p.az1]) {
-        const d = az * CRANE_DUSK_AZ.mul + CRANE_DUSK_AZ.add;
-        expect(d).toBeLessThan(SHEET.az - 20 * DEG);
-        expect(d).toBeGreaterThan(-80 * DEG);
+    const K = 450 / Math.tan(25 * DEG);
+    const minRise = Math.min(...CRANE_SLOTS.map((s) => s[1])) - 10;
+    for (const sky of [CRANE_SKY.washi, CRANE_SKY.dusk]) {
+      for (let k = 0; k < 300; k++) {
+        cranePathInto(k, p);
+        p.R *= sky.rMul;
+        // Past the fade-in at each end, every bird is right of the title block
+        // (its right edge is 696 px at 1440x900).
+        for (let i = 0; i <= 50; i++) {
+          const q = 0.08 + (0.84 * i) / 50;
+          const az = (p.az0 + (p.az1 - p.az0) * q) * sky.mul + sky.add;
+          expect(az).toBeGreaterThan(-1 * DEG);
+          expect(az).toBeLessThan(85 * DEG);
+          const D = 918 + p.R * Math.cos(az);
+          if (D > 0) expect(720 + ((p.R * Math.sin(az)) / D) * K).toBeGreaterThan(696 + 20);
+        }
       }
+    }
+    // Dusk: the lowest crane clears the highest bird of the murmuration.
+    const seeds = Array.from({ length: SHEET.count }, (_, i) => murmSheetSeed(i));
+    let top = -Infinity;
+    const b = { az: 0, R: 0, h: 0 };
+    for (let t = 0; t < 400; t += 11.3) for (const sd of seeds) top = Math.max(top, murmSheetBird(sd, t, b).h);
+    const D = CRANE_SKY.dusk;
+    const lowRise = Math.min(...CRANE_SLOTS.map((s) => s[1])) * D.riseMul - 10;
+    const highRise = Math.max(...CRANE_SLOTS.map((s) => s[1])) * D.riseMul + 10;
+    expect(minRise).toBeLessThan(0);
+    expect(CRANE.h - CRANE.hSpan + lowRise + D.hAdd - CRANE.size).toBeGreaterThan(top);
+    // And the highest bird stays on screen at home, at every azimuth on screen.
+    const hi = CRANE.h + CRANE.hSpan + highRise + D.hAdd + CRANE.size;
+    for (const az of [0, 20 * DEG, 40 * DEG]) {
+      const Dd = 918 + CRANE.R * D.rMul * Math.cos(az);
+      expect(450 - ((hi + 5) / Dd) * K).toBeGreaterThan(0);
     }
   });
 

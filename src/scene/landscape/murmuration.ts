@@ -34,10 +34,10 @@ export const SHEET = {
   /** The tail is this share of the full width; the head is full width. */
   tailW: 0.42,
   /** Centerline bend (up, radial) and the head's curl (back, up). */
-  bendY: 60,
+  bendY: 45,
   bendZ: 60,
   curlX: 0.34,
-  curlY: 120,
+  curlY: 80,
   /** Twist along the length: a base angle and a rate per unit length. */
   twist0: 0.5,
   twistRate: 1.3,

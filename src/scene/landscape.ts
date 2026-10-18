@@ -41,7 +41,7 @@ import { HANGA_FIELD_GLSL, HANGA_SCREEN_UNIFORMS, SHELL_RADIUS } from "./environ
 import { CREST_DEPTH, DEG, FLOOR_Y, NOISE_GLSL, RINGS, TAU, easeQuiet, f, lhash, ringCeiling, smooth01 } from "./landscape/core";
 import {
   CRANE,
-  CRANE_DUSK_AZ,
+  CRANE_SKY,
   CRANE_FRAG,
   CRANE_SLOTS,
   CRANE_VERT,
@@ -964,6 +964,8 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       uAz1: { value: 0 },
       uAzMul: { value: 1 },
       uAzAdd: { value: 0 },
+      uHAdd: { value: 0 },
+      uRiseMul: { value: 1 },
       uR: { value: CRANE.R },
       uH0: { value: CRANE.h },
       uH1: { value: CRANE.h },
@@ -1021,6 +1023,7 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
   const sched: CraneState = { index: 0, start: CRANE.first, progress: -1, visible: false };
   const path: CranePath = { az0: 0, az1: 0, R: CRANE.R, h0: CRANE.h, h1: CRANE.h, count: 3 };
   let pathIndex = -1;
+  let craneRMul = 1;
 
   const hex = (u: THREE.IUniform, h: number): void => {
     (u.value as THREE.Color).setHex(h);
@@ -1079,8 +1082,12 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     hex(cu.uBill, pal.craneBill);
     hex(cu.uLine, pal.craneLine);
     cu.uLineOp.value = pal.craneLineOp;
-    cu.uAzMul.value = dusk ? CRANE_DUSK_AZ.mul : 1;
-    cu.uAzAdd.value = dusk ? CRANE_DUSK_AZ.add : 0;
+    const sky = dusk ? CRANE_SKY.dusk : CRANE_SKY.washi;
+    cu.uAzMul.value = sky.mul;
+    cu.uAzAdd.value = sky.add;
+    cu.uHAdd.value = sky.hAdd;
+    cu.uRiseMul.value = sky.riseMul;
+    craneRMul = sky.rMul;
     hex(murmMat.uniforms.uInk, pal.bird);
     const tu = trunkMat.uniforms;
     hex(tu.uBark, pal.bark);
@@ -1159,7 +1166,7 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
           const u = craneMat.uniforms;
           u.uAz0.value = path.az0;
           u.uAz1.value = path.az1;
-          u.uR.value = path.R;
+          u.uR.value = path.R * craneRMul;
           u.uH0.value = path.h0;
           u.uH1.value = path.h1;
           u.uCount.value = path.count;
