@@ -22,19 +22,27 @@ export const INK = {
   paper: 0xf2efe8,
   /** Sumi: every line. */
   sumi: 0x1c1a17,
-  /** Shade wash on a massif under a fold line (its darkest composite). */
+  /** Grey shadow wash on the snow (lee side of a fold, under a shelf). */
   shade: 0xd6d2ca,
-  /** Crest wash just under a near massif's silhouette. */
+  /** Crest wash just under a snow crest. */
   crest: 0xdcd8d0,
-  /** Oehun: the sky wash at its darkest, just above the ridge line. */
-  oehun: 0xb9b3a8,
+  /** Rock: the wet sumi wash over a massif face, light to dark. */
+  rockLight: 0x5a5650,
+  rockDark: 0x2a2824,
+  /** Oehun: the sky wash at its darkest, just above the ridge line, behind
+   *  the low snow hills in front of the map (light) and behind the tall
+   *  massifs at the sides (dark). */
+  oehun: 0xb3ada3,
+  oehunDeep: 0x7d786f,
   /** The sky well above the ridges. */
   skyHigh: 0xe4e0d8,
   /** The screen-fixed band behind the title (equal to HANGA.bulguksa.top). */
   band: 0xc4beb3,
-  /** Temple stone, walls, shadow under the eaves, tile ends. */
+  /** Temple stone, walls (a light wet ink wash), boulders (a wet ink wash),
+   *  shadow under the eaves, tile ends. */
   stone: 0xe4dfd4,
-  wall: 0xe9e5dc,
+  wall: 0xd9d4ca,
+  boulder: 0x8e897f,
   soffit: 0x9a958c,
   fascia: 0x56514a,
   /** Faint muted dancheong under the eaves (green, red). */
@@ -81,6 +89,20 @@ export const MASSIFS: readonly MassifSpec[] = [
 ];
 
 /** Envelope over azimuth: 0.08 in front and behind, 1 at the sides. */
+/**
+ * Where the snow covers a whole face: the low snow hills in front of and
+ * behind the map (envelope under SNOW_ALL_ENV) are untouched paper top to
+ * bottom, so at the home view the map prints over snow, never over rock.
+ * The rock shows from SNOW_ALL_ENV and fully from SNOW_ROCK_ENV.
+ */
+export const SNOW_ALL_ENV = 0.34;
+export const SNOW_ROCK_ENV = 0.6;
+export function massifSnowAll(theta: number): number {
+  const e = massifEnvelope(theta);
+  const t = Math.min(1, Math.max(0, (e - SNOW_ALL_ENV) / (SNOW_ROCK_ENV - SNOW_ALL_ENV)));
+  return 1 - t * t * (3 - 2 * t);
+}
+
 export function massifEnvelope(theta: number): number {
   const s = Math.abs(Math.sin(theta));
   const t = Math.min(1, Math.max(0, (s - 0.5) / 0.42));
@@ -150,7 +172,7 @@ export const TEMPLE = {
   /** Width of the front terrace in plan units. */
   width: 100,
   /** World units per plan unit (across). */
-  scale: 5.07,
+  scale: 7.6,
   /**
    * The raised viewpoint of the ink tradition: heights and depths print
    * compressed against the width (0.7 and 0.65 of it), so the whole complex
@@ -222,11 +244,11 @@ export const BCRANE = {
 export const BCRANE_SLOTS: readonly [number, number, number][] = [
   // lag along the path, rise (world units), wing phase (0..1)
   [0, 0, 0.0],
-  [0.016, 46, 0.17],
-  [0.02, -40, 0.34],
-  [0.034, 92, 0.51],
-  [0.04, -84, 0.68],
-  [0.052, 20, 0.85],
+  [0.022, 70, 0.17],
+  [0.026, -64, 0.34],
+  [0.046, 142, 0.51],
+  [0.052, -130, 0.68],
+  [0.072, 205, 0.85],
 ];
 export function bcraneCount(k: number): number {
   return 4 + Math.min(2, Math.floor(lhash(1925, k) * 3));
@@ -240,7 +262,7 @@ export const bcraneDir = (k: number): number => (k % 2 === 0 ? 1 : -1);
 // the sheet, a sharp edge, a thin straggler fringe. Moved in the vertex
 // shader; every period is 20 s or longer.
 export const BMURM = {
-  count: 2000,
+  count: 1200,
   /** Share of birds in the straggler fringe. */
   fringe: 0.05,
   az: 28 * DEG,
@@ -401,6 +423,9 @@ export function mixLinearHex(a: number, b: number, k: number): number {
 }
 
 /** Every massif FILL tone a map mark can print over (the contrast gate). */
+/** Every massif SNOW tone a map mark can print over (the contrast gate). The
+ *  rock wash is dark by design and never lies behind the map at the home view
+ *  (massifSnowAll, tested). */
 export function massifFillTones(): number[] {
   return [INK.paper, INK.shade, INK.crest];
 }

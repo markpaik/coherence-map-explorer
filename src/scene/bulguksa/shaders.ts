@@ -4,7 +4,7 @@
 // crawls when the camera moves. The one screen-fixed term is the title band,
 // which belongs to the sheet (as on Washi and Dusk).
 
-import { BCRANE, BMURM, FLOOR, MASSIFS, SNOW, TAU } from "./params";
+import { BCRANE, BMURM, FLOOR, MASSIFS, SNOW, SNOW_ALL_ENV, SNOW_ROCK_ENV, TAU } from "./params";
 
 export const f = (v: number): string => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
@@ -77,6 +77,7 @@ export const SKY_VERT = /* glsl */ `
 export const SKY_FRAG = /* glsl */ `
   uniform vec3 uPaper;
   uniform vec3 uOehun;
+  uniform vec3 uOehunDeep;
   uniform vec3 uSkyHigh;
   uniform vec3 uBand;
   uniform vec2 uViewport;
@@ -94,8 +95,14 @@ export const SKY_FRAG = /* glsl */ `
     // snow on the peaks shows as bare paper; the wash lifts over about 9 deg.
     // Broad horizontal wash strokes vary it a little, keyed to the direction.
     float stroke = vn(vec2(theta * 9.0, tanE * 70.0)) * 0.6 + vn(vec2(theta * 23.0 + 4.0, tanE * 160.0)) * 0.4;
-    float k = exp(-max(above, 0.0) / (0.085 + 0.02 * stroke));
-    vec3 col = mix(uSkyHigh, uOehun, k);
+    // The band of wash above the ridge is about 15% of the frame tall (0.14 in
+    // tan of elevation at the home view's 50 deg field), darkest at the ridge.
+    float k = 1.0 - smoothstep(0.0, 0.13 + 0.04 * stroke, max(above, 0.0));
+    k = k * k;
+    // Deep behind the tall massifs at the sides, lighter behind the low snow
+    // hills in front of the map, so the map's pigments keep their contrast.
+    vec3 deep = mix(uOehun, uOehunDeep, smoothstep(0.25, 0.75, envelope(theta)));
+    vec3 col = mix(uSkyHigh, deep, k);
     // Under the ridges the mist is paper (the massif bases fade into it).
     col = mix(uPaper, col, smoothstep(-0.012, 0.004, above));
     // The sheet's title band: screen-fixed, a pale ink wash (as Washi's band).
@@ -129,93 +136,107 @@ export const MASSIF_FRAG = /* glsl */ `
   uniform vec3 uShade;
   uniform vec3 uCrest;
   uniform vec3 uSumi;
+  uniform vec3 uRockLight;
+  uniform vec3 uRockDark;
   varying vec3 vLocal;
   ${NOISE_GLSL}
   ${CREST_GLSL}
-  // Line coverage for a signed distance d with screen width w (a hairline).
   float hair(float d, float w, float px) { return 1.0 - smoothstep(px * 0.5, px * 0.5 + w, abs(d)); }
   void main() {
     float theta = atan(vLocal.x, -vLocal.z);
     float y = vLocal.y;
     float c = crestOf(theta, uTop, uAmp, uLat, uOct, uSeed);
-    float d = c - y;
+    float d = c - y; // depth below the crest
     float w = max(fwidth(d), 1e-3);
     float cover = clamp(d / w + 0.5, 0.0, 1.0);
     if (cover <= 0.0) discard;
-    float X = theta * uR; // arc length along the wall
-    // Slope of the silhouette (world units per unit of arc).
+    float X = theta * uR;
     float e = 0.004;
     float slope = (crestOf(theta + e, uTop, uAmp, uLat, uOct, uSeed) - crestOf(theta - e, uTop, uAmp, uLat, uOct, uSeed)) / (2.0 * e * uR);
-    vec3 col = uPaper;
-    float ink = 0.0; // sumi line marks, composited last
-    // Crest wash: a light grey just under the silhouette, so a near peak's
-    // edge reads against the oehun sky without a hard outline everywhere.
-    col = mix(col, uCrest, (1.0 - smoothstep(0.0, 55.0, d)) * 0.9 * uInk);
-    // Folds: three inner ridgelines (overlapping peaks), each with a shade
-    // wash under it and a dark tide line where the wash dried.
+    float env = envelope(theta);
+
+    // -- snow, reserved paper ------------------------------------------------
+    // The low hills in front of and behind the map are snow from crest to base
+    // (massifSnowAll in params.ts). Elsewhere a stepped snow cap follows the
+    // silhouette, and snow lies on the shelf under each inner fold line.
+    float snowAll = 1.0 - smoothstep(${f(SNOW_ALL_ENV)}, ${f(SNOW_ROCK_ENV)}, env);
+    float rag = vn(vec2(X / 7.0, y / 7.0)) * 0.6 + vn(vec2(X / 19.0, y / 13.0)) * 0.4; // ragged edge
+    float sx0 = X / 48.0;
+    float step1 = mix(h21(vec2(floor(sx0), float(uSeed))), h21(vec2(floor(sx0) + 1.0, float(uSeed))), smoothstep(0.7, 1.0, fract(sx0)));
+    float capD = 22.0 + 46.0 * step1 + 30.0 * (1.0 - smoothstep(0.3, 1.2, abs(slope)));
+    float snow = 1.0 - smoothstep(capD - 6.0, capD + 6.0, d + (rag - 0.5) * 22.0);
+    float leeShade = 0.0; // grey shadow wash on the snow, lee of a fold
+    float foldLine = 0.0;
     for (int j = 1; j <= 3; j++) {
       float fj = float(j);
       float cj = crestOf(theta + 0.11 * fj, uTop, uAmp * (1.0 - 0.2 * fj), uLat + j * 3, uOct, uSeed + 50 * j) - 55.0 * fj;
       float inside = smoothstep(12.0, 40.0, c - cj);
       float dj = cj - y;
-      float wj = max(fwidth(dj), 1e-3);
-      float washSpan = 70.0 + 30.0 * vn(vec2(X / 90.0, fj * 3.0));
-      float wash = step(0.0, dj) * (1.0 - smoothstep(0.0, washSpan, dj));
-      col = mix(col, uShade, wash * inside * uInk);
-      // Fold line: dry brush, broken along its length.
-      float brk = smoothstep(0.35, 0.6, vn(vec2(X / 26.0 + fj * 13.0, fj)));
-      ink = max(ink, hair(dj, 0.7, wj) * brk * inside * 0.55);
-      // Tide line at the bottom edge of the wash.
-      float tl = hair(dj - washSpan * 0.92, 0.5, wj) * smoothstep(0.3, 0.7, vn(vec2(X / 40.0, fj * 7.0)));
-      ink = max(ink, tl * inside * 0.32);
+      float shelf = 16.0 + 26.0 * h21(vec2(floor(X / 40.0), fj + float(uSeed)));
+      float sj = step(0.0, dj) * (1.0 - smoothstep(shelf - 5.0, shelf + 5.0, dj + (rag - 0.5) * 16.0));
+      snow = max(snow, sj * inside);
+      // Lee side (the face turned from the light, to the right): a grey wash.
+      float sl = (crestOf(theta + 0.11 * fj + e, uTop, uAmp * (1.0 - 0.2 * fj), uLat + j * 3, uOct, uSeed + 50 * j)
+                - crestOf(theta + 0.11 * fj - e, uTop, uAmp * (1.0 - 0.2 * fj), uLat + j * 3, uOct, uSeed + 50 * j)) / (2.0 * e * uR);
+      leeShade = max(leeShade, sj * inside * smoothstep(0.0, -0.6, sl));
+      foldLine = max(foldLine, hair(dj, 0.8, max(fwidth(dj), 1e-3)) * inside * smoothstep(0.35, 0.6, vn(vec2(X / 26.0 + fj * 13.0, fj))));
     }
-    // Jun strokes: short dry strokes that follow the slope, where the face is
-    // steep enough that snow does not hold (rock shows through).
-    float rock = smoothstep(0.3, 1.0, abs(slope)) * (1.0 - smoothstep(20.0, 240.0, d));
-    if (rock > 0.01) {
-      float ang = atan(slope);
-      vec2 q = vec2(X, y);
-      vec2 dirS = vec2(cos(ang), sin(ang));
-      vec2 r2 = vec2(dot(q, dirS), dot(q, vec2(-dirS.y, dirS.x)));
-      vec2 cell = vec2(58.0, 11.0);
-      // Stagger the rows, so the strokes never line up in a grid.
-      float row = floor(r2.y / cell.y);
-      r2.x += cell.x * h21(vec2(row, 3.0 + float(uSeed)));
-      vec2 ci = floor(r2 / cell);
-      vec2 cf = fract(r2 / cell) - 0.5;
-      // Strokes gather in patches (the painter's hand), not an even field.
-      float clump = smoothstep(0.45, 0.7, vn(vec2(X / 160.0, y / 110.0) + float(uSeed)));
-      float on = step(0.5, h21(ci + float(uSeed))) * clump;
-      float len = 0.28 + 0.2 * h21(ci + 7.0);
-      float off = (h21(ci + 11.0) - 0.5) * 0.3;
-      float sx = (cf.x - off) / len; // -1..1 along the stroke
-      float along = 1.0 - smoothstep(0.85, 1.0, abs(sx));
-      // A pressed head that tapers to a dry tail.
-      float wdt = mix(0.16, 0.04, clamp(sx * 0.5 + 0.5, 0.0, 1.0));
-      float wpx = fwidth(r2.y / cell.y);
-      float jun = (1.0 - smoothstep(wdt, wdt + wpx * 1.2, abs(cf.y))) * along * on;
-      ink = max(ink, jun * rock * (0.45 + 0.4 * h21(ci + 5.0)));
-    }
-    // Moss dots (near massifs): a row of small dark dots just under the crest.
-    if (uInk > 0.9) {
-      float cellX = 24.0;
-      float ix = floor(X / cellX);
-      float hx = h21(vec2(ix, 3.0));
-      if (hx < 0.38) {
-        vec2 cc = vec2((ix + 0.25 + 0.5 * h21(vec2(ix, 9.0))) * cellX, c - 8.0 - 18.0 * h21(vec2(ix, 5.0)));
-        float rr = 2.0 + 1.6 * h21(vec2(ix, 1.0));
-        float dd = length(vec2(X, y) - cc);
-        float pw = max(fwidth(dd), 1e-3);
-        ink = max(ink, (1.0 - smoothstep(rr - pw, rr + pw, dd)) * 0.8);
-      }
-    }
-    // The crest contour itself: a dry hairline, heavier on near massifs.
+    // Rock shows from the crest down, deeper as the massif rises, so the snow
+    // and rock meet along a ragged slanting edge, never a vertical cut.
+    float body = max(c - (uTop - uFadeSpan), 1.0);
+    float rockDepth = clamp((env - ${f(SNOW_ALL_ENV)}) / 0.3, 0.0, 1.0) * body * 1.05;
+    float rockZone = 1.0 - smoothstep(rockDepth - 25.0, rockDepth + 25.0, d + (rag - 0.5) * 60.0);
+    snow = max(snow, max(snowAll, 1.0 - rockZone));
+    float rock = 1.0 - snow;
+
+    // -- rock: a wet sumi wash ---------------------------------------------------
+    float wet = vn(vec2(X / 140.0, y / 90.0)) * 0.55 + vn(vec2(X / 47.0, y / 33.0)) * 0.3 + vn(vec2(X / 13.0, y / 9.0)) * 0.15;
+    vec3 rockCol = mix(uRockLight, uRockDark, smoothstep(0.25, 0.8, wet));
+    // The lee face darker, the wash pooled at the snow's edge (a wet edge).
+    rockCol *= slope < 0.0 ? 0.82 : 1.0;
+    float edgePool = smoothstep(0.0, 0.35, rock) * (1.0 - smoothstep(0.35, 0.9, rock));
+    rockCol = mix(rockCol, uSumi, 0.35 * edgePool);
+    // Jun strokes: dark marks along the slope, dense enough to read at 1x.
+    // The strokes follow the silhouette near the crest and loosen lower down,
+    // each patch turned a little by hand.
+    // One direction per patch (90 x 70 units), so every stroke stays straight.
+    vec2 pch = floor(vec2(X / 90.0, y / 70.0));
+    float thQ = (pch.x + 0.5) * 90.0 / uR;
+    float slopeQ = (crestOf(thQ + e, uTop, uAmp, uLat, uOct, uSeed) - crestOf(thQ - e, uTop, uAmp, uLat, uOct, uSeed)) / (2.0 * e * uR);
+    float ang = atan(slopeQ) * mix(1.0, 0.45, smoothstep(0.0, 220.0, d)) + (h21(pch + 17.0) - 0.5) * 0.6;
+    vec2 dirS = vec2(cos(ang), sin(ang));
+    vec2 r2 = vec2(dot(vec2(X, y), dirS), dot(vec2(X, y), vec2(-dirS.y, dirS.x)));
+    vec2 cell = vec2(40.0, 12.0);
+    float row = floor(r2.y / cell.y);
+    r2.x += cell.x * h21(vec2(row, 3.0 + float(uSeed)));
+    vec2 ci = floor(r2 / cell);
+    vec2 cf = fract(r2 / cell) - 0.5;
+    float clump = smoothstep(0.35, 0.65, vn(vec2(X / 120.0, y / 80.0) + float(uSeed)));
+    float on = step(0.45, h21(ci + float(uSeed))) * clump;
+    float len = 0.3 + 0.18 * h21(ci + 7.0);
+    float sx = (cf.x - (h21(ci + 11.0) - 0.5) * 0.3) / len;
+    float along = 1.0 - smoothstep(0.8, 1.0, abs(sx));
+    float wd = mix(0.24, 0.07, clamp(sx * 0.5 + 0.5, 0.0, 1.0));
+    float wpx = fwidth(r2.y / cell.y);
+    float jun = (1.0 - smoothstep(wd, wd + wpx * 1.2, abs(cf.y))) * along * on;
+    rockCol = mix(rockCol, uSumi, jun * 0.9);
+
+    // -- compose -----------------------------------------------------------------
+    vec3 snowCol = mix(uPaper, uShade, 0.8 * leeShade);
+    snowCol = mix(snowCol, uCrest, (1.0 - smoothstep(0.0, 18.0, d)) * 0.6 * (1.0 - snowAll));
+    vec3 col = mix(rockCol, snowCol, snow);
+    // Fold lines and the crest contour, dry hairlines.
     float brkC = mix(0.55, 1.0, smoothstep(0.25, 0.55, vn(vec2(X / 34.0, 2.0))));
-    ink = max(ink, hair(d - 0.6 * w, 0.6 + 1.2 * uInk * uInk, w) * brkC * 0.95);
-    col = mix(col, uSumi, ink * uInk);
-    // The base fades into the mist (the field is paper below).
+    float ink = max(foldLine * 0.5 * snow, hair(d - 0.6 * w, 0.5 + 0.9 * uInk, w) * brkC * 0.8);
+    col = mix(col, uSumi, ink);
+    // Far massifs recede into the mist: everything lifts toward the paper.
+    col = mix(uPaper, col, 0.3 + 0.7 * uInk);
+    // The base fades into the mist, with a dark tide line where the wash dried.
     float mist = smoothstep(uTop - uFadeSpan, uTop + 10.0, y);
-    float a = cover * mist;
+    float tideY = uTop - uFadeSpan * 0.42 + (vn(vec2(X / 60.0, 5.0)) - 0.5) * 18.0;
+    float tide = hair(y - tideY, 0.7, max(fwidth(y), 1e-3)) * rock * smoothstep(0.3, 0.6, vn(vec2(X / 30.0, 9.0)));
+    col = mix(col, uSumi, tide * 0.7 * uInk);
+    float a = cover * max(mist, tide * 0.8);
     if (a < 0.003) discard;
     gl_FragColor = vec4(col, a);
   }

@@ -180,6 +180,7 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
     {
       uPaper: { value: lin(INK.paper) },
       uOehun: { value: lin(INK.oehun) },
+      uOehunDeep: { value: lin(INK.oehunDeep) },
       uSkyHigh: { value: lin(INK.skyHigh) },
       uBand: { value: lin(INK.band) },
       ...HANGA_SCREEN_UNIFORMS,
@@ -233,6 +234,8 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
         uShade: { value: lin(INK.shade) },
         uCrest: { value: lin(INK.crest) },
         uSumi: { value: lin(INK.sumi) },
+        uRockLight: { value: lin(INK.rockLight) },
+        uRockDark: { value: lin(INK.rockDark) },
       },
       THREE.BackSide,
     );
