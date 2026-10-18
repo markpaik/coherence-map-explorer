@@ -138,14 +138,14 @@ export const WATER = {
   /** The shore radius (just inside ring 1) and the rows inward from it. */
   shore: RINGS[0].R - 16,
   rows: 8,
-  rowGap: 20,
+  rowGap: 30,
   /** Each row's gap grows by this share per row toward the viewer. */
   rowGrow: 0.14,
   /** Cell length along the row (world units), the stroke's share of a cell,
    *  the crest's rise (sagitta) and the stroke's half-thickness. */
-  cell: 58,
-  sag: 4.5,
-  thick: 1.6,
+  cell: 90,
+  sag: 7,
+  thick: 3,
   /** Drift along the shore (radians per second): about a cell a minute. */
   drift: 0.0006,
 } as const;
@@ -247,7 +247,7 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     falls: 0xf8f6f1,
     fallsOp: 0.38,
     floor: 0x9fb2bf,
-    floorOp: 0.12,
+    floorOp: 0.18,
     wave: 0x2b4a70,
     waveOp: 0.5,
     glint: 0xf8f6f1,
@@ -579,14 +579,14 @@ const FLOOR_FRAG = /* glsl */ `
         if (i >= k) break;
         rr -= ${f(WATER.rowGap)} * (1.0 + ${f(WATER.rowGrow)} * float(i));
       }
-      if (abs(r - rr) > 14.0) continue;
+      if (abs(r - rr) > 20.0) continue;
       float dir = mod(float(k), 2.0) < 0.5 ? 1.0 : 0.8;
       float drift = uTime * ${f(WATER.drift)} * dir + float(k) * 0.37;
       float keep = mix(0.55, 0.9, onPath);
       float fade = 1.0 - float(k) / ${f(WATER.rows + 1)};
       lines = max(lines, crestRow(r, phi, rr, 31 + k * 7, drift, keep) * fade);
     }
-    lines *= far * smoothstep(${f(RINGS[0].R - 260)}, ${f(RINGS[0].R - 120)}, r);
+    lines *= far * smoothstep(${f(RINGS[0].R - 360)}, ${f(RINGS[0].R - 200)}, r);
     vec3 ink = mix(uWave, uGlint, onPath);
     float inkOp = mix(uWaveOp, uGlintOp, onPath);
     col = mix(col, ink, lines * inkOp);

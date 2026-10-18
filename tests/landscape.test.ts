@@ -615,7 +615,7 @@ describe("water", () => {
       prevGap = gap;
     }
     expect(waterRow(0)).toBeLessThan(RINGS[0].R);
-    expect(waterRow(WATER.rows - 1)).toBeGreaterThan(RINGS[0].R * 0.8);
+    expect(waterRow(WATER.rows - 1)).toBeGreaterThan(RINGS[0].R * 0.75);
   });
 
   it("strokes are short and drift very slowly (a cell takes a minute or more)", () => {
