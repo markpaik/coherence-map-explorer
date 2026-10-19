@@ -39,7 +39,8 @@ import {
   floorY,
   massifCrest,
   massifFillTones,
-  massifSnowAll,
+  massifPale,
+  mixLinearHex,
   median,
   murmEdge,
   murmPosition,
@@ -134,43 +135,55 @@ describe("chrome ink on the title band", () => {
 });
 
 describe("massifs keep the map's center region clear at the home view", () => {
-  it("every crest in front of the map prints below 52% of the frame height", () => {
-    for (const v of VIEWS) {
-      for (let az = -30; az <= 30; az += 0.5) {
-        const th = az * DEG;
-        for (const m of MASSIFS) {
-          const p = [m.R * Math.sin(th), massifCrest(m, th), -m.R * Math.cos(th)];
-          const [x, y] = project(p, v);
-          if (x < 0.3 * v[0] || x > 0.7 * v[0]) continue;
-          expect(y / v[1], `${v[0]} az ${az} R ${m.R}`).toBeGreaterThan(0.52);
-        }
-      }
-    }
-  });
-  it("show only snow (no rock) behind the map at the home view", () => {
+  it("pale behind the map body: every pigment holds 3:1 over the darkest paled tone", () => {
     const core: GraphCore = JSON.parse(read("public/data/graph-core.json"));
     const ys = core.nodes.map((n) => n.pos[1]);
     const zs = core.nodes.map((n) => n.pos[2]);
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+    let worst = Infinity;
+    let samples = 0;
     for (const v of VIEWS) {
       const pts = core.nodes.map((n) => project([n.pos[0], n.pos[1] - cy, n.pos[2] - cz], v));
-      // The map's body: the 5th to 95th percentile of its standards on screen.
       const xs = pts.map((p) => p[0]).sort((a, b) => a - b);
       const yv = pts.map((p) => p[1]).sort((a, b) => a - b);
       const q = (arr: number[], f: number): number => arr[Math.floor(arr.length * f)];
-      const x0 = q(xs, 0.05);
-      const x1 = q(xs, 0.95);
-      const y1 = q(yv, 0.95);
+      const [x0, x1, y0, y1] = [q(xs, 0.05), q(xs, 0.95), q(yv, 0.05), q(yv, 0.95)];
       for (let az = -90; az <= 90; az += 0.5) {
         const th = az * DEG;
         for (const m of MASSIFS) {
-          const [x, y] = project([m.R * Math.sin(th), massifCrest(m, th), -m.R * Math.cos(th)], v);
-          // A massif face whose crest prints inside the map's box must be all snow.
-          if (x > x0 && x < x1 && y < y1) expect(massifSnowAll(th), `${v[0]} az ${az} R ${m.R}`).toBeGreaterThan(0.995);
+          const crest = massifCrest(m, th);
+          for (let y = m.top - m.fadeSpan; y <= crest; y += 8) {
+            const [x, py] = project([m.R * Math.sin(th), y, -m.R * Math.cos(th)], v);
+            if (x < x0 || x > x1 || py < y0 || py > y1) continue;
+            // The darkest mark a face can carry (sumi), paled by the mist.
+            const tone = mixLinearHex(INK.sumi, INK.paper, massifPale(th, y, m.R));
+            for (const s of STRAND_ORDER as StrandId[]) worst = Math.min(worst, contrastHex(PIG[s], tone));
+            samples++;
+          }
         }
       }
     }
+    expect(samples).toBeGreaterThan(1000);
+    expect(worst).toBeGreaterThanOrEqual(3);
+  });
+  it("the far crests reach about the map's upper third at the home view", () => {
+    const v = VIEWS[0];
+    const far = MASSIFS[MASSIFS.length - 1];
+    const ys: number[] = [];
+    for (let az = -15; az <= 15; az += 1) {
+      const th = az * DEG;
+      ys.push(project([far.R * Math.sin(th), massifCrest(far, th), -far.R * Math.cos(th)], v)[1]);
+    }
+    const mid = median(ys);
+    expect(mid).toBeGreaterThan(300);
+    expect(mid).toBeLessThan(440);
+  });
+  it("rise in order: each far crest prints above the nearer one in front of the map", () => {
+    const v = VIEWS[0];
+    const at = (m: (typeof MASSIFS)[number]): number =>
+      median(Array.from({ length: 31 }, (_, i) => project([m.R * Math.sin((i - 15) * DEG), massifCrest(m, (i - 15) * DEG), -m.R * Math.cos((i - 15) * DEG)], v)[1]));
+    for (let k = 1; k < MASSIFS.length; k++) expect(at(MASSIFS[k])).toBeLessThan(at(MASSIFS[k - 1]));
   });
   it("rise as monumental masses at the sides", () => {
     const side = Math.max(...MASSIFS.map((m) => massifCrest(m, 70 * DEG)));
@@ -183,26 +196,44 @@ describe("massifs keep the map's center region clear at the home view", () => {
 });
 
 describe("temple", () => {
-  it("spans about 1.5x the first round's 55% of the frame width at the home view", () => {
-    expect(templeFrameShare(1440 / 900)).toBeGreaterThan(0.78);
-    expect(templeFrameShare(1440 / 900)).toBeLessThan(0.86);
+  // Plan points of Daeungjeon in temple units: hall centre x 22, ridge 15.1 up
+  // and 25 back, eave ends 11.4 either side, stair foot 7.5 forward.
+  const T = (px: number, py: number, pz: number): number[] => [
+    TEMPLE.x + px * TEMPLE.scale,
+    TEMPLE.y + py * TEMPLE.scale * TEMPLE.yScale,
+    TEMPLE.z + pz * TEMPLE.scale * TEMPLE.zScale,
+  ];
+  // Chrome measured in the live app (etch label band, Style card, filter rail).
+  const CHROME = {
+    1440: { etchBottom: 712, styleLeft: 886, railTop: 844 },
+    1280: { etchBottom: 572, styleLeft: 726, railTop: 664 },
+  } as const;
+  it("spans about 0.6 of the frame width at the home view", () => {
+    expect(templeFrameShare(1440 / 900)).toBeGreaterThan(0.57);
+    expect(templeFrameShare(1440 / 900)).toBeLessThan(0.63);
   });
-  it("stays below the map: its highest roof prints under the lowest standard, in the gap above the filter rail", () => {
+  it("prints its ridge at least 24 px under the lowest etch label at 1440x900", () => {
+    const v = VIEWS[0];
+    expect(project(T(22, 15.1, -25), v)[1]).toBeGreaterThanOrEqual(CHROME[1440].etchBottom + 24);
+  });
+  it("stays below the map: its highest roof prints under the lowest standard", () => {
     const core: GraphCore = JSON.parse(read("public/data/graph-core.json"));
     const ys = core.nodes.map((n) => n.pos[1]);
     const zs = core.nodes.map((n) => n.pos[2]);
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
-    let lowest = 0;
     const v = VIEWS[0];
+    let lowest = 0;
     for (const n of core.nodes) lowest = Math.max(lowest, project([n.pos[0], n.pos[1] - cy, n.pos[2] - cz], v)[1]);
-    // Daeungjeon's ridge: 15.1 plan units up, 25 plan units back from the front face.
-    const ridge = project([0, TEMPLE.y + 15.1 * TEMPLE.scale * TEMPLE.yScale, TEMPLE.z - 25 * TEMPLE.scale * TEMPLE.zScale], v);
-    expect(ridge[1]).toBeGreaterThan(lowest);
-    // The main hall prints below the search row (bottom 648 px at 1440x900)
-    // and the terrace foot above the filter rail (top 845 px).
-    expect(ridge[1]).toBeGreaterThan(648);
-    expect(project([0, TEMPLE.y, TEMPLE.z], v)[1]).toBeLessThan(845);
+    expect(project(T(22, 15.1, -25), v)[1]).toBeGreaterThan(lowest);
+  });
+  it("keeps the main hall left of the Style card at 1440x900 and 1280x720", () => {
+    for (const [i, w] of [[0, 1440], [1, 1280]] as const) {
+      expect(project(T(22 + 11.4, 10, -21), VIEWS[i])[0]).toBeLessThan(CHROME[w].styleLeft);
+    }
+  });
+  it("prints the terrace foot above the filter rail at 1440x900", () => {
+    expect(project(T(0, 0, 0), VIEWS[0])[1]).toBeLessThan(CHROME[1440].railTop);
   });
   it("has its terrace foot at the snow slope", () => {
     expect(Math.abs(floorY(TEMPLE.z) - TEMPLE.y)).toBeLessThan(2);

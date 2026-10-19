@@ -193,13 +193,13 @@ function roof(B: Builder, cx: number, y: number, cz: number, w: number, d: numbe
       add(B, tris([gx, f.y - 0.05, f.z - 0.2 * Math.sign(f.z - cz), gx, r.y - 0.05, r.z, gx, b2.y - 0.05, b2.z + 0.2 * Math.sign(cz - b2.z)]), INK.wall);
     }
     // Ridge heap.
-    const rh = new THREE.BoxGeometry(2 * ex * 0.97, 0.32, 0.42);
-    rh.translate(cx, y + o.h1 + 0.1, cz);
+    const rh = new THREE.BoxGeometry(2 * ex * 0.97, 0.6, 0.7);
+    rh.translate(cx, y + o.h1 + 0.2, cz);
     add(B, rh, INK.paper, { angle: 40 });
     // Tile ends under the lips (the shadow line), front and back.
     for (const s of [1, -1]) {
-      const lip = new THREE.BoxGeometry(2 * ex, 0.22, 0.12);
-      lip.translate(cx, y - 0.12, cz + s * ez);
+      const lip = new THREE.BoxGeometry(2 * ex, 0.45, 0.14);
+      lip.translate(cx, y - 0.22, cz + s * ez);
       add(B, lip, INK.fascia, { edges: false, shade: 0 });
     }
     // Shadow on the wall top under the eave, and a faint dancheong band.
@@ -225,8 +225,8 @@ function roof(B: Builder, cx: number, y: number, cz: number, w: number, d: numbe
     for (const s of [-1, 1]) {
       add(B, tris([cx + s * bx, top, cz - bz, cx + s * bx, top, cz + bz, cx + s * bx, ry, cz]), INK.wall);
     }
-    const rh = new THREE.BoxGeometry(2 * bx + 0.6, 0.42, 0.5);
-    rh.translate(cx, ry + 0.12, cz);
+    const rh = new THREE.BoxGeometry(2 * bx + 0.9, 0.75, 0.85);
+    rh.translate(cx, ry + 0.25, cz);
     add(B, rh, INK.paper, { angle: 40 });
   } else {
     // Hip: a pyramid cap over the break ring.
@@ -239,7 +239,7 @@ function roof(B: Builder, cx: number, y: number, cz: number, w: number, d: numbe
     ]), INK.paper, { angle: 18, heavy: true });
   }
   // Tile ends under the lip: a dark band hung under the eave ring.
-  const lip = eave.map((p) => new THREE.Vector3(p.x, p.y - 0.28, p.z));
+  const lip = eave.map((p) => new THREE.Vector3(p.x, p.y - 0.5, p.z));
   add(B, loft(eave, lip, true), INK.fascia, { edges: false, shade: 0 });
   // Soffit in shadow, from the lip in to the wall top.
   const wallTop = ring(cx, cz, w / 2, d / 2, y - 0.9, seg, 0, 0);
@@ -250,9 +250,9 @@ function roof(B: Builder, cx: number, y: number, cz: number, w: number, d: numbe
   // Snow heaps at the four hip ends.
   for (const i of [0, seg, 2 * seg, 3 * seg]) {
     const p = eave[i];
-    const g = new THREE.SphereGeometry(0.42, 6, 4);
-    g.scale(1.4, 0.55, 1.4);
-    g.translate(p.x, p.y + 0.12, p.z);
+    const g = new THREE.SphereGeometry(0.75, 8, 5);
+    g.scale(1.5, 0.6, 1.5);
+    g.translate(p.x, p.y + 0.2, p.z);
     add(B, g, INK.paper, { edges: false, shade: 0.06 });
   }
 }
@@ -406,27 +406,26 @@ export function buildTemple(): TempleBuild {
   // Ground snow on top of the terraces (the court floors are untouched paper).
   box(B, 2, T2, -24.5, 95.8, 0.06, 34.8, INK.paper, false);
   box(B, 0, T1, -3.5, 99.8, 0.06, 6.9, INK.paper, false);
-  // Boulder base: a course of rounded natural stones along the front.
-  for (let i = 0; i < 46; i++) {
-    const x = -49 + (98 * (i + 0.5)) / 46 + (lhash(301, i) - 0.5) * 0.8;
-    const r = 0.9 + lhash(302, i) * 0.55;
-    const g = new THREE.IcosahedronGeometry(r, 0);
-    g.rotateY(lhash(303, i) * 6.28);
-    g.rotateX(lhash(304, i) * 0.6);
-    g.scale(1.25, 0.75, 0.6);
-    g.translate(x, r * 0.62, 0.15);
-    add(B, g, INK.boulder, { shade: 0.25, angle: 30 });
+  // The boulder base is a separate ink-wash strip (BOULDER_FRAG, index.ts).
+  // Ashlar: only a few broken hairlines remain, the way a painter hints at
+  // coursed stone instead of ruling it.
+  for (const [y, z, x0, x1, sd] of [
+    [2.2, 0.02, -50, 50, 311],
+    [T1 + 1.1, -6.98, -46, 50, 321],
+  ] as const) {
+    let x = x0;
+    let k = 0;
+    while (x < x1) {
+      const len = 3 + 6 * lhash(sd, k);
+      if (lhash(sd + 1, k) < 0.55) line(B, [x, y, z], [Math.min(x1, x + len), y, z]);
+      x += len + 1 + 3 * lhash(sd + 2, k);
+      k++;
+    }
   }
-  // Ashlar grid on the lower face (above the boulders) and the upper face.
-  for (const y of [1.6, 2.4, 3.1]) line(B, [-50, y, 0.02], [50, y, 0.02]);
-  for (let i = 0; i <= 44; i++) {
-    const x = -50 + (100 * i) / 44;
-    line(B, [x, 1.25, 0.02], [x, T1, 0.02]);
-  }
-  for (const y of [T1 + 0.8, T1 + 1.6]) line(B, [-46, y, -6.98], [50, y, -6.98]);
-  for (let i = 0; i <= 40; i++) {
-    const x = -46 + (96 * i) / 40;
-    line(B, [x, T1, -6.98], [x, T2, -6.98]);
+  for (let i = 0; i < 18; i++) {
+    if (lhash(331, i) > 0.45) continue;
+    const x = -48 + 96 * lhash(332, i);
+    line(B, [x, 1.4 + lhash(333, i), 0.02], [x, T1 - 0.2, 0.02]);
   }
   // Stone railing along the lower terrace top.
   for (let i = 0; i <= 48; i++) {

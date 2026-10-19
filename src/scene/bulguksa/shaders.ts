@@ -4,7 +4,7 @@
 // crawls when the camera moves. The one screen-fixed term is the title band,
 // which belongs to the sheet (as on Washi and Dusk).
 
-import { BCRANE, BMURM, FLOOR, MASSIFS, SNOW, SNOW_ALL_ENV, SNOW_ROCK_ENV, TAU } from "./params";
+import { BCRANE, BMURM, FLOOR, MASSIFS, MIST_PALE, MIST_SIN0, MIST_SIN1, SNOW, SNOW_ALL_ENV, SNOW_ROCK_ENV, TAU } from "./params";
 
 export const f = (v: number): string => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
@@ -138,6 +138,8 @@ export const MASSIF_FRAG = /* glsl */ `
   uniform vec3 uSumi;
   uniform vec3 uRockLight;
   uniform vec3 uRockDark;
+  uniform vec2 uViewport;
+  uniform float uBandBottom;
   varying vec3 vLocal;
   ${NOISE_GLSL}
   ${CREST_GLSL}
@@ -184,7 +186,7 @@ export const MASSIF_FRAG = /* glsl */ `
     // Rock shows from the crest down, deeper as the massif rises, so the snow
     // and rock meet along a ragged slanting edge, never a vertical cut.
     float body = max(c - (uTop - uFadeSpan), 1.0);
-    float rockDepth = clamp((env - ${f(SNOW_ALL_ENV)}) / 0.3, 0.0, 1.0) * body * 1.05;
+    float rockDepth = clamp((env - ${f(SNOW_ALL_ENV)}) / 0.12, 0.0, 1.0) * body * 1.05;
     float rockZone = 1.0 - smoothstep(rockDepth - 25.0, rockDepth + 25.0, d + (rag - 0.5) * 60.0);
     snow = max(snow, max(snowAll, 1.0 - rockZone));
     float rock = 1.0 - snow;
@@ -196,29 +198,43 @@ export const MASSIF_FRAG = /* glsl */ `
     rockCol *= slope < 0.0 ? 0.82 : 1.0;
     float edgePool = smoothstep(0.0, 0.35, rock) * (1.0 - smoothstep(0.35, 0.9, rock));
     rockCol = mix(rockCol, uSumi, 0.35 * edgePool);
-    // Jun strokes: dark marks along the slope, dense enough to read at 1x.
-    // The strokes follow the silhouette near the crest and loosen lower down,
-    // each patch turned a little by hand.
-    // One direction per patch (90 x 70 units), so every stroke stays straight.
-    vec2 pch = floor(vec2(X / 90.0, y / 70.0));
-    float thQ = (pch.x + 0.5) * 90.0 / uR;
+    // Jun strokes: brush marks along the slope. They come in groups of 3 to
+    // 7 parallel strokes with gaps between the groups; each stroke tapers at
+    // both ends, bows a little, and the longer ones break dry in the middle.
+    // One direction per patch, so every group keeps its own lean.
+    vec2 pch = floor(vec2(X / 110.0, y / 80.0));
+    float thQ = (pch.x + 0.5) * 110.0 / uR;
     float slopeQ = (crestOf(thQ + e, uTop, uAmp, uLat, uOct, uSeed) - crestOf(thQ - e, uTop, uAmp, uLat, uOct, uSeed)) / (2.0 * e * uR);
-    float ang = atan(slopeQ) * mix(1.0, 0.45, smoothstep(0.0, 220.0, d)) + (h21(pch + 17.0) - 0.5) * 0.6;
+    float ang = atan(slopeQ) * mix(1.0, 0.45, smoothstep(0.0, 260.0, d)) + (h21(pch + 17.0) - 0.5) * 0.6;
     vec2 dirS = vec2(cos(ang), sin(ang));
     vec2 r2 = vec2(dot(vec2(X, y), dirS), dot(vec2(X, y), vec2(-dirS.y, dirS.x)));
-    vec2 cell = vec2(40.0, 12.0);
-    float row = floor(r2.y / cell.y);
-    r2.x += cell.x * h21(vec2(row, 3.0 + float(uSeed)));
-    vec2 ci = floor(r2 / cell);
-    vec2 cf = fract(r2 / cell) - 0.5;
-    float clump = smoothstep(0.35, 0.65, vn(vec2(X / 120.0, y / 80.0) + float(uSeed)));
-    float on = step(0.45, h21(ci + float(uSeed))) * clump;
-    float len = 0.3 + 0.18 * h21(ci + 7.0);
-    float sx = (cf.x - (h21(ci + 11.0) - 0.5) * 0.3) / len;
-    float along = 1.0 - smoothstep(0.8, 1.0, abs(sx));
-    float wd = mix(0.24, 0.07, clamp(sx * 0.5 + 0.5, 0.0, 1.0));
-    float wpx = fwidth(r2.y / cell.y);
-    float jun = (1.0 - smoothstep(wd, wd + wpx * 1.2, abs(cf.y))) * along * on;
+    vec2 gcell = vec2(90.0, 52.0);
+    vec2 gi = floor(r2 / gcell);
+    vec2 gq = r2 - (gi + 0.5) * gcell;
+    float jun = 0.0;
+    if (h21(gi + float(uSeed) * 1.7) < 0.62) {
+      float nS = 3.0 + floor(h21(gi + 5.0) * 5.0);
+      float baseLen = 26.0 + 22.0 * h21(gi + 9.0);
+      float curv = (h21(gi + 13.0) - 0.5) * 0.5;
+      for (int i = 0; i < 7; i++) {
+        float fi = float(i);
+        if (fi >= nS) break;
+        float hs = h21(gi * 1.3 + fi * 7.1);
+        float cy = (fi - 0.5 * (nS - 1.0)) * 6.5 + (hs - 0.5) * 2.5;
+        float len = baseLen * (0.7 + 0.5 * hs);
+        float u = (gq.x - (hs - 0.5) * 14.0) / len + 0.5;
+        if (u < 0.0 || u > 1.0) continue;
+        // A slight bow along the stroke.
+        float yc = cy + curv * len * (u - 0.5) * (u - 0.5) * 4.0 - curv * len * 0.33;
+        float wHalf = 1.9 * sin(3.14159 * u) * (0.8 + 0.4 * hs);
+        float dist = abs(gq.y - yc);
+        float aa = max(fwidth(gq.y), 1e-3);
+        float k = 1.0 - smoothstep(wHalf - aa, wHalf + aa, dist);
+        // Dry-brush break in the middle of the longer strokes.
+        if (len > 30.0) k *= smoothstep(0.03, 0.09, abs(u - 0.5 - (hs - 0.5) * 0.1));
+        jun = max(jun, k * (0.75 + 0.25 * hs));
+      }
+    }
     rockCol = mix(rockCol, uSumi, jun * 0.9);
 
     // -- compose -----------------------------------------------------------------
@@ -231,11 +247,23 @@ export const MASSIF_FRAG = /* glsl */ `
     col = mix(col, uSumi, ink);
     // Far massifs recede into the mist: everything lifts toward the paper.
     col = mix(uPaper, col, 0.3 + 0.7 * uInk);
+    // Mist over the map at the home view (massifPale in params.ts).
+    float Dh = 918.0 + uR * abs(cos(theta));
+    float ndcX = abs(uR * sin(theta)) / (Dh * 0.746);
+    float mm = 1.0 - smoothstep(${f(MIST_SIN0)}, ${f(MIST_SIN1)}, ndcX);
+    float yTop = -5.5 + 0.2207 * Dh;
+    float pale = ${f(MIST_PALE)} * mm * (1.0 - smoothstep(yTop - 40.0, yTop + 120.0, y));
+    // The title block's corner is misted too, in screen space (the title is
+    // fixed to the screen): left of the block's right edge, above its bottom.
+    vec2 sc = gl_FragCoord.xy / max(uViewport, vec2(1.0));
+    float below = (1.0 - sc.y) - uBandBottom;
+    pale = max(pale, ${f(MIST_PALE)} * (1.0 - smoothstep(0.5, 0.62, sc.x)) * (1.0 - smoothstep(0.0, 0.12, below)));
     // The base fades into the mist, with a dark tide line where the wash dried.
     float mist = smoothstep(uTop - uFadeSpan, uTop + 10.0, y);
     float tideY = uTop - uFadeSpan * 0.42 + (vn(vec2(X / 60.0, 5.0)) - 0.5) * 18.0;
     float tide = hair(y - tideY, 0.7, max(fwidth(y), 1e-3)) * rock * smoothstep(0.3, 0.6, vn(vec2(X / 30.0, 9.0)));
     col = mix(col, uSumi, tide * 0.7 * uInk);
+    col = mix(col, uPaper, pale);
     float a = cover * max(mist, tide * 0.8);
     if (a < 0.003) discard;
     gl_FragColor = vec4(col, a);
@@ -769,5 +797,65 @@ export const TEMPLE_FRAG = /* glsl */ `
       col *= 1.0 - vWash * (0.08 + 0.26 * smoothstep(0.35, 0.85, n));
     }
     gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// ---------------------------------------------------------------------------
+// The boulder base: rounded ink-wash stones as a signed-distance field of
+// overlapping ovals on a strip in front of the terrace's lowest course. Each
+// stone is a mid-grey wash that pools to a wet dark edge, with a patch of
+// reserved paper where the light falls (upper left). No facets anywhere.
+export const BOULDER_VERT = /* glsl */ `
+  varying vec2 vP;
+  void main() {
+    vP = position.xy;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+export const BOULDER_FRAG = /* glsl */ `
+  uniform vec3 uWash;
+  uniform vec3 uEdge;
+  uniform vec3 uPaper;
+  varying vec2 vP; // plan units: x along the terrace, y up from its foot
+  ${NOISE_GLSL}
+  void main() {
+    float cellW = 2.3;
+    float ci = floor(vP.x / cellW);
+    float best = 1e9;   // the front-most stone covering this point
+    vec3 col = vec3(0.0);
+    float cover = 0.0;
+    for (int dc = -1; dc <= 1; dc++) {
+      for (int k = 0; k < 2; k++) {
+        float c = ci + float(dc);
+        vec2 hseed = vec2(c, float(k) * 7.0);
+        float h1 = h21(hseed + 1.0);
+        float h2 = h21(hseed + 2.0);
+        float h3 = h21(hseed + 3.0);
+        vec2 ctr = vec2((c + 0.2 + 0.6 * h1) * cellW, 0.75 + 0.5 * h2 + float(k) * 0.35);
+        vec2 rad = vec2(1.05 + 0.45 * h3, 0.7 + 0.35 * h2);
+        vec2 q = (vP - ctr) / rad;
+        // A slightly lumpy oval.
+        float ang = atan(q.y, q.x);
+        float r = length(q) * (1.0 + 0.06 * sin(ang * 3.0 + h1 * 6.0));
+        float aa = fwidth(r) * 1.2;
+        float inside = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
+        if (inside <= 0.0) continue;
+        float order = float(k) + h3 * 0.5; // the upper row overlaps the lower
+        if (order + 10.0 * (1.0 - inside) < best) {
+          best = order;
+          float edge = smoothstep(0.62, 0.98, r);
+          vec3 sc = mix(uWash, uEdge, edge);
+          float wet = vn(q * 2.5 + h1 * 9.0);
+          sc *= 0.9 + 0.2 * wet;
+          // Reserved paper where the light falls.
+          float hl = 1.0 - smoothstep(0.15, 0.5, length(q - vec2(-0.35, 0.38)));
+          sc = mix(sc, uPaper, 0.85 * hl);
+          col = sc;
+          cover = max(cover, inside);
+        }
+      }
+    }
+    if (cover < 0.01) discard;
+    gl_FragColor = vec4(col, cover);
   }
 `;

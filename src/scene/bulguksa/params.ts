@@ -82,10 +82,12 @@ export interface MassifSpec {
 }
 
 export const MASSIFS: readonly MassifSpec[] = [
-  { R: 1750, top: -330, amp: 560, lattice: 22, octaves: 3, seed: 5, fadeSpan: 120, ink: 1 },
-  { R: 2250, top: -300, amp: 760, lattice: 18, octaves: 3, seed: 17, fadeSpan: 150, ink: 0.78 },
-  { R: 2750, top: -270, amp: 940, lattice: 15, octaves: 3, seed: 29, fadeSpan: 170, ink: 0.58 },
-  { R: 3300, top: -250, amp: 1100, lattice: 12, octaves: 2, seed: 43, fadeSpan: 190, ink: 0.42 },
+  // Round 3: the tops rise so the far crests reach about the map's upper
+  // third at the home view, and each base fades into mist down to the slope.
+  { R: 1750, top: -10, amp: 560, lattice: 22, octaves: 3, seed: 5, fadeSpan: 385, ink: 1 },
+  { R: 2250, top: 65, amp: 700, lattice: 18, octaves: 3, seed: 17, fadeSpan: 460, ink: 0.78 },
+  { R: 2750, top: 150, amp: 700, lattice: 15, octaves: 3, seed: 29, fadeSpan: 545, ink: 0.58 },
+  { R: 3300, top: 260, amp: 800, lattice: 12, octaves: 2, seed: 43, fadeSpan: 655, ink: 0.42 },
 ];
 
 /** Envelope over azimuth: 0.08 in front and behind, 1 at the sides. */
@@ -95,8 +97,38 @@ export const MASSIFS: readonly MassifSpec[] = [
  * bottom, so at the home view the map prints over snow, never over rock.
  * The rock shows from SNOW_ALL_ENV and fully from SNOW_ROCK_ENV.
  */
-export const SNOW_ALL_ENV = 0.45;
-export const SNOW_ROCK_ENV = 0.7;
+export const SNOW_ALL_ENV = 0.0;
+export const SNOW_ROCK_ENV = 0.12;
+
+/**
+ * Mist over the map (round 3). Rock may lie behind the map's body at the home
+ * view, but there it pales toward the paper by MIST_PALE, enough that every
+ * obangsaek pigment keeps 3:1 against the paled tone even where the darkest
+ * sumi mark lies (tests/bulguksa.test.ts samples the map body's 5th to 95th
+ * percentile box). The mist covers the part of each ring that the home
+ * camera sees inside the map's width (|ndc x| under MIST_SIN0, gone by
+ * MIST_SIN1; the back hemisphere mirrors it for the reverse view) and lifts
+ * above the map's top edge, so the ink prints at full strength above the map
+ * and at the sides.
+ */
+export const MIST_PALE = 0.8;
+export const MIST_SIN0 = 0.76;
+export const MIST_SIN1 = 0.88;
+/** The world height of the map's top edge at the home view, on a ring at (theta, R). */
+export function mistTopY(theta: number, R: number): number {
+  return -5.5 + 0.2207 * (918 + R * Math.abs(Math.cos(theta)));
+}
+export function massifPale(theta: number, y: number, R: number): number {
+  const D = 918 + R * Math.abs(Math.cos(theta));
+  const s = Math.abs(R * Math.sin(theta)) / (D * 0.746);
+  const t0 = Math.min(1, Math.max(0, (s - MIST_SIN0) / (MIST_SIN1 - MIST_SIN0)));
+  const m = 1 - t0 * t0 * (3 - 2 * t0);
+  const yt = mistTopY(theta, R);
+  const v = Math.min(1, Math.max(0, (y - (yt - 40)) / 160));
+  const sm = (x: number): number => x * x * (3 - 2 * x);
+  // The shader also mists the title block's corner in screen space (MASSIF_FRAG).
+  return MIST_PALE * m * (1 - sm(v));
+}
 export function massifSnowAll(theta: number): number {
   const e = massifEnvelope(theta);
   const t = Math.min(1, Math.max(0, (e - SNOW_ALL_ENV) / (SNOW_ROCK_ENV - SNOW_ALL_ENV)));
@@ -133,7 +165,7 @@ export const massifCeiling = (m: MassifSpec): number => m.top + m.amp * 1.2;
 // Floor: the snow slope, a gentle dome of untouched paper under the map.
 export const FLOOR = {
   /** Height at the center and the drop to the rim (world y, local to the map center). */
-  y0: -252,
+  y0: -255,
   drop: 140,
   r0: 560,
   r1: 1700,
@@ -172,17 +204,22 @@ export const TEMPLE = {
   /** Width of the front terrace in plan units. */
   width: 100,
   /** World units per plan unit (across). */
-  scale: 7.6,
+  scale: 5.53,
   /**
    * The raised viewpoint of the ink tradition: heights and depths print
-   * compressed against the width (0.7 and 0.65 of it), so the whole complex
-   * reads from slightly above and stays below the map's lowest labels.
+   * compressed against the width (0.5 and 0.45 of it), so the whole complex
+   * reads from slightly above and its roofs print below the grade labels.
    */
-  yScale: 0.7,
-  zScale: 0.65,
+  yScale: 0.5,
+  zScale: 0.45,
+  /**
+   * The plan's x = 0 (the terrace's centre) in world x: shifted left so the
+   * main hall and the stair bridges sit left of the Style card.
+   */
+  x: -130,
   /** Front face of the terrace (world z) and its ground (world y). */
   z: 300,
-  y: -252,
+  y: -255,
 } as const;
 
 /** Temple ink line: heavy (roofs) and medium (walls, terraces, stairs) widths
@@ -192,8 +229,8 @@ export const TEMPLE_LINE = { heavy: 1.35, medium: 0.7, hairOpacity: 0.32 } as co
 /** The share of the frame width the temple front spans at the home view. */
 export function templeFrameShare(aspect: number): number {
   const half = (TEMPLE.width * TEMPLE.scale) / 2;
-  const a = homeProject([-half, TEMPLE.y, TEMPLE.z], aspect);
-  const b = homeProject([half, TEMPLE.y, TEMPLE.z], aspect);
+  const a = homeProject([TEMPLE.x - half, TEMPLE.y, TEMPLE.z], aspect);
+  const b = homeProject([TEMPLE.x + half, TEMPLE.y, TEMPLE.z], aspect);
   return (b[0] - a[0]) / 2;
 }
 

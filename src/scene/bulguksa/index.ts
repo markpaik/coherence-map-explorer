@@ -66,6 +66,8 @@ import {
   SNOW_VERT,
   TEMPLE_FRAG,
   TEMPLE_VERT,
+  BOULDER_FRAG,
+  BOULDER_VERT,
 } from "./shaders";
 import { buildTemple } from "./temple";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
@@ -244,6 +246,7 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
         uSumi: { value: lin(INK.sumi) },
         uRockLight: { value: lin(INK.rockLight) },
         uRockDark: { value: lin(INK.rockDark) },
+        ...HANGA_SCREEN_UNIFORMS,
       },
       THREE.BackSide,
     );
@@ -310,7 +313,7 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
   const temple = buildTemple();
   geos.push(temple.fill, temple.hair);
   const templeGroup = new THREE.Group();
-  templeGroup.position.set(0, TEMPLE.y, TEMPLE.z);
+  templeGroup.position.set(TEMPLE.x, TEMPLE.y, TEMPLE.z);
   templeGroup.scale.set(TEMPLE.scale, TEMPLE.scale * TEMPLE.yScale, TEMPLE.scale * TEMPLE.zScale);
   group.add(templeGroup);
   // Paper fills with a mottled wet-ink wash on the walls, soffits, and boulders.
@@ -339,6 +342,22 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
   mats.push(hairMat);
   const hairLines = new THREE.LineSegments(temple.hair, hairMat);
   const templeFill = new THREE.Mesh(temple.fill, fillMat);
+  // The boulder base: one ink-wash strip in front of the lowest course.
+  const boulderGeo = new THREE.PlaneGeometry(100, 2.6, 1, 1);
+  boulderGeo.translate(0, 1.3, 0.25);
+  geos.push(boulderGeo);
+  const boulderMat = shader(
+    BOULDER_VERT,
+    BOULDER_FRAG,
+    { uWash: { value: lin(INK.boulder) }, uEdge: { value: lin(0x3a3631) }, uPaper: { value: lin(INK.paper) } },
+    THREE.FrontSide,
+    { depthWrite: false },
+  );
+  const boulders = new THREE.Mesh(boulderGeo, boulderMat);
+  boulders.renderOrder = -5.97;
+  boulders.frustumCulled = false;
+  templeGroup.add(boulders);
+  objs.push(boulders);
   for (const o of [templeFill, hairLines, mediumLines, heavyLines]) {
     o.frustumCulled = false;
     templeGroup.add(o);
