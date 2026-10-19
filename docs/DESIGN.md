@@ -666,19 +666,37 @@ them, so importers keep one path.
   shore and drifting about one cell a minute. At Dusk the strokes on the line
   from the camera toward the moon print pale and closer together: the moon
   path.
+- Banks: low mounds that rise out of the water floor (y -760), so every pine
+  and the reeds grow out of the ground and none floats (Mark's review,
+  2026-10-19: "The patch of grass is floating in the air"). Each bank has an
+  irregular lobed outline, a flat top that rolls down to the waterline, and a
+  dark strip of bank at the waterline printed as a bokashi, after Hiroshige's
+  shores. Tops sit 32 to 80 units above the water, so even the lowest reads as a mound, never as a flat patch under a tree. Washi prints them grey
+  green, Dusk in moonlit slate a shade lighter than the water, so a bank under a tree never reads as a cast shadow.
 - Two framing pines outside the map's radius, at the near left (low, its pads
   under the search rail and clear of Fuji and the sun) and the near right
   (tall): plated ink trunks with a key line, and needle clusters as flat fan
   pads (camera-facing cards with a level flat underside, an irregular scalloped
   crown, and fans of needles in ink; seen from above they turn into round
-  clumps). Washi prints them soft and snowless in pine green. Dusk prints them
-  in silhouette with a faint pale rim on the side facing the moon. Small
-  distant pines print as ink marks on ring 3's crest.
-- A reed bank at the near shore, left foreground at the home view: instanced
-  strap leaves and stems with drooping panicles that face the camera. They
-  sway very slowly (periods 11 and 17 s) and hold still under reduced motion.
-  At the Ascent the left pine and the reeds fade, because the depth scale owns
-  that edge of the screen.
+  clumps). Their trunks run down to their banks, and the crowns keep their old
+  place. Washi prints them soft and snowless in pine green. Dusk prints them
+  in silhouette with a faint pale rim on the side facing the moon.
+- Six middle-ground pines (Mark: "more trees?"), scaled copies of the framing
+  pines at 0.24 to 0.62 of their size, built with the same trunk and pad
+  builders and writing depth like them: one on the reed bank behind the reeds,
+  a pair on the first ridge's crest at the left edge in front of Fuji's foot,
+  one on each of two shore banks behind the home view, and one on the first
+  ridge at the right, seen on orbit. At the home view (1440x900, 1280x720,
+  1024x600) none crosses the title block, the search rail, the Style card, the
+  pose control, or the map body. Small distant pines still print as ink marks
+  on ring 3's crest.
+- A reed bank on the far shore, left foreground at the home view: 150
+  instanced strap leaves and stems with drooping panicles that face the camera,
+  rooted 4 units into the flat top of their bank (top y -680), with a soft
+  base 6% of the blade high. They sway very slowly (periods 11 and 17 s) and
+  hold still under reduced motion. At 1024x600 the roots pass behind the filter
+  rail. At the Ascent the left pines and the reeds fade, because the depth
+  scale owns that edge of the screen.
 - The sky body: a low red-orange sun on Washi, a pale moon on Dusk.
 - Cranes on both styles: one flight of red-crowned cranes (3 to 5 in a loose
   V, a 40 s crossing, then 50 to 90 s of empty sky). The anatomy follows the
@@ -694,22 +712,29 @@ them, so importers keep one path.
   about 20 to 23 px from wingtip to wingtip at the home view. Both fly the open
   sky right of the title block. Washi prints white
   plumage, which reads on the Prussian band. Dusk prints pale moonlit plumage
-  and flies higher, at one height, above the flock.
-- Dusk: one murmuration as a thin folded sheet of 2000 birds in one draw,
-  moved in the vertex shader. Each bird is a small chevron aligned to the
-  sheet's local flow. The sheet is uniform inside and twice as dense or more
-  in its border strip, with a sparse straggler fringe, a head that curls back
-  into a dense fold, and a thinning tail. It twists along its length, so where
-  it turns edge-on it prints as a dark band. Its shape turns over across 29 to
-  53 s.
+  and flies higher, at one height, above the flock's core.
+- Dusk: one murmuration of 1250 birds in one draw, moved in the vertex
+  shader, dispersed across the sky after Mark's review (2026-10-19: "spans more
+  of the sky", fewer birds, randomly scattered). Each bird is a small chevron
+  aligned to the local flow. The sheet is wide and loose (half-length 1050,
+  half-width 290, half-thickness 48, at radius 3880 and height 1150): a dense
+  core, clumps and thin gaps from low-frequency noise on each bird's seed, and
+  a quarter of the birds scattered as stragglers well outside the sheet, with a
+  jitter of 26 units. The head curls back into a fold and the tail thins. It
+  twists along its length, so where it turns edge-on it prints as a darker
+  band. At the home view it spans about x 830 to the right edge and y 0 to 320
+  of 1440x900, clear of the title block and the bottom-right chrome. Its shape
+  turns over across 29 to 53 s.
 
 Legibility is a test (`tests/landscape.test.ts`): Washi gold and teal keep
 2.5:1 or more on every ring body and crest band, and every Dusk pigment keeps
 2.8:1 on every ring, crest band, and Fuji's body. The tests also hold the
 crane planform (chords parallel, the black block inside the arm), the
-murmuration's placement, interior density cap, and edge ratio, Fuji's concave
-profile, the mist band bounds, and the pines and reeds outside the map's radius
-and clear of the title block and chrome at 1440x900, 1280x720, and 1024x600.
+murmuration's placement at 1440x900 and 1280x720, its straggler share, uneven
+interior and dense core, and a 15% cap on any 60 px disc, Fuji's concave
+profile, the mist band bounds, the banks, every pine and reed rooted on a bank
+or the first ridge, and the pines and reeds outside the map's radius and clear
+of the title block and chrome at 1440x900, 1280x720, and 1024x600.
 Motion keeps the project rules: every period is several seconds or longer,
 nothing pulses in brightness, a story or a focus fades the birds out over 2 s,
 and reduced motion freezes the water, mist, waterfall, and reeds and hides the
