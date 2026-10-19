@@ -56,8 +56,10 @@ import {
   MASSIF_VERT,
   MURM_FRAG,
   MURM_VERT,
-  PINE_FRAG,
-  PINE_VERT,
+  PAD_FRAG,
+  PAD_VERT,
+  WOOD_FRAG,
+  WOOD_VERT,
   SKY_FRAG,
   SKY_VERT,
   SNOW_FRAG,
@@ -356,22 +358,53 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
 
   // -- pines ---------------------------------------------------------------------
   const pines = buildPines();
-  geos.push(pines.fill, pines.lines);
+  geos.push(pines.wood);
   const pineFwd = { value: new THREE.Vector3(0, 0, -1) };
-  // Pine fill: written as "color" (pines.ts) and read under PINE_FILL.
-  const pineFillMat = shader(PINE_VERT, PINE_FRAG, { uFwd: pineFwd, uColor: { value: lin(INK.sumi) }, uOpacity: { value: 1 } }, THREE.FrontSide, {
-    defines: { PINE_FILL: 1 },
-    depthWrite: true,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
-  });
-  const pineLineMat = shader(PINE_VERT, PINE_FRAG, { uFwd: pineFwd, uColor: { value: lin(INK.sumi) }, uOpacity: { value: 0.55 } }, THREE.FrontSide);
-  const pineFill = place(new THREE.Mesh(pines.fill, pineFillMat), -5.8);
-  place(new THREE.LineSegments(pines.lines, pineLineMat), -5.7);
-  pineFill.onBeforeRender = (_r, _s, camera) => {
+  const woodMat = shader(
+    WOOD_VERT,
+    WOOD_FRAG,
+    { uFwd: pineFwd, uBark: { value: lin(INK.bark) }, uSumi: { value: lin(INK.sumi) }, uPaper: { value: lin(INK.paper) } },
+    THREE.FrontSide,
+    { depthWrite: true },
+  );
+  const wood = place(new THREE.Mesh(pines.wood, woodMat), -5.8);
+  wood.onBeforeRender = (_r, _s, camera) => {
     camera.getWorldDirection(pineFwd.value);
   };
+  const padBase = new THREE.PlaneGeometry(2, 2);
+  const padGeo = new THREE.InstancedBufferGeometry();
+  padGeo.index = padBase.index;
+  padGeo.setAttribute("position", padBase.getAttribute("position"));
+  const NP = pines.pads.length;
+  const pc = new Float32Array(NP * 3);
+  const pk = new Float32Array(NP * 3);
+  const pd = new Float32Array(NP * 3);
+  // Far pads first, so the cards composite back to front from the home view.
+  const order = pines.pads.map((p, i) => [p.c.z, i] as const).sort((a, b) => a[0] - b[0]);
+  order.forEach(([, i], n) => {
+    const p = pines.pads[i];
+    pc.set([p.c.x, p.c.y, p.c.z], n * 3);
+    pk.set([p.crown.x, p.crown.y, p.crown.z], n * 3);
+    pd.set([p.rx, p.ry, p.seed], n * 3);
+  });
+  padGeo.setAttribute("aCenter", new THREE.InstancedBufferAttribute(pc, 3));
+  padGeo.setAttribute("aCrown", new THREE.InstancedBufferAttribute(pk, 3));
+  padGeo.setAttribute("aPad", new THREE.InstancedBufferAttribute(pd, 3));
+  padGeo.instanceCount = NP;
+  geos.push(padBase, padGeo);
+  const padMat = shader(
+    PAD_VERT,
+    PAD_FRAG,
+    {
+      uFwd: pineFwd,
+      uSumi: { value: lin(INK.sumi) },
+      uPad: { value: lin(INK.pad) },
+      uPaper: { value: lin(INK.paper) },
+      uShadow: { value: lin(INK.padShadow) },
+    },
+    THREE.DoubleSide,
+  );
+  place(new THREE.Mesh(padGeo, padMat), -5.6);
   void PINES;
 
   // -- cranes ----------------------------------------------------------------------
@@ -507,7 +540,7 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
       }
       murm.visible = birdA > 0.002;
       murmMat.uniforms.uTime.value = t;
-      murmMat.uniforms.uAlpha.value = birdA * 0.85;
+      murmMat.uniforms.uAlpha.value = birdA;
     },
     stats() {
       let meshes = 0;

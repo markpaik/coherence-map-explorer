@@ -263,6 +263,16 @@ export const FLOOR_FRAG = /* glsl */ `
     float band = vn(vec2(phi * 18.0, r / 140.0)) * 0.6 + vn(vec2(phi * 41.0 + 3.0, r / 60.0)) * 0.4;
     float drift = smoothstep(0.55, 0.85, band) * smoothstep(${f(FLOOR.r0)}, ${f(FLOOR.r1)}, r);
     vec3 col = mix(uPaper, uShade, drift * 0.55);
+    // A faint grey ink contour of the slope's shape: three wandering hairlines.
+    float lines = 0.0;
+    for (int i = 0; i < 3; i++) {
+      float fi = float(i);
+      float rr = ${f(FLOOR.r0 + 180)} + fi * 330.0 + 60.0 * (vn(vec2(phi * 5.0 + fi * 7.0, fi)) - 0.5);
+      float dl = abs(r - rr) / max(fwidth(r), 1e-3);
+      float brk = smoothstep(0.3, 0.55, vn(vec2(phi * 14.0 + fi * 3.0, 4.0 + fi)));
+      lines = max(lines, (1.0 - smoothstep(0.4, 1.2, dl)) * brk);
+    }
+    col = mix(col, uShade * 0.62, lines * 0.55);
     float a = 1.0 - smoothstep(${f(FLOOR.R - 70)}, ${f(FLOOR.R)}, r);
     gl_FragColor = vec4(col, a);
   }
@@ -570,7 +580,9 @@ export const MURM_VERT = /* glsl */ `
     vec3 world = c + vec3(T.x * along + N.x * depth, up, T.y * along + N.y * depth);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(world, 1.0);
     gl_PointSize = mix(${f(BMURM.px0)}, ${f(BMURM.px1)}, h) * uPx;
-    vA = uAlpha * (fr > 0.5 ? 0.7 : 0.92);
+    // A thin interior (the sheet reads by its edge and its folds, not as a
+    // solid block), the stragglers a little darker so the fringe shows.
+    vA = uAlpha * (fr > 0.5 ? 0.78 : 0.55);
     vRot = (h - 0.5) * 0.9;
   }
 `;
@@ -595,43 +607,135 @@ export const MURM_FRAG = /* glsl */ `
 `;
 
 // ---------------------------------------------------------------------------
-// Pines (fills and lines). A pine that comes between the reader and the middle
-// of the view (inside about 22 deg of the view axis) ghosts out, so an orbit
-// never walls the map off behind a crown. At the home view the two framing
-// pines stand at the edges and print in full.
-export const PINE_VERT = /* glsl */ `
-  attribute vec3 aCrown;
-  #ifdef PINE_FILL
-  attribute vec3 color;
-  varying vec3 vCol;
-  #endif
-  uniform vec3 uFwd;
-  varying float vA;
-  void main() {
-    #ifdef PINE_FILL
-    vCol = color;
-    #endif
-    vec3 wc = (modelMatrix * vec4(aCrown, 1.0)).xyz;
+// Pines. A pine that comes between the reader and the middle of the view
+// (inside about 22 deg of the view axis) ghosts out, so an orbit never walls
+// the map off behind a crown. At the home view the two framing pines stand at
+// the edges and print in full.
+const PINE_FADE = /* glsl */ `
+  float pineFade(vec3 crownLocal) {
+    vec3 wc = (modelMatrix * vec4(crownLocal, 1.0)).xyz;
     float c = dot(normalize(wc - cameraPosition), uFwd);
-    vA = 1.0 - smoothstep(0.906, 0.94, c);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    return 1.0 - smoothstep(0.906, 0.94, c);
   }
 `;
-export const PINE_FRAG = /* glsl */ `
-  uniform vec3 uColor;
-  uniform float uOpacity;
-  #ifdef PINE_FILL
-  varying vec3 vCol;
-  #endif
+// Trunk and limbs: smooth tubes, inked in the fragment shader.
+export const WOOD_VERT = /* glsl */ `
+  attribute vec3 aCrown;
+  attribute vec2 aBark;
+  uniform vec3 uFwd;
   varying float vA;
+  varying vec2 vBark;
+  varying vec3 vN;
+  varying vec3 vV;
+  ${PINE_FADE}
   void main() {
-    float a = vA * uOpacity;
+    vA = pineFade(aCrown);
+    vBark = aBark;
+    vec4 w = modelMatrix * vec4(position, 1.0);
+    vN = normalize(mat3(modelMatrix) * normal);
+    vV = cameraPosition - w.xyz;
+    gl_Position = projectionMatrix * viewMatrix * w;
+  }
+`;
+export const WOOD_FRAG = /* glsl */ `
+  uniform vec3 uBark;
+  uniform vec3 uSumi;
+  uniform vec3 uPaper;
+  varying float vA;
+  varying vec2 vBark;
+  varying vec3 vN;
+  varying vec3 vV;
+  ${NOISE_GLSL}
+  void main() {
+    if (vA < 0.01) discard;
+    float ndv = abs(dot(normalize(vN), normalize(vV)));
+    // A wet-ink edge: the wash pools at the silhouette and pales at the core.
+    vec3 col = mix(uSumi, uBark, smoothstep(0.08, 0.7, ndv));
+    col = mix(col, uPaper, 0.18 * smoothstep(0.75, 1.0, ndv));
+    // Plated bark: short dark strokes across the trunk, staggered plates.
+    // Each mark is a short thin dash of a plate edge, staggered row to row.
+    float L = vBark.x / 6.0;
+    float row = floor(L);
+    float sh = h21(vec2(row, 1.0));
+    float cu = vBark.y * 7.0 + sh;
+    float ci = floor(cu);
+    float u = fract(cu);
+    float hp = h21(vec2(row, ci));
+    float u0 = 0.1 + 0.3 * h21(vec2(row, ci + 5.0));
+    float u1 = u0 + 0.25 + 0.35 * hp;
+    float yOff = (h21(vec2(row, ci + 9.0)) - 0.5) * 0.5;
+    float thick = 0.06 + 0.05 * hp;
+    float across = 1.0 - smoothstep(thick, thick + fwidth(L) * 1.5, abs(fract(L) - 0.5 - yOff));
+    float mark = across * step(0.45, hp) * smoothstep(u0, u0 + 0.05, u) * (1.0 - smoothstep(u1 - 0.05, u1, u));
+    col = mix(col, uSumi, 0.8 * mark);
+    gl_FragColor = vec4(col, vA);
+  }
+`;
+// Needle pads: camera-facing cards drawn as needle fans under snow.
+export const PAD_VERT = /* glsl */ `
+  attribute vec3 aCenter;
+  attribute vec3 aCrown;
+  attribute vec3 aPad; // rx, ry, seed
+  uniform vec3 uFwd;
+  varying vec2 vP;
+  varying float vSeed;
+  varying float vA;
+  ${PINE_FADE}
+  void main() {
+    vA = pineFade(aCrown);
+    vec3 wc = (modelMatrix * vec4(aCenter, 1.0)).xyz;
+    vec3 toCam = normalize(cameraPosition - wc);
+    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), toCam) + vec3(1e-4, 0.0, 0.0));
+    vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), cross(toCam, right), 0.35));
+    vec3 p = wc + right * position.x * aPad.x + up * position.y * aPad.y;
+    vP = position.xy;
+    vSeed = aPad.z;
+    gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+  }
+`;
+export const PAD_FRAG = /* glsl */ `
+  uniform vec3 uSumi;
+  uniform vec3 uPad;
+  uniform vec3 uPaper;
+  uniform vec3 uShadow;
+  varying vec2 vP;
+  varying float vSeed;
+  varying float vA;
+  ${NOISE_GLSL}
+  void main() {
+    if (vA < 0.01) discard;
+    vec2 p = vP; // -1..1 across, -1..1 up
+    float px = max(fwidth(p.x), fwidth(p.y));
+    // The fan grows from a point just under the card; needles radiate from it.
+    vec2 o = vec2(0.0, -1.3);
+    vec2 q = p - o;
+    float phi = atan(q.x, q.y);
+    float r = length(q);
+    // Body: an ellipse, its rim cut into needle tips (triangular teeth) that
+    // come and go in clusters.
+    float body = length(p / vec2(0.95, 0.8));
+    float teeth = abs(fract(phi * 11.0 + vSeed * 7.0) - 0.5) * 2.0;
+    float cluster = vn(vec2(phi * 4.0 + vSeed * 13.0, 1.0));
+    // Clusters of needle tips: the rim swells and recedes, cut into teeth.
+    float rim = 0.62 + 0.18 * cluster + 0.2 * (1.0 - teeth) * (0.4 + 0.6 * cluster);
+    float dEdge = body - rim;
+    float needles = 1.0 - smoothstep(-px, px, dEdge);
+    // Needle streaks: fine radiating lines, a touch lighter, inside the fan.
+    float streak = smoothstep(0.7, 1.0, abs(sin(phi * 70.0 + vSeed * 31.0))) * smoothstep(0.3, 0.9, body);
+    vec3 col = mix(uPad, uSumi, 0.5 + 0.5 * vn(p * 3.0 + vSeed * 9.0));
+    col = mix(col, uShadow, 0.25 * streak);
+    // Snow pillow: reserved paper on top, a soft ragged lower edge.
+    float rag = vn(vec2(p.x * 9.0 + vSeed * 17.0, 2.0)) - 0.5;
+    float snowLow = 0.3 + 0.35 * p.x * p.x + 0.12 * rag;
+    float pillow = length((p - vec2(0.0, 0.42)) / vec2(0.78, 0.4));
+    float snow = (1.0 - smoothstep(-px * 1.5, px * 1.5, snowLow - p.y)) * (1.0 - smoothstep(1.0 - px * 1.5, 1.0 + px * 1.5, pillow));
+    // A soft grey wash where the snow meets the needles.
+    float wash = smoothstep(snowLow - 0.22, snowLow, p.y) * (1.0 - snow) * needles;
+    col = mix(col, uShadow, 0.7 * wash);
+    col = mix(col, uPaper, snow);
+    float a = max(needles, snow) * vA;
     if (a < 0.01) discard;
-    #ifdef PINE_FILL
-    gl_FragColor = vec4(vCol, a);
-    #else
-    gl_FragColor = vec4(uColor, a);
-    #endif
+    gl_FragColor = vec4(col, a);
   }
 `;
 
