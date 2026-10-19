@@ -1,102 +1,90 @@
 // Hanga landscape: the 3D world around the map in the two woodblock styles
 // (3 Washi, 4 Dusk), after Utagawa Hiroshige. Built from the approved previews
-// (scripts/hanga-landscape-previews.mjs, docs/previews/hanga-*-landscape-*.svg),
-// with the designer's "more landscape" pass: taller ridges (amplitude x1.6,
-// raised tops, so the far crests reach about the map's vertical center at the
-// home view) and a peak 1.5x larger.
+// (scripts/hanga-landscape-previews.mjs) with the "more landscape" pass, then
+// rebuilt from a study of open-access prints and photographs (docs/DESIGN.md,
+// "Hanga landscape").
 //
 // Parts, far to near (each is one draw call, drawn in that order):
 //   sky body   the Washi sun or the Dusk moon, a camera-facing disc and halo
-//   peak       one calm volcanic cone (lathe geometry) at a fixed azimuth just
-//              beyond the far ring: pale cap with soft snow tongues, a hairline
-//              contour on the upper outline, a slow waterfall dash
-//   birds      Washi: one flight of cranes. Dusk: one murmuration of starlings.
+//   Fuji       Hiroshige's profile (landscape/fuji.ts) at a fixed azimuth
+//              beyond the far ring: snow cap with tongues down the gullies, a
+//              flat bokashi body, a slow waterfall line, alpenglow on Dusk
+//   birds      a flight of red-crowned cranes (landscape/crane.ts) on both
+//              styles, and on Dusk one murmuration as a folded sheet
+//              (landscape/murmuration.ts)
 //   ring 4..1  concentric cylinder walls. The silhouette is computed per
 //              fragment from seamless periodic value noise over azimuth, with a
-//              darker crest bokashi band and a fade to mist at the base
-//   mist       suyari-gasumi bands between the rings, filled with the exact
-//              field color behind them (HANGA_FIELD_GLSL), drifting slowly
-//   floor      a faint water plane well below the map, with fine wave lines
-//              near the far shore
+//              dry-brush crest bokashi and a fade to mist at the base. Far rings
+//              print paler, as distance layers
+//   far pines  small ink marks on ring 3's crest (landscape/flora.ts)
+//   mist       suyari-gasumi bands at three depths between the rings: flat
+//              tops, lobed rounded ends, a thin darker underline, filled with
+//              the exact field color behind them (HANGA_FIELD_GLSL)
+//   floor      a flat bokashi water field with rows of short tapered crest
+//              strokes that recede toward the far shore; on Dusk a moon path
+//   pines      two framing pines at the near left and right (trunks, then pads)
+//   reeds      a reed bank at the near shore, left of the map
 //
 // Legibility: the map stays the subject. Every color the strokes can cross
 // (ring body, crest band) keeps a contrast ratio of 2.5 or more against the
-// Washi gold and teal pigments (tests/landscape.test.ts). The Washi peak uses the
-// preview sheet's colors as chosen, without a gate.
+// Washi gold and teal pigments (tests/landscape.test.ts).
 //
 // Motion: every period is several seconds or longer and nothing pulses in
 // brightness. `quiet` (a story or a focus) fades the birds out over about 2 s.
-// Reduced motion freezes the water, mist, and waterfall at a fixed phase and
-// hides the birds. The group is invisible outside styles 3 and 4, so the
+// Reduced motion freezes the water, mist, waterfall, and reeds at a fixed phase
+// and hides the birds. The group is invisible outside styles 3 and 4, so the
 // Galaxy and the other styles draw nothing from here.
-//
-// The pure math below (noise, schedule, easing, flock bounds, contrast) mirrors
-// the GLSL one for one and is exported for the tests.
 
 import * as THREE from "three";
 import { HANGA } from "./artstyle";
 import { HANGA_FIELD_GLSL, HANGA_SCREEN_UNIFORMS, SHELL_RADIUS } from "./environs";
+import { CREST_DEPTH, DEG, FLOOR_Y, NOISE_GLSL, RINGS, TAU, easeQuiet, f, lhash, ringCeiling, smooth01 } from "./landscape/core";
+import {
+  CRANE,
+  CRANE_SKY,
+  CRANE_FRAG,
+  CRANE_SLOTS,
+  CRANE_VERT,
+  craneScheduleInto,
+  cranePathInto,
+  type CranePath,
+  type CraneState,
+} from "./landscape/crane";
+import { MURM_SHEET_FRAG, MURM_SHEET_VERT, SHEET, murmSheetSeed } from "./landscape/murmuration";
+import { FUJI, FUJI_FRAG, FUJI_TONGUES, FUJI_VERT, buildFujiGeometry } from "./landscape/fuji";
+import {
+  CARD_FRAG,
+  CARD_VERT,
+  REED_FRAG,
+  REED_VERT,
+  TRUNK_FRAG,
+  TRUNK_VERT,
+  buildCards,
+  buildPineTrunks,
+  buildReeds,
+} from "./landscape/flora";
 
-const TAU = Math.PI * 2;
-const DEG = Math.PI / 180;
+// The public surface stays where it was: other modules import these from here.
+export * from "./landscape/core";
+export * from "./landscape/crane";
+export * from "./landscape/murmuration";
+export * from "./landscape/murmuration-cloud";
+export * from "./landscape/fuji";
+export * from "./landscape/flora";
 
-// ---------------------------------------------------------------------------
-// Model constants (world units, relative to the pose-0 map center).
-// Ring azimuth theta = 0 points to -z (straight ahead at the home view) and
-// grows toward +x.
-
-export interface RingSpec {
-  /** Radius of the wall. */
-  R: number;
-  /** Lowest silhouette height. */
-  top: number;
-  /** Silhouette rise above `top` (the shaped noise reaches 1.15 x amp at most). */
-  amp: number;
-  /** Value-noise cells per 360 degrees (first octave). */
-  lattice: number;
-  octaves: number;
-  seed: number;
-  /** Mist fade: full color above top + 10, alpha 0 at top - fadeSpan. */
-  fadeSpan: number;
-}
-
-/** Four rings, near to far. Preview amplitudes x1.6, tops raised. */
-export const RINGS: readonly RingSpec[] = [
-  { R: 1500, top: -400, amp: 240, lattice: 26, octaves: 3, seed: 11, fadeSpan: 270 },
-  { R: 2050, top: -305, amp: 224, lattice: 21, octaves: 3, seed: 23, fadeSpan: 170 },
-  { R: 2550, top: -220, amp: 200, lattice: 17, octaves: 2, seed: 37, fadeSpan: 140 },
-  { R: 3050, top: -150, amp: 168, lattice: 13, octaves: 2, seed: 41, fadeSpan: 140 },
-];
-/** Height of the crest bokashi band below the silhouette. */
-export const CREST_DEPTH = 110;
-export const FLOOR_Y = -760;
-
-/** The cone: the preview's profile at 1.5x scale. Radius grows with depth below
- *  the summit as a power above 1 (concave flanks, small flat crater). */
-export const PEAK = {
-  az: -33 * DEG,
-  R: 3400,
-  apex: 420,
-  rTop: 93,
-  p: 1.38,
-  /** Half-width 900 at 495 below the summit. */
-  halfW: 900,
-  halfD: 495,
-  dMax: 1425,
-  snow: 132,
-  /** The flank fades to the field over this depth range. */
-  fade0: 450,
-  fade1: 840,
-} as const;
-export const peakRadius = (d: number): number =>
-  PEAK.rTop + ((PEAK.halfW - PEAK.rTop) / Math.pow(PEAK.halfD, PEAK.p)) * Math.pow(Math.max(0, d), PEAK.p);
+/** The old peak's placement, kept for importers: Fuji stands exactly there. */
+export const PEAK = { az: FUJI.az, R: FUJI.R, apex: FUJI.apex } as const;
 
 /** Sun (Washi) or moon (Dusk): the preview's azimuth and distance (the old star
  *  shell), set lower than the preview's 9.5 deg so the disc clears the Ascent's
  *  depth label and the title block at the left edge. */
 export const SKY_BODY = { az: -40 * DEG, el: 5 * DEG, dist: 3600, r: 66 } as const;
 
-/** Suyari-gasumi bands, four per gap. az/halfSpan in radians, h/th in world units. */
+// ---------------------------------------------------------------------------
+// Suyari-gasumi: four bands per gap. az and halfSpan in radians; h is the
+// band's middle and th its full height (world units). Each band has a flat
+// bottom and a flat top; each end is two lobes stepping out and down.
+
 export interface MistBand {
   az: number;
   halfSpan: number;
@@ -123,341 +111,55 @@ export const MIST_RINGS: readonly MistRing[] = [
   // between ring 1 and ring 2
   { R: 1780, rate: 1 / 2100, bands: [band(22, 20, -378, 46), band(100, 26, -370, 42), band(196, 18, -384, 40), band(312, 24, -374, 44)] },
 ];
-
-// ---------------------------------------------------------------------------
-// Integer hash and seamless periodic value noise (mirrors the GLSL below).
-
-/** 32-bit integer hash of (seed, i) to [0, 1). i and seed must be >= 0. */
-export function lhash(seed: number, i: number): number {
-  let h = (Math.imul(i >>> 0, 0x9e3779b1) + Math.imul(seed >>> 0, 0x85ebca77)) >>> 0;
-  h = (h ^ (h >>> 15)) >>> 0;
-  h = Math.imul(h, 0x2c1b3c6d) >>> 0;
-  h = (h ^ (h >>> 12)) >>> 0;
-  h = Math.imul(h, 0x297a2d39) >>> 0;
-  h = (h ^ (h >>> 15)) >>> 0;
-  return (h >>> 8) / 16777216;
-}
-const crom = (p0: number, p1: number, p2: number, p3: number, t: number): number =>
-  0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-
-/** Periodic value noise over u in turns: Catmull-Rom between N hashed lattice
- *  values, so u = 0 and u = 1 meet exactly. */
-export function pnoise(u: number, N: number, seed: number): number {
-  const x = (((u % 1) + 1) % 1) * N;
-  const i = Math.min(Math.floor(x), N - 1);
-  const t = x - i;
-  const s = seed * 977 + N;
-  return crom(lhash(s, (i - 1 + N) % N), lhash(s, i), lhash(s, (i + 1) % N), lhash(s, (i + 2) % N), t);
-}
-
-/** Silhouette height of a ring at azimuth theta (radians). */
-export function ridgeHeight(ring: RingSpec, theta: number): number {
-  const u = theta / TAU;
-  let s = 0;
-  let a = 1;
-  let tot = 0;
-  let n = ring.lattice;
-  for (let o = 0; o < ring.octaves; o++) {
-    s += a * pnoise(u, n, ring.seed * 7 + o);
-    tot += a;
-    a *= 0.38;
-    n *= 2;
-  }
-  const v = Math.min(1, Math.max(0, s / tot));
-  const swell = 0.55 + 0.45 * pnoise(u, Math.max(3, Math.floor((ring.lattice + 2) / 4)), ring.seed * 13 + 5);
-  const shaped = Math.pow(v, 1.35) * swell;
-  return ring.top + ring.amp * Math.min(1.15, Math.max(0, shaped / 0.68));
-}
-/** Highest possible crest of a ring (the shaping clamp). */
-export const ringCeiling = (ring: RingSpec): number => ring.top + ring.amp * 1.15;
-
-// ---------------------------------------------------------------------------
-// Cranes (Washi): one flight crosses the far sky in CRANE.crossing seconds,
-// then the sky stays empty for a gap hashed from the crossing index.
-
-export const CRANE = {
-  first: 18, // the first flight starts 18 s after the clock starts
-  crossing: 40,
-  gapMin: 50,
-  gapSpan: 40, // gap in [50, 90)
-  wingPeriod: 2.5,
-  R: 3380,
-  RSpan: 160,
-  h: 1240,
-  hSpan: 70,
-  halfArc: 54 * DEG,
-  centerSpan: 26 * DEG,
-  /** Silhouette scale: about 16 px nose to toe and 14 to 18 px across the wings
-   *  at the home view (the crossing is about 4300 units from the camera). */
-  size: 46,
-  /** Wing lengths in silhouette units: the arm to the wrist, then the hand. */
-  arm: 0.5,
-  hand: 0.78,
-  maxCount: 5,
-} as const;
-export const craneGap = (k: number): number => CRANE.gapMin + CRANE.gapSpan * lhash(911, k);
-
-export interface CraneState {
-  index: number;
-  start: number;
-  progress: number;
-  visible: boolean;
-}
-/** Which crossing owns time t, and how far along it is. Writes into `out`. */
-export function craneScheduleInto(t: number, out: CraneState, from?: { index: number; start: number }): CraneState {
-  let k = 0;
-  let start: number = CRANE.first;
-  if (from && from.start <= t) {
-    k = from.index;
-    start = from.start;
-  }
-  while (t >= start + CRANE.crossing + craneGap(k)) {
-    start += CRANE.crossing + craneGap(k);
-    k++;
-  }
-  out.index = k;
-  out.start = start;
-  out.progress = (t - start) / CRANE.crossing;
-  out.visible = out.progress >= 0 && out.progress <= 1;
-  return out;
-}
-export const craneSchedule = (t: number): CraneState =>
-  craneScheduleInto(t, { index: 0, start: 0, progress: 0, visible: false });
-
-export interface CranePath {
-  az0: number;
-  az1: number;
-  R: number;
-  h0: number;
-  h1: number;
-  count: number;
-}
-/** The path of crossing k: an arc of the far sky, alternating direction. */
-export function cranePathInto(k: number, out: CranePath): CranePath {
-  const c = (lhash(921, k) - 0.5) * 2 * CRANE.centerSpan;
-  const dir = k % 2 === 0 ? 1 : -1;
-  out.az0 = c - dir * CRANE.halfArc;
-  out.az1 = c + dir * CRANE.halfArc;
-  out.R = CRANE.R + lhash(922, k) * CRANE.RSpan;
-  out.h0 = CRANE.h + (lhash(923, k) - 0.5) * 2 * CRANE.hSpan;
-  out.h1 = CRANE.h + (lhash(924, k) - 0.5) * 2 * CRANE.hSpan;
-  out.count = 3 + Math.min(2, Math.floor(lhash(925, k) * 3));
-  return out;
-}
-/** Formation slots: lag along the path (fraction), rise (world units), wing phase. */
-export const CRANE_SLOTS: readonly [number, number, number][] = [
-  [0, 0, 0.0],
-  [0.012, 40, 0.31],
-  [0.015, -36, 0.67],
-  [0.025, 78, 0.12],
-  [0.03, -70, 0.83],
+/** Lobes at each end: [inset from the end, center height, radius], in units of
+ *  the band height. The first lobe rounds the full height; the second steps
+ *  out and down. */
+export const MIST_LOBES: readonly [number, number, number][] = [
+  [0.5, 0.5, 0.5],
+  [0.06, 0.29, 0.29],
 ];
-
-// ---------------------------------------------------------------------------
-// Quiet easing: a linear ramp over QUIET_EASE seconds, shaped by a smoothstep
-// where it is applied.
-export const QUIET_EASE = 2;
-export function easeQuiet(cur: number, target: number, dt: number): number {
-  const step = Math.max(0, dt) / QUIET_EASE;
-  return cur < target ? Math.min(target, cur + step) : Math.max(target, cur - step);
-}
-export const smooth01 = (x: number): number => {
-  const t = Math.min(1, Math.max(0, x));
-  return t * t * (3 - 2 * t);
-};
-
-// ---------------------------------------------------------------------------
-// Murmuration (Dusk): a dispersed cloud of specks, not one shape. Three
-// sub-flocks ride their own slow centers around the main center, so they split
-// and merge over 30 to 60 s. Inside each sub-flock a seed ball, flattened to a
-// sheet, is folded by bounded sums of sines. Every speck adds its own slow
-// jitter (periods 20 to 40 s), so no two specks share a path. Part of the time
-// a thin band of specks streams between sub-flocks 0 and 2. All of it runs in
-// the vertex shader. The functions below mirror it one for one.
-
-export const MURM = {
-  count: 880,
-  // In open sky above and right of the map's center (the moon is at -40 deg),
-  // at the home view about y 90 to 320 of 1440x900: clear of the title block
-  // on the left and of the Style card and pose control at the bottom right
-  // (tests/landscape.test.ts and the viewport screenshots).
-  az: 31 * DEG,
-  azSwing: 2 * DEG,
-  R: 3440,
-  RSwing: 90,
-  h: 990,
-  hSwing: 20,
-  /** Sub-flock half-axes in world units: along the azimuth, up, radial. The
-   *  half-height is half the half-length, and the tilt leans it further, so
-   *  each sub-flock reads round and turning. */
-  ax: 290,
-  ay: 175,
-  az3: 80,
-  /** The seed ball is flattened to a sheet, so the warp folds it into ribbons. */
-  sheet: 0.7,
-  /** Warp amplitudes and periods (seconds). */
-  warp1: 0.3,
-  warp2: 0.15,
-  stretch: 0.2,
-  tilt: 0.25,
-  pW1: 31,
-  pW2: 23,
-  pW3: 26,
-  pS: 37,
-  pTilt: 53,
-  pAz1: 97,
-  pAz2: 41,
-  pR: 73,
-  pH: 59,
-  /** Sub-flock home azimuths sit subBase apart; each swings by subAz, so two
-   *  can merge while the three rarely meet. Then height and radius swings. */
-  subBase: 3 * DEG,
-  subAz: 2.5 * DEG,
-  /** Home heights: sub-flock 0 sits subHBase higher, 1 lower, 2 level. */
-  subHBase: 55,
-  subH: 45,
-  subR: 140,
-  /** Per-speck jitter amplitudes (world units) and period range (seconds). */
-  jitX: 120,
-  jitY: 90,
-  jitZ: 40,
-  jitP0: 20,
-  jitP1: 40,
-  /** Share of specks that can join the streaming band, its period, and its
-   *  half-thickness in height. */
-  streamFrac: 0.12,
-  pStream: 90,
-  streamTh: 20,
-  /** The band's least length in azimuth (rad). */
-  streamLen: 7 * DEG,
-  /** Speck size range in CSS px (by seed). */
-  px0: 1.5,
-  px1: 3,
-} as const;
-
-/** Sub-flock periods (s) and phases for the azimuth, height, and radius swings. */
-export const MURM_SUBS: readonly (readonly [number, number, number, number, number, number])[] = [
-  [41, 0.0, 59, 1.1, 71, 0.3],
-  [53, 2.1, 47, 2.9, 61, 1.9],
-  [47, 4.2, 67, 4.4, 83, 3.7],
-];
-
-/** The flock center at time t: azimuth (rad), radius, height. Writes into out. */
-export function murmurationCenterInto(t: number, out: { az: number; R: number; h: number }): { az: number; R: number; h: number } {
-  out.az = MURM.az + MURM.azSwing * (0.65 * Math.sin((t * TAU) / MURM.pAz1) + 0.35 * Math.sin((t * TAU) / MURM.pAz2 + 1.3));
-  out.R = MURM.R + MURM.RSwing * Math.sin((t * TAU) / MURM.pR + 0.4);
-  out.h = MURM.h + MURM.hSwing * Math.sin((t * TAU) / MURM.pH + 1.0);
-  return out;
-}
-export const murmurationCenter = (t: number): { az: number; R: number; h: number } =>
-  murmurationCenterInto(t, { az: 0, R: 0, h: 0 });
-
-/** A sub-flock's offset from the main center: [azimuth (rad), height, radius]. */
-export function murmurationSub(k: number, t: number): [number, number, number] {
-  const s = MURM_SUBS[k];
-  return [
-    (k - 1) * MURM.subBase + MURM.subAz * Math.sin((t * TAU) / s[0] + s[1]),
-    [1, -1, 0][k] * MURM.subHBase + MURM.subH * Math.sin((t * TAU) / s[2] + s[3]),
-    MURM.subR * Math.sin((t * TAU) / s[4] + s[5]),
-  ];
-}
-
-/** A speck's offset inside its sub-flock, in world units along (tangent, up, radial). */
-export function murmurationLocal(p0: readonly [number, number, number], t: number): [number, number, number] {
-  let x = p0[0];
-  let y = p0[1] * MURM.sheet;
-  let z = p0[2];
-  const w1 = TAU / MURM.pW1;
-  const w2 = TAU / MURM.pW2;
-  const w3 = TAU / MURM.pW3;
-  const a1 = MURM.warp1;
-  const a2 = MURM.warp2;
-  let nx = x + a1 * Math.sin(y * 2.1 + t * w1 + 0.3);
-  let ny = y + a1 * Math.sin(z * 1.9 + t * w2 + 1.7);
-  let nz = z + a1 * Math.sin(x * 2.3 - t * w1 + 2.9);
-  x = nx;
-  y = ny;
-  z = nz;
-  nx = x + a2 * Math.sin(z * 3.1 - t * w2 + 4.1);
-  ny = y + a2 * Math.sin(x * 2.7 + t * w3 + 0.6);
-  nz = z + a2 * Math.sin(y * 3.3 + t * w1 + 5.2);
-  const s = 1 + MURM.stretch * Math.sin((t * TAU) / MURM.pS);
-  x = nx * s;
-  y = ny / Math.sqrt(s);
-  z = nz;
-  const tl = MURM.tilt * Math.sin((t * TAU) / MURM.pTilt);
-  const c = Math.cos(tl);
-  const sn = Math.sin(tl);
-  const wx = (x * c - y * sn * (MURM.ay / MURM.ax)) * MURM.ax;
-  const wy = (x * sn * (MURM.ax / MURM.ay) + y * c) * MURM.ay;
-  return [wx, wy, z * MURM.az3];
-}
-
-/** One speck's seeds: the seed point and four hashes in [0, 1). */
-export interface SpeckSeed {
-  p: [number, number, number];
-  /** Stream membership (below streamFrac) and alpha variation. */
-  g: number;
-  /** Place along the stream, and the jitter phase. */
-  u: number;
-  /** Home sub-flock (0, 1, 2). */
-  j: number;
-  /** Size, and the jitter period. */
-  s: number;
-}
-export function murmurationSeed(i: number): SpeckSeed {
-  const th = lhash(701, i) * TAU;
-  const ph = Math.acos(2 * lhash(702, i) - 1);
-  const r = Math.cbrt(lhash(703, i));
-  return {
-    // Uniform along the flock's length (no dense core), a ball across it.
-    p: [2 * lhash(708, i) - 1, r * Math.cos(ph), r * Math.sin(ph) * Math.sin(th)],
-    g: lhash(704, i),
-    u: lhash(705, i),
-    j: lhash(706, i),
-    s: lhash(707, i),
-  };
-}
-
-/** How far the streaming band is formed at time t (0 none, 1 full). */
-export const murmurationStream = (t: number): number =>
-  smooth01((0.5 + 0.5 * Math.sin((t * TAU) / MURM.pStream) - 0.1) / 0.8);
-
-/** Where one speck is at time t: azimuth (rad), radius, height. */
-export function murmurationSpeck(seed: SpeckSeed, t: number): { az: number; R: number; h: number } {
-  const c = murmurationCenter(t);
-  // Stream specks live in the sub-flock at their end of the band (0 or 2).
-  const k = seed.g < MURM.streamFrac ? (seed.u < 0.5 ? 0 : 2) : Math.min(2, Math.floor(seed.j * 3));
-  const sub = murmurationSub(k, t);
-  const loc = murmurationLocal(seed.p, t + k * 17.3);
-  const pj = MURM.jitP0 + (MURM.jitP1 - MURM.jitP0) * seed.s;
-  const ph = seed.u * TAU;
-  const jx = MURM.jitX * Math.sin((t * TAU) / pj + ph);
-  const jy = MURM.jitY * Math.sin((t * TAU) / (pj * 1.27) + ph * 3.1);
-  const jz = MURM.jitZ * Math.sin((t * TAU) / (pj * 0.83) + ph * 1.7);
-  let R = c.R + sub[2] + loc[2] + jz;
-  let az = c.az + sub[0] + (loc[0] + jx) / c.R;
-  let h = c.h + sub[1] + loc[1] + jy;
-  if (seed.g < MURM.streamFrac) {
-    const s0 = murmurationSub(0, t);
-    const s1 = murmurationSub(2, t);
-    const st = murmurationStream(t);
-    // The band runs past both sub-flocks and is never shorter than streamLen.
-    const v = seed.u * 1.8 - 0.4;
-    const sAz = c.az + s0[0] + (s1[0] - s0[0]) * v + (seed.u - 0.5) * MURM.streamLen + (0.6 * jx) / c.R;
-    const sH = c.h + s0[1] + (s1[1] - s0[1]) * v + MURM.streamTh * Math.sin(seed.s * 40.0 + (t * TAU) / pj);
-    const sR = c.R + s0[2] + (s1[2] - s0[2]) * v + 0.3 * jz;
-    az += (sAz - az) * st;
-    h += (sH - h) * st;
-    R += (sR - R) * st;
+/** Signed distance (world units, negative inside) of a mist band at arc
+ *  length X from its middle and height y above its flat bottom. */
+export function mistBandSd(b: MistBand, R: number, X: number, y: number): number {
+  const L = b.halfSpan * R;
+  const ax = Math.abs(X);
+  const body = Math.max(ax - (L - 0.5 * b.th), Math.max(-y, y - b.th));
+  let sd = body;
+  for (const [inset, cy, r] of MIST_LOBES) {
+    sd = Math.min(sd, Math.hypot(ax - (L - inset * b.th), y - cy * b.th) - r * b.th);
   }
-  return { az, R, h };
+  return Math.max(sd, -y);
+}
+
+// ---------------------------------------------------------------------------
+// Water: rows of short tapered crest strokes, receding toward the far shore.
+
+export const WATER = {
+  /** The shore radius (just inside ring 1) and the rows inward from it. */
+  shore: RINGS[0].R - 16,
+  rows: 8,
+  rowGap: 30,
+  /** Each row's gap grows by this share per row toward the viewer. */
+  rowGrow: 0.14,
+  /** Cell length along the row (world units), the stroke's share of a cell,
+   *  the crest's rise (sagitta) and the stroke's half-thickness. */
+  cell: 90,
+  sag: 7,
+  thick: 4,
+  /** Drift along the shore (radians per second): about a cell a minute. */
+  drift: 0.0006,
+} as const;
+/** Radius of crest row k. */
+export function waterRow(k: number): number {
+  let r = WATER.shore;
+  for (let i = 0; i < k; i++) r -= WATER.rowGap * (1 + WATER.rowGrow * i);
+  return r;
 }
 
 // ---------------------------------------------------------------------------
 // Palettes (sRGB hex). Washi uses the preview sheet's ridge, crest, and peak
-// colors (the designer chose the stronger ridges): Washi gold and teal keep
-// 2.5:1 or more on every ring body and crest band (tests/landscape.test.ts).
+// colors: Washi gold and teal keep 2.5:1 or more on every ring body and crest
+// band (tests/landscape.test.ts).
 
 export interface LandPalette {
   rings: [number, number, number, number];
@@ -465,8 +167,13 @@ export interface LandPalette {
   crestOp: [number, number, number, number];
   peak: number;
   peakTop: number;
+  peakBase: number;
   cap: number;
   capOp: number;
+  glow: number;
+  glowOp: number;
+  gully: number;
+  gullyOp: number;
   peakLine: number;
   peakLineOp: number;
   falls: number;
@@ -475,6 +182,11 @@ export interface LandPalette {
   floorOp: number;
   wave: number;
   waveOp: number;
+  /** Moon path on the water (Dusk): the glint color and its strength. */
+  glint: number;
+  glintOp: number;
+  mistLine: number;
+  mistLineOp: number;
   /** Sun or moon: disc center, disc edge, halo inner, halo outer. */
   disc0: number;
   disc1: number;
@@ -483,30 +195,65 @@ export interface LandPalette {
   haloOp: number;
   discScale: number;
   haloScale: number;
+  /** Cranes: plumage, the black block and neck, legs, cap, bill, key line. */
+  craneWhite: number;
+  craneBlack: number;
+  craneLeg: number;
+  craneCap: number;
+  craneBill: number;
+  craneLine: number;
+  craneLineOp: number;
+  craneOp: number;
+  /** The murmuration's ink. */
   bird: number;
   birdOp: number;
+  /** Pines: bark and cracks, pads and their underside, key line, moon rim. */
+  bark: number;
+  crack: number;
+  pad: number;
+  padDark: number;
+  pineLine: number;
+  pineLineOp: number;
+  rim: number;
+  rimOp: number;
+  farPine: number;
+  farPineOp: number;
+  /** Reeds: stems and leaves, panicles. */
+  reed: number;
+  plume: number;
+  reedOp: number;
 }
 
 export const LAND: { washi: LandPalette; dusk: LandPalette } = {
   washi: {
-    // near (grey-green) to far (pale Prussian blue)
-    rings: [0xcbd3c6, 0xcfd8d0, 0xd2dbdb, 0xd6dfe4],
+    // near (grey-green) to far (pale Prussian blue); the far two print paler,
+    // as distance layers
+    rings: [0xcbd3c6, 0xcfd8d0, 0xd7dfdf, 0xdfe6e9],
     crest: 0x6d889f, // ridge-top bokashi ink (Prussian grey)
     // Preview opacities 0.20 / 0.18 / 0.16 / 0.14, capped on the two near rings
     // so the deepest crest ink keeps 2.5:1 against Washi gold.
-    crestOp: [0.055, 0.13, 0.16, 0.14],
+    crestOp: [0.055, 0.13, 0.15, 0.12],
     peak: 0xc9d5df,
     peakTop: 0x9fb4c8,
-    cap: 0xf5f3ee,
-    capOp: 0.96,
+    peakBase: 0xe3e5dd,
+    cap: 0xf7f5ef,
+    capOp: 0.97,
+    glow: 0xf7f5ef,
+    glowOp: 0,
+    gully: 0x7d93aa,
+    gullyOp: 0.32,
     peakLine: 0x2b4a70,
     peakLineOp: 0.3,
     falls: 0xf8f6f1,
     fallsOp: 0.38,
     floor: 0x9fb2bf,
-    floorOp: 0.12,
+    floorOp: 0.18,
     wave: 0x2b4a70,
-    waveOp: 0.4,
+    waveOp: 0.75,
+    glint: 0xf8f6f1,
+    glintOp: 0,
+    mistLine: 0x6d889f,
+    mistLineOp: 0.3,
     disc0: 0xe2683e,
     disc1: 0xe57a52,
     halo0: 0xec9a6c,
@@ -514,8 +261,29 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     haloOp: 0.34,
     discScale: 1,
     haloScale: 4.2,
+    craneWhite: 0xf7f3ea,
+    craneBlack: 0x1c1a17,
+    craneLeg: 0x34302b,
+    craneCap: 0xc8372d,
+    craneBill: 0x9a9468,
+    craneLine: 0x1c1a17,
+    craneLineOp: 0.5,
+    craneOp: 0.96,
     bird: 0x1c1a17,
     birdOp: 0.8,
+    bark: 0x3b342c,
+    crack: 0x7a6d5c,
+    pad: 0x4f6b4f, // pine green
+    padDark: 0x2f4637,
+    pineLine: 0x1c1a17,
+    pineLineOp: 0.55,
+    rim: 0xf7f3ea,
+    rimOp: 0,
+    farPine: 0x51667a,
+    farPineOp: 0.8,
+    reed: 0x5f7556,
+    plume: 0x8d7352,
+    reedOp: 0.92,
   },
   dusk: {
     rings: [0x24365a, 0x2b3e63, 0x33486d, 0x3d5379],
@@ -523,8 +291,13 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     crestOp: [0.42, 0.36, 0.3, 0.26],
     peak: 0x3b5179,
     peakTop: 0x2a3c60,
+    peakBase: 0x3b5179,
     cap: 0x9aa6bf,
-    capOp: 0.62,
+    capOp: 0.66,
+    glow: 0xd9a493, // alpenglow on the summit
+    glowOp: 0.55,
+    gully: 0x1d2c4a,
+    gullyOp: 0.5,
     peakLine: 0xcdd6e6,
     peakLineOp: 0.16,
     falls: 0xb6bfd3,
@@ -532,7 +305,11 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     floor: 0x1b2b4a,
     floorOp: 0.22,
     wave: 0xb8c7de,
-    waveOp: 0.3,
+    waveOp: 0.45,
+    glint: 0xf1ead8,
+    glintOp: 0.7,
+    mistLine: 0x0e182e,
+    mistLineOp: 0.35,
     disc0: 0xf1ead8,
     disc1: 0xdcd6c8,
     halo0: 0xd8dfeb,
@@ -540,9 +317,31 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     haloOp: 0.2,
     discScale: 0.62,
     haloScale: 4.6,
+    // Pale moonlit plumage, the block in night ink.
+    craneWhite: 0xcfd6e3,
+    craneBlack: 0x0f1729,
+    craneLeg: 0x1a2133,
+    craneCap: 0xa8524a,
+    craneBill: 0x7c8090,
+    craneLine: 0x0f1729,
+    craneLineOp: 0.35,
+    craneOp: 0.85,
     // Mid slate ink: it shows against the deep aizuri band and the lighter sky.
     bird: 0x7d8ea8,
-    birdOp: 0.5,
+    birdOp: 0.62,
+    bark: 0x0d1526,
+    crack: 0x1a2640,
+    pad: 0x101b30,
+    padDark: 0x0b1424,
+    pineLine: 0x2a3856, // needles print a shade lighter than the silhouette
+    pineLineOp: 0.55,
+    rim: 0xc8d2e4,
+    rimOp: 0.3,
+    farPine: 0x15213b,
+    farPineOp: 0.85,
+    reed: 0x111b2f,
+    plume: 0x1f2b45,
+    reedOp: 0.95,
   },
 };
 
@@ -567,28 +366,7 @@ export function crestLinear(ringHex: number, crestHex: number, op: number): [num
 }
 
 // ---------------------------------------------------------------------------
-// GLSL
-
-const f = (v: number): string => (Number.isInteger(v) ? v.toFixed(1) : String(v));
-
-const NOISE_GLSL = /* glsl */ `
-  float lhash(int seed, int i) {
-    uint h = uint(i) * 0x9E3779B1u + uint(seed) * 0x85EBCA77u;
-    h ^= h >> 15u; h *= 0x2C1B3C6Du; h ^= h >> 12u; h *= 0x297A2D39u; h ^= h >> 15u;
-    return float(h >> 8u) / 16777216.0;
-  }
-  float crom(float p0, float p1, float p2, float p3, float t) {
-    return 0.5 * (2.0 * p1 + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
-      + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t);
-  }
-  float pnoise(float u, int N, int seed) {
-    float x = fract(u) * float(N);
-    int i = min(int(floor(x)), N - 1);
-    float t = x - float(i);
-    int s = seed * 977 + N;
-    return crom(lhash(s, (i - 1 + N) % N), lhash(s, i), lhash(s, (i + 1) % N), lhash(s, (i + 2) % N), t);
-  }
-`;
+// GLSL: rings, mist, floor, sky body.
 
 const RING_VERT = /* glsl */ `
   varying vec3 vLocal;
@@ -628,6 +406,19 @@ const RING_FRAG = /* glsl */ `
     float shaped = pow(v, 1.35) * swell;
     return uTop + uAmp * clamp(shaped / 0.68, 0.0, 1.15);
   }
+  // Brush hairs: value noise, periodic in the turn u (N cells), smooth in v.
+  float hairs(float u, float v, int N, int seed) {
+    float x = fract(u) * float(N);
+    int i0 = int(floor(x));
+    int i1 = (i0 + 1) % N;
+    float fx = smoothstep(0.0, 1.0, fract(x));
+    float j = floor(v);
+    float fy = smoothstep(0.0, 1.0, v - j);
+    int j0 = int(j) + 4096;
+    float a = mix(lhash(seed + j0 * 31, i0), lhash(seed + j0 * 31, i1), fx);
+    float b = mix(lhash(seed + (j0 + 1) * 31, i0), lhash(seed + (j0 + 1) * 31, i1), fx);
+    return mix(a, b, fy);
+  }
   void main() {
     float theta = atan(vLocal.x, -vLocal.z);
     float d = ridgeH(theta) - vLocal.y; // > 0 below the crest
@@ -635,9 +426,16 @@ const RING_FRAG = /* glsl */ `
     float w = max(fwidth(d), 1e-3);
     float cover = clamp(d / w + 0.5, 0.0, 1.0);
     if (cover <= 0.0) discard;
-    // Crest bokashi: the ink pools at the crest and fades down the slope.
-    float k = 1.0 - smoothstep(0.0, ${f(CREST_DEPTH)}, d);
-    vec3 col = mix(uColor, uCrest, uCrestOp * k * k);
+    // Dry-brush crest bokashi: solid ink at the crest, a ragged lower edge,
+    // and horizontal hairs where the brush ran dry (crestInk in core.ts).
+    float u = theta / 6.28318530718;
+    float nEdge = pnoise(u, 90, uSeed + 3);
+    float nHair = hairs(u, max(d, 0.0) / 5.0, 160, uSeed * 5 + 17);
+    float reach = ${f(CREST_DEPTH)} * (0.7 + 0.55 * nEdge);
+    float k = 1.0 - smoothstep(0.0, reach, d);
+    float hair = clamp((nHair - 0.28) / 0.34, 0.0, 1.0);
+    float dry = 1.0 - (1.0 - hair) * 0.75 * (1.0 - k);
+    vec3 col = mix(uColor, uCrest, uCrestOp * k * k * dry);
     // Fade to mist at the base: the field shows through.
     float mist = smoothstep(uFade1, uFade0, vLocal.y);
     float a = cover * mist;
@@ -672,29 +470,48 @@ const MIST_VERT = /* glsl */ `
 `;
 const MIST_FRAG = /* glsl */ `
   uniform vec4 uBands[4];
+  uniform float uR;
   uniform float uOpacity;
+  uniform vec3 uLine;
+  uniform float uLineOp;
   varying vec3 vLocal;
   varying vec3 vWorld;
   ${FIELD_SAMPLE_GLSL}
+  // The band shape (mistBandSd in landscape.ts): a flat body, two lobes at
+  // each end, cut flat at the bottom.
+  float bandSd(float X, float y, float L, float th) {
+    float ax = abs(X);
+    float sd = max(ax - (L - 0.5 * th), max(-y, y - th));
+    sd = min(sd, length(vec2(ax - (L - ${f(MIST_LOBES[0][0])} * th), y - ${f(MIST_LOBES[0][1])} * th)) - ${f(MIST_LOBES[0][2])} * th);
+    sd = min(sd, length(vec2(ax - (L - ${f(MIST_LOBES[1][0])} * th), y - ${f(MIST_LOBES[1][1])} * th)) - ${f(MIST_LOBES[1][2])} * th);
+    return max(sd, -y);
+  }
   void main() {
     float theta = atan(vLocal.x, -vLocal.z);
     float a = 0.0;
+    float line = 0.0;
     for (int k = 0; k < 4; k++) {
       vec4 b = uBands[k];
       float da = mod(theta - b.x + 3.14159265, 6.28318530718) - 3.14159265;
-      float s = abs(da) / b.y;
-      if (s >= 1.0) continue;
-      // Stadium profile: flat top and bottom, rounded ends.
-      float prof = sqrt(max(0.0, 1.0 - pow(s, 6.0)));
-      float t = b.w * prof;
-      float y = vLocal.y - b.z;
-      float up = 1.0 - smoothstep(t * 0.4, t, y);
-      float dn = smoothstep(-t * 0.8, -t * 0.3, y);
-      a = max(a, up * dn * prof);
+      if (abs(da) > b.y * 1.2) continue;
+      float X = da * uR;
+      float y = vLocal.y - (b.z - 0.5 * b.w);
+      float sd = bandSd(X, y, b.y * uR, b.w);
+      float fw = max(fwidth(sd), 1e-3);
+      float c = clamp(0.5 - sd / fw, 0.0, 1.0);
+      a = max(a, c);
+      // A thin darker underline along the flat bottom.
+      float fy = max(fwidth(y), 1e-3);
+      float ul = (1.0 - smoothstep(0.4 * fy, 1.4 * fy, y)) * step(-0.5 * fy, y);
+      ul *= clamp(0.5 - (abs(X) - (b.y * uR - 0.6 * b.w)) / max(fwidth(X), 1e-3), 0.0, 1.0);
+      line = max(line, ul);
     }
     a *= uOpacity;
-    if (a < 0.003) discard;
-    gl_FragColor = vec4(fieldBehind(vWorld), a);
+    line *= uLineOp;
+    float alpha = max(a, line);
+    if (alpha < 0.003) discard;
+    vec3 col = mix(fieldBehind(vWorld), uLine, line / max(alpha, 1e-4));
+    gl_FragColor = vec4(col, alpha);
   }
 `;
 
@@ -704,6 +521,9 @@ const FLOOR_FRAG = /* glsl */ `
   uniform vec3 uFloor;
   uniform vec3 uWave;
   uniform float uWaveOp;
+  uniform vec3 uGlint;
+  uniform float uGlintOp;
+  uniform vec2 uMoonXZ; // unit direction toward the moon in the xz plane
   varying vec3 vLocal;
   varying vec3 vWorld;
   ${FIELD_SAMPLE_GLSL}
@@ -712,24 +532,26 @@ const FLOOR_FRAG = /* glsl */ `
     h ^= h >> 15u; h *= 0x2C1B3C6Du; h ^= h >> 12u; h *= 0x297A2D39u; h ^= h >> 15u;
     return float(h >> 8u) / 16777216.0;
   }
-  // One row of fine wave lines at radius rRow: hashed segments around the shore,
-  // drifting slowly along the shore. Returns line coverage (about 1 px wide).
-  float waveRow(float r, float phi, float rRow, int seed, float drift, float cells) {
+  // One row of short tapered crest strokes at radius rRow: a small arc that
+  // bows toward the far shore, thick in the middle and pointed at both ends.
+  // keep: the share of cells that hold a stroke. Returns coverage.
+  float crestRow(float r, float phi, float rRow, int seed, float drift, float keep) {
+    float cells = floor(6.28318530718 * rRow / ${f(WATER.cell)});
     float ph = fract((phi - drift) / 6.28318530718) * cells;
     float ci = floor(ph);
     float s = ph - ci;
     int id = int(ci);
-    if (lh(seed, id) > 0.62) return 0.0; // most cells hold one stroke
-    float c0 = 0.2 + lh(seed + 1, id) * 0.2;
-    float c1 = c0 + 0.35 + lh(seed + 2, id) * 0.25;
+    if (lh(seed, id) > keep) return 0.0;
+    float c0 = 0.08 + lh(seed + 1, id) * 0.3;
+    float c1 = c0 + 0.3 + lh(seed + 2, id) * 0.25;
     if (s < c0 || s > c1) return 0.0;
     float u = (s - c0) / (c1 - c0);
-    float wob = 3.0 * sin(u * 3.14159 * (2.0 + floor(lh(seed + 3, id) * 2.0)) + lh(seed + 4, id) * 6.0);
-    float dr = abs(r - (rRow + wob));
-    float px = dr / max(fwidth(r), 1e-3);
-    float line = 1.0 - smoothstep(0.35, 1.1, px);
-    // thin ends, fuller middle
-    return line * mix(0.45, 1.0, smoothstep(0.0, 0.3, u) * (1.0 - smoothstep(0.7, 1.0, u)));
+    float off = ${f(WATER.sag)} * 4.0 * u * (1.0 - u) + (lh(seed + 3, id) - 0.5) * 5.0;
+    float tw = ${f(WATER.thick)} * pow(sin(3.14159265 * u), 0.8);
+    float fr = max(fwidth(r), 1e-3);
+    float te = max(tw, 0.5 * fr);
+    float dr = abs(r - (rRow + off));
+    return clamp((te - dr) / fr + 0.5, 0.0, 1.0) * (tw / te);
   }
   void main() {
     float r = length(vLocal.xz);
@@ -745,89 +567,36 @@ const FLOOR_FRAG = /* glsl */ `
     float edge = 1.0 - smoothstep(${f(RINGS[0].R - 40)}, ${f(RINGS[0].R - 4)}, r);
     vec3 field = fieldBehind(vWorld);
     vec3 col = mix(field, uFloor, tint);
+    // The moon path (Dusk): from the camera toward the moon's azimuth, the
+    // strokes thicken in number and print pale.
+    vec3 camL = cameraPosition - (vWorld - vLocal); // the group only translates
+    vec2 toF = vLocal.xz - camL.xz;
+    float onPath = smoothstep(0.988, 0.9985, dot(normalize(toF), uMoonXZ)) * step(0.001, uGlintOp);
     float lines = 0.0;
-    lines = max(lines, waveRow(r, phi, ${f(RINGS[0].R - 22)}, 31, uTime * 0.0042, 34.0));
-    lines = max(lines, waveRow(r, phi, ${f(RINGS[0].R - 50)}, 41, -uTime * 0.0031, 30.0) * 0.84);
-    lines = max(lines, waveRow(r, phi, ${f(RINGS[0].R - 84)}, 53, uTime * 0.0024, 26.0) * 0.68);
-    lines *= uWaveOp * far * smoothstep(${f(RINGS[0].R - 160)}, ${f(RINGS[0].R - 70)}, r);
-    col = mix(col, uWave, lines);
-    float a = max(tint, lines) * edge;
+    for (int k = 0; k < ${WATER.rows}; k++) {
+      float rr = ${f(WATER.shore)};
+      for (int i = 0; i < ${WATER.rows}; i++) {
+        if (i >= k) break;
+        rr -= ${f(WATER.rowGap)} * (1.0 + ${f(WATER.rowGrow)} * float(i));
+      }
+      if (abs(r - rr) > 20.0) continue;
+      float dir = mod(float(k), 2.0) < 0.5 ? 1.0 : 0.8;
+      float drift = uTime * ${f(WATER.drift)} * dir + float(k) * 0.37;
+      float keep = mix(0.55, 0.9, onPath);
+      float fade = 1.0 - float(k) / ${f(WATER.rows + 1)};
+      lines = max(lines, crestRow(r, phi, rr, 31 + k * 7, drift, keep) * fade);
+    }
+    lines *= far * smoothstep(${f(RINGS[0].R - 360)}, ${f(RINGS[0].R - 200)}, r);
+    // The strokes are a grazing-view convention: seen from steeply above they
+    // would print as large hooks, so they fade there.
+    lines *= 1.0 - smoothstep(0.55, 0.75, abs(normalize(vWorld - cameraPosition).y));
+    vec3 ink = mix(uWave, uGlint, onPath);
+    float inkOp = mix(uWaveOp, uGlintOp, onPath);
+    col = mix(col, ink, lines * inkOp);
+    float a = max(tint, lines * inkOp) * edge;
     if (a < 0.002) discard;
     // Opaque-composite of the field with the tint, then alpha so the edge melts.
     gl_FragColor = vec4(col, a / max(a, 1e-4) * edge);
-  }
-`;
-
-const PEAK_VERT = /* glsl */ `
-  varying vec3 vLocal;
-  varying vec3 vWorld;
-  varying vec3 vNormalW;
-  void main() {
-    vLocal = position;
-    vec4 w = modelMatrix * vec4(position, 1.0);
-    vWorld = w.xyz;
-    vNormalW = normalize(mat3(modelMatrix) * normal);
-    gl_Position = projectionMatrix * viewMatrix * w;
-  }
-`;
-const PEAK_FRAG = /* glsl */ `
-  uniform float uTime;
-  uniform vec3 uPeak;
-  uniform vec3 uPeakTop;
-  uniform vec3 uCap;
-  uniform float uCapOp;
-  uniform vec3 uLine;
-  uniform float uLineOp;
-  uniform vec3 uFalls;
-  uniform float uFallsOp;
-  uniform float uFallsPhi;
-  uniform vec3 uTongue[7];
-  varying vec3 vLocal;
-  varying vec3 vWorld;
-  varying vec3 vNormalW;
-  uniform float uCamAz; // camera azimuth around the cone axis (fed per draw)
-  float wrapA(float a) { return mod(a + 3.14159265, 6.28318530718) - 3.14159265; }
-  void main() {
-    float d = ${f(PEAK.apex)} - vLocal.y; // depth below the summit
-    float phi = atan(vLocal.z, vLocal.x);
-    vec3 V = normalize(cameraPosition - vWorld);
-    float ndv = dot(normalize(vNormalW), V);
-    // Body: deeper just under the snow (summit bokashi), lifting to the body color.
-    vec3 col = mix(uPeakTop, uPeak, smoothstep(65.0, 300.0, d));
-    // Snowline: a closed curve whose depth swells into soft rounded tongues.
-    float snowD = ${f(PEAK.snow)};
-    for (int i = 0; i < 7; i++) {
-      vec3 tg = uTongue[i];
-      float da = wrapA(phi - tg.x) / tg.y;
-      snowD += tg.z * exp(-da * da);
-    }
-    snowD += 9.0 * sin(phi * 11.0 + 1.3);
-    // Tongues seen edge-on near the outline print as streaks: relax them there,
-    // by the azimuth from the camera's side of the cone (the preview's rule).
-    float dphi = abs(wrapA(phi - uCamAz));
-    float relax = 1.0 - smoothstep(0.7854, 1.2217, dphi); // full inside 45 deg, none past 70 deg
-    snowD = ${f(PEAK.snow)} + min(87.0, snowD - ${f(PEAK.snow)}) * relax;
-    float sd = snowD - d;
-    float capA = clamp(sd / max(fwidth(d), 1e-3) * 0.6 + 0.5, 0.0, 1.0);
-    col = mix(col, uCap, capA * uCapOp);
-    // Waterfall: one thin pale line down the face toward the map. A soft, slow
-    // swell of ink drifts down it (about 18 s per period); no hard dashes.
-    float rr = ${f(PEAK.rTop)} + ${f((PEAK.halfW - PEAK.rTop) / Math.pow(PEAK.halfD, PEAK.p))} * pow(max(d, 0.0), ${f(PEAK.p)});
-    // A straight fall (a meander aliases into dashes at one pixel wide).
-    float arc = wrapA(phi - uFallsPhi) * rr;
-    float fpx = abs(arc) / max(fwidth(arc), 1e-3);
-    float fallLine = 1.0 - smoothstep(0.6, 1.5, fpx);
-    float dashA = 0.85 + 0.15 * sin((d - uTime * 6.0) * 6.28318530718 / 110.0);
-    float fallSpan = smoothstep(snowD - 10.0, snowD + 30.0, d) * (1.0 - smoothstep(420.0, 600.0, d));
-    col = mix(col, uFalls, fallLine * dashA * fallSpan * uFallsOp * step(0.0, ndv));
-    // Hairline key-block contour on the upper outline only.
-    float line = 1.0 - smoothstep(0.0, 1.6 * max(fwidth(ndv), 1e-4), ndv);
-    line *= 1.0 - smoothstep(330.0, 470.0, d);
-    col = mix(col, uLine, line * uLineOp);
-    // The flank fades to the field well below the far ridge.
-    float a = 1.0 - smoothstep(${f(PEAK.fade0)}, ${f(PEAK.fade1)}, d);
-    if (a < 0.003) discard;
-    gl_FragColor = vec4(col, a);
   }
 `;
 
@@ -868,197 +637,6 @@ const SKY_FRAG = /* glsl */ `
   }
 `;
 
-const CRANE_VERT = /* glsl */ `
-  attribute vec4 aSlot; // lag, rise, wing phase, index
-  uniform float uProg;
-  uniform float uAz0;
-  uniform float uAz1;
-  uniform float uR;
-  uniform float uH0;
-  uniform float uH1;
-  uniform float uCount;
-  uniform float uTime;
-  uniform float uAlpha;
-  uniform float uSize;
-  varying vec2 vUv;
-  varying float vA;
-  // Wing joints in silhouette space (x forward, y up): wrist.xy, tip.xy.
-  varying vec4 vNear;
-  varying vec4 vFar;
-  vec3 pathAt(float p, float rise) {
-    float az = mix(uAz0, uAz1, p);
-    float h = mix(uH0, uH1, p) + rise;
-    return vec3(uR * sin(az), h, -uR * cos(az));
-  }
-  // A wing in silhouette space, drawn the way a print draws it rather than as
-  // a projection. A is the arm's angle above the backward horizontal (+ up).
-  // The primaries bend back toward the horizontal and lag the beat. The wing
-  // shortens a little as it swings through level (it points at the viewer).
-  vec4 wing(float A, float lag, float len) {
-    vec2 arm = ${f(CRANE.arm)} * len * vec2(-cos(A), sin(A));
-    float H = 0.55 * A + lag;
-    vec2 hand = arm + ${f(CRANE.hand)} * len * vec2(-cos(H), sin(H));
-    return vec4(arm, hand);
-  }
-  void main() {
-    float p = uProg - aSlot.x;
-    float rise = aSlot.y + 5.0 * sin(uTime * 6.28318 / 9.0 + aSlot.z * 6.28318);
-    vec4 v1 = modelViewMatrix * vec4(pathAt(p, rise), 1.0);
-    vec4 v2 = modelViewMatrix * vec4(pathAt(p + 0.004, rise), 1.0);
-    // Screen direction of flight, so the silhouette flies along its path.
-    vec2 dir = v2.xy / max(-v2.z, 1.0) - v1.xy / max(-v1.z, 1.0);
-    dir = length(dir) > 1e-7 ? normalize(dir) : vec2(1.0, 0.0);
-    vec2 perp = vec2(-dir.y, dir.x);
-    if (perp.y < 0.0) perp = -perp;
-    vec4 mv = v1;
-    mv.xy += (position.x * dir + position.y * perp) * uSize;
-    gl_Position = projectionMatrix * mv;
-    vUv = position.xy;
-    float ends = smoothstep(0.0, 0.08, p) * (1.0 - smoothstep(0.92, 1.0, p));
-    vA = uAlpha * ends * step(aSlot.w + 0.5, uCount);
-    // A slow beat (period ${CRANE.wingPeriod} s) between a raised and a lowered pose.
-    float ph = 6.28318530718 * uTime / ${f(CRANE.wingPeriod)} + aSlot.z * 6.28318530718;
-    float beat = sin(ph);
-    float w = 0.5 + 0.5 * beat;
-    float lag = -0.3 * cos(ph);
-    float len = 0.72 + 0.28 * abs(beat);
-    // Near wing from about 49 deg below to 66 deg above the back line. The far
-    // wing rides 29 deg higher, so the pair opens into a V when raised.
-    float A = mix(-0.85, 1.15, w);
-    vNear = wing(A, lag, len);
-    vFar = wing(min(A + 0.5, 1.6), lag, len * 0.92);
-  }
-`;
-const CRANE_FRAG = /* glsl */ `
-  uniform vec3 uInk;
-  varying vec2 vUv;
-  varying float vA;
-  varying vec4 vNear;
-  varying vec4 vFar;
-  // Signed-distance tapered stroke from a (radius ra) to b (radius rb), as
-  // anti-aliased coverage. A stroke thinner than a pixel draws one pixel wide
-  // with its ink thinned, so the line stays continuous and never swells.
-  float stroke(vec2 p, vec2 a, vec2 b, float ra, float rb, float px) {
-    vec2 pa = p - a;
-    vec2 ba = b - a;
-    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
-    float d = length(pa - ba * h);
-    float r = mix(ra, rb, h);
-    float re = max(r, 0.5 * px);
-    return clamp((re - d) / px + 0.5, 0.0, 1.0) * sqrt(r / re);
-  }
-  void main() {
-    if (vA <= 0.001) discard;
-    vec2 p = vUv;
-    float px = max(fwidth(p.x) + fwidth(p.y), 1e-4) * 0.7071;
-    // Silhouette units: x forward, y up, the quad spans -1..1.
-    vec2 shoulder = vec2(0.12, 0.02);
-    float ink = 0.0;
-    // Long neck forward, small head, a fine beak.
-    ink = max(ink, stroke(p, vec2(0.26, 0.03), vec2(0.72, 0.1), 0.032, 0.02, px));
-    ink = max(ink, stroke(p, vec2(0.72, 0.1), vec2(0.77, 0.105), 0.045, 0.04, px));
-    ink = max(ink, stroke(p, vec2(0.76, 0.105), vec2(0.9, 0.085), 0.015, 0.006, px));
-    // Body: a slim tapered spindle.
-    ink = max(ink, stroke(p, vec2(0.28, 0.03), vec2(-0.22, -0.01), 0.08, 0.045, px));
-    // Legs trailing straight behind, a little apart.
-    ink = max(ink, stroke(p, vec2(-0.2, -0.03), vec2(-0.78, -0.07), 0.016, 0.009, px));
-    ink = max(ink, stroke(p, vec2(-0.2, -0.03), vec2(-0.76, -0.11), 0.014, 0.008, px));
-    // Two long tapered wings: arm to the wrist, then the swept primaries.
-    float nearW = max(stroke(p, shoulder, shoulder + vNear.xy, 0.085, 0.05, px),
-                      stroke(p, shoulder + vNear.xy, shoulder + vNear.zw, 0.05, 0.008, px));
-    float farW = max(stroke(p, shoulder, shoulder + vFar.xy, 0.06, 0.04, px),
-                     stroke(p, shoulder + vFar.xy, shoulder + vFar.zw, 0.04, 0.006, px));
-    ink = max(ink, max(nearW, 0.8 * farW));
-    float a = ink * vA;
-    if (a < 0.003) discard;
-    gl_FragColor = vec4(uInk, a);
-  }
-`;
-
-const MURM_VERT = /* glsl */ `
-  attribute vec4 aSeed; // g (stream, alpha), u (stream place, jitter phase), j (sub-flock), s (size, jitter period)
-  uniform float uTime;
-  uniform float uAlpha;
-  uniform float uPx;
-  varying float vA;
-  const float TAU = 6.28318530718;
-  vec3 local(vec3 p0, float t) {
-    vec3 p = p0 * vec3(1.0, ${f(MURM.sheet)}, 1.0);
-    float w1 = TAU / ${f(MURM.pW1)};
-    float w2 = TAU / ${f(MURM.pW2)};
-    float w3 = TAU / ${f(MURM.pW3)};
-    p = p + ${f(MURM.warp1)} * vec3(sin(p.y * 2.1 + t * w1 + 0.3), sin(p.z * 1.9 + t * w2 + 1.7), sin(p.x * 2.3 - t * w1 + 2.9));
-    p = p + ${f(MURM.warp2)} * vec3(sin(p.z * 3.1 - t * w2 + 4.1), sin(p.x * 2.7 + t * w3 + 0.6), sin(p.y * 3.3 + t * w1 + 5.2));
-    float s = 1.0 + ${f(MURM.stretch)} * sin(t * TAU / ${f(MURM.pS)});
-    p.x *= s;
-    p.y /= sqrt(s);
-    float tl = ${f(MURM.tilt)} * sin(t * TAU / ${f(MURM.pTilt)});
-    float c = cos(tl);
-    float sn = sin(tl);
-    return vec3(
-      (p.x * c - p.y * sn * ${f(MURM.ay / MURM.ax)}) * ${f(MURM.ax)},
-      (p.x * sn * ${f(MURM.ax / MURM.ay)} + p.y * c) * ${f(MURM.ay)},
-      p.z * ${f(MURM.az3)});
-  }
-  // Sub-flock offset from the main center: (azimuth, height, radius).
-  vec3 sub(float k, float t) {
-    vec3 a = k < 0.5 ? vec3(${[MURM_SUBS[0][0], MURM_SUBS[0][2], MURM_SUBS[0][4]].map(f).join(", ")})
-           : (k < 1.5 ? vec3(${[MURM_SUBS[1][0], MURM_SUBS[1][2], MURM_SUBS[1][4]].map(f).join(", ")})
-                      : vec3(${[MURM_SUBS[2][0], MURM_SUBS[2][2], MURM_SUBS[2][4]].map(f).join(", ")}));
-    vec3 b = k < 0.5 ? vec3(${[MURM_SUBS[0][1], MURM_SUBS[0][3], MURM_SUBS[0][5]].map(f).join(", ")})
-           : (k < 1.5 ? vec3(${[MURM_SUBS[1][1], MURM_SUBS[1][3], MURM_SUBS[1][5]].map(f).join(", ")})
-                      : vec3(${[MURM_SUBS[2][1], MURM_SUBS[2][3], MURM_SUBS[2][5]].map(f).join(", ")}));
-    return vec3((k - 1.0) * ${f(MURM.subBase)}, (k < 0.5 ? 1.0 : (k < 1.5 ? -1.0 : 0.0)) * ${f(MURM.subHBase)}, 0.0)
-      + vec3(${f(MURM.subAz)}, ${f(MURM.subH)}, ${f(MURM.subR)}) * sin(t * TAU / a + b);
-  }
-  void main() {
-    float t = uTime;
-    float g = aSeed.x;
-    float u = aSeed.y;
-    float k = g < ${f(MURM.streamFrac)} ? (u < 0.5 ? 0.0 : 2.0) : min(2.0, floor(aSeed.z * 3.0));
-    float sz = aSeed.w;
-    float caz = ${f(MURM.az)} + ${f(MURM.azSwing)} * (0.65 * sin(t * TAU / ${f(MURM.pAz1)}) + 0.35 * sin(t * TAU / ${f(MURM.pAz2)} + 1.3));
-    float cR = ${f(MURM.R)} + ${f(MURM.RSwing)} * sin(t * TAU / ${f(MURM.pR)} + 0.4);
-    float ch = ${f(MURM.h)} + ${f(MURM.hSwing)} * sin(t * TAU / ${f(MURM.pH)} + 1.0);
-    vec3 so = sub(k, t);
-    vec3 lo = local(position, t + k * 17.3);
-    float pj = ${f(MURM.jitP0)} + ${f(MURM.jitP1 - MURM.jitP0)} * sz;
-    float ph = u * TAU;
-    float jx = ${f(MURM.jitX)} * sin(t * TAU / pj + ph);
-    float jy = ${f(MURM.jitY)} * sin(t * TAU / (pj * 1.27) + ph * 3.1);
-    float jz = ${f(MURM.jitZ)} * sin(t * TAU / (pj * 0.83) + ph * 1.7);
-    float R = cR + so.z + lo.z + jz;
-    float az = caz + so.x + (lo.x + jx) / cR;
-    float h = ch + so.y + lo.y + jy;
-    if (g < ${f(MURM.streamFrac)}) {
-      vec3 s0 = sub(0.0, t);
-      vec3 s1 = sub(2.0, t);
-      float st = smoothstep(0.1, 0.9, 0.5 + 0.5 * sin(t * TAU / ${f(MURM.pStream)}));
-      float v = u * 1.8 - 0.4;
-      float sAz = caz + s0.x + (s1.x - s0.x) * v + (u - 0.5) * ${f(MURM.streamLen)} + 0.6 * jx / cR;
-      float sH = ch + s0.y + (s1.y - s0.y) * v + ${f(MURM.streamTh)} * sin(sz * 40.0 + t * TAU / pj);
-      float sR = cR + s0.z + (s1.z - s0.z) * v + 0.3 * jz;
-      az = mix(az, sAz, st);
-      h = mix(h, sH, st);
-      R = mix(R, sR, st);
-    }
-    vec3 world = vec3(R * sin(az), h, -R * cos(az));
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(world, 1.0);
-    gl_PointSize = mix(${f(MURM.px0)}, ${f(MURM.px1)}, sz) * uPx;
-    vA = uAlpha * (0.7 + 0.3 * g);
-  }
-`;
-const MURM_FRAG = /* glsl */ `
-  uniform vec3 uInk;
-  varying float vA;
-  void main() {
-    float d = length(gl_PointCoord - 0.5) * 2.0;
-    float a = (1.0 - smoothstep(0.45, 1.0, d)) * vA;
-    if (a < 0.003) discard;
-    gl_FragColor = vec4(uInk, a);
-  }
-`;
-
 // ---------------------------------------------------------------------------
 
 export interface LandscapeUpdateOpts {
@@ -1078,12 +656,14 @@ export interface LandscapeHandle {
   dispose(): void;
 }
 
-/** The phase reduced motion holds the water, mist, and waterfall at. */
+/** The phase reduced motion holds the water, mist, waterfall, and reeds at. */
 export const FROZEN_T = 240;
 /** How far the landscape drops at the Ascent (the map is taller there). */
 export const ASCENT_DROP = 70;
+/** How far the left framing pine and the reeds fade at the Ascent, where the
+ *  depth scale owns the left edge of the screen. */
+export const ASCENT_SIDE_FADE = 0.85;
 
-const linColor = (hex: number): THREE.Color => new THREE.Color().setHex(hex);
 const srgb01 = (hex: number): THREE.Vector3 =>
   new THREE.Vector3(((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255);
 
@@ -1100,6 +680,7 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     fragmentShader: string,
     uniforms: Record<string, THREE.IUniform>,
     side: THREE.Side,
+    depthWrite = false,
   ): THREE.ShaderMaterial => {
     const m = new THREE.ShaderMaterial({
       vertexShader,
@@ -1107,12 +688,13 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       uniforms,
       side,
       transparent: true,
-      depthWrite: false,
+      depthWrite,
       depthTest: true,
     });
     mats.push(m);
     return m;
   };
+  const col = (): { value: THREE.Color } => ({ value: new THREE.Color() });
 
   // Shared field uniforms (the same objects in every field-sampling material).
   const fieldU = {
@@ -1146,10 +728,10 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     {
       uCenter: { value: skyDir.clone().multiplyScalar(SKY_BODY.dist) },
       uSize: { value: SKY_BODY.r * 4.2 },
-      uDisc0: { value: new THREE.Color() },
-      uDisc1: { value: new THREE.Color() },
-      uHalo0: { value: new THREE.Color() },
-      uHalo1: { value: new THREE.Color() },
+      uDisc0: col(),
+      uDisc1: col(),
+      uHalo0: col(),
+      uHalo1: col(),
       uHaloOp: { value: 0.3 },
       uDiscR: { value: 0.24 },
     },
@@ -1159,36 +741,34 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
   sky.frustumCulled = false;
   sky.renderOrder = -9.6;
   group.add(sky);
+  // The moon, for the Dusk rims (world position fed each update).
+  const moonWorld = new THREE.Vector3();
+  const moonLocal = skyDir.clone().multiplyScalar(SKY_BODY.dist);
 
-  // -- peak ----------------------------------------------------------------
-  const prof: THREE.Vector2[] = [new THREE.Vector2(0.01, PEAK.apex), new THREE.Vector2(PEAK.rTop, PEAK.apex)];
-  for (let i = 1; i <= 48; i++) {
-    const d = PEAK.dMax * Math.pow(i / 48, 1.35);
-    prof.push(new THREE.Vector2(peakRadius(d), PEAK.apex - d));
-  }
-  // Lathe profiles run bottom to top for outward faces and normals.
-  prof.reverse();
-  const peakGeo = new THREE.LatheGeometry(prof, 192);
-  geos.push(peakGeo);
-  const peakPos = new THREE.Vector3(PEAK.R * Math.sin(PEAK.az), 0, -PEAK.R * Math.cos(PEAK.az));
+  // -- Fuji ----------------------------------------------------------------
+  const fujiGeo = buildFujiGeometry();
+  geos.push(fujiGeo);
+  const fujiPos = new THREE.Vector3(FUJI.R * Math.sin(FUJI.az), 0, -FUJI.R * Math.cos(FUJI.az));
   // The waterfall faces the map center, a little to the right of it.
-  const fallsPhi = Math.atan2(-peakPos.z, -peakPos.x) + 0.2;
-  const tongues: THREE.Vector3[] = [];
-  for (let i = 0; i < 7; i++) {
-    tongues.push(new THREE.Vector3(lhash(501, i) * TAU, (7 + lhash(502, i) * 7) * DEG, (22 + lhash(503, i) * 44) * 1.5));
-  }
-  const peakMat = baseMat(
-    PEAK_VERT,
-    PEAK_FRAG,
+  const fallsPhi = Math.atan2(-fujiPos.z, -fujiPos.x) + 0.2;
+  const tongues = FUJI_TONGUES.map(([az, w, len]) => new THREE.Vector3(az, w, len));
+  const fujiMat = baseMat(
+    FUJI_VERT,
+    FUJI_FRAG,
     {
       uTime: { value: 0 },
-      uPeak: { value: new THREE.Color() },
-      uPeakTop: { value: new THREE.Color() },
-      uCap: { value: new THREE.Color() },
+      uPeak: col(),
+      uPeakTop: col(),
+      uPeakBase: col(),
+      uCap: col(),
       uCapOp: { value: 1 },
-      uLine: { value: new THREE.Color() },
+      uGlow: col(),
+      uGlowOp: { value: 0 },
+      uGully: col(),
+      uGullyOp: { value: 0.4 },
+      uLine: col(),
       uLineOp: { value: 0.3 },
-      uFalls: { value: new THREE.Color() },
+      uFalls: col(),
       uFallsOp: { value: 0.5 },
       uFallsPhi: { value: fallsPhi },
       uTongue: { value: tongues },
@@ -1196,21 +776,20 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     },
     THREE.FrontSide,
   );
-  const peak = new THREE.Mesh(peakGeo, peakMat);
-  peak.position.copy(peakPos);
-  peak.renderOrder = -9.4;
-  const peakWorld = new THREE.Vector3();
+  const fuji = new THREE.Mesh(fujiGeo, fujiMat);
+  fuji.position.copy(fujiPos);
+  fuji.renderOrder = -9.4;
+  const fujiWorld = new THREE.Vector3();
   const camWorld = new THREE.Vector3();
-  peak.onBeforeRender = (_r, _s, camera) => {
-    peak.getWorldPosition(peakWorld);
+  fuji.onBeforeRender = (_r, _s, camera) => {
+    fuji.getWorldPosition(fujiWorld);
     camera.getWorldPosition(camWorld);
-    peakMat.uniforms.uCamAz.value = Math.atan2(camWorld.z - peakWorld.z, camWorld.x - peakWorld.x);
+    fujiMat.uniforms.uCamAz.value = Math.atan2(camWorld.z - fujiWorld.z, camWorld.x - fujiWorld.x);
   };
-  group.add(peak);
+  group.add(fuji);
 
   // -- rings ---------------------------------------------------------------
   const ringMats: THREE.ShaderMaterial[] = [];
-  const ringMeshes: THREE.Mesh[] = [];
   RINGS.forEach((ring, i) => {
     const y0 = FLOOR_Y - 60;
     const y1 = ringCeiling(ring) + 12;
@@ -1228,8 +807,8 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
         uSeed: { value: ring.seed },
         uFade0: { value: ring.top + 10 },
         uFade1: { value: ring.top - ring.fadeSpan },
-        uColor: { value: new THREE.Color() },
-        uCrest: { value: new THREE.Color() },
+        uColor: col(),
+        uCrest: col(),
         uCrestOp: { value: 0.1 },
       },
       // The inside of the wall: a camera dollied out past a ring culls its
@@ -1240,12 +819,33 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     mesh.frustumCulled = false;
     mesh.renderOrder = -8.8 + (3 - i) * 0.4; // far ring first
     ringMats.push(mat);
-    ringMeshes.push(mesh);
     group.add(mesh);
   });
 
+  // -- distant pines on ring 3's crest (after ring 3, before what is nearer) --
+  const farGeo = buildCards(1);
+  geos.push(farGeo);
+  const cardUniforms = (): Record<string, THREE.IUniform> => ({
+    uPad: col(),
+    uPadDark: col(),
+    uLine: col(),
+    uLineOp: { value: 0.5 },
+    uRim: col(),
+    uRimOp: { value: 0 },
+    uOpacity: { value: 1 },
+    uKind: { value: 0 },
+    uMoonWorld: { value: moonWorld },
+    uSideFade: { value: 0 },
+  });
+  const farMat = baseMat(CARD_VERT, CARD_FRAG, { ...cardUniforms(), uKind: { value: 1 } }, THREE.DoubleSide);
+  const farPines = new THREE.Mesh(farGeo, farMat);
+  farPines.frustumCulled = false;
+  farPines.renderOrder = -8.3;
+  group.add(farPines);
+
   // -- mist bands ----------------------------------------------------------
   const mistMeshes: THREE.Mesh[] = [];
+  const mistMats: THREE.ShaderMaterial[] = [];
   MIST_RINGS.forEach((mr, i) => {
     let lo = Infinity;
     let hi = -Infinity;
@@ -1257,7 +857,12 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     geo.translate(0, (lo + hi) / 2, 0);
     geos.push(geo);
     const bandsU = mr.bands.map((b) => new THREE.Vector4(b.az, b.halfSpan, b.h, b.th));
-    const mat = baseMat(MIST_VERT, MIST_FRAG, { ...fieldU, uBands: { value: bandsU }, uOpacity: { value: 0.9 } }, THREE.BackSide);
+    const mat = baseMat(
+      MIST_VERT,
+      MIST_FRAG,
+      { ...fieldU, uBands: { value: bandsU }, uR: { value: mr.R }, uOpacity: { value: 0.92 }, uLine: col(), uLineOp: { value: 0.3 } },
+      THREE.BackSide,
+    );
     const mesh = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     // Mist ring i lies between rings 3 - i and 4 - i (1-based): drawn after the
@@ -1265,6 +870,7 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     mesh.renderOrder = -8.6 + i * 0.4;
     mesh.onBeforeRender = feedFwd;
     mistMeshes.push(mesh);
+    mistMats.push(mat);
     group.add(mesh);
   });
 
@@ -1280,9 +886,12 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       ...fieldU,
       uTime: { value: 0 },
       uOpacity: { value: 0.12 },
-      uFloor: { value: new THREE.Color() },
-      uWave: { value: new THREE.Color() },
+      uFloor: col(),
+      uWave: col(),
       uWaveOp: { value: 0.4 },
+      uGlint: col(),
+      uGlintOp: { value: 0 },
+      uMoonXZ: { value: new THREE.Vector2(Math.sin(SKY_BODY.az), -Math.cos(SKY_BODY.az)) },
     },
     THREE.FrontSide,
   );
@@ -1292,7 +901,52 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
   floor.onBeforeRender = feedFwd;
   group.add(floor);
 
-  // -- cranes (Washi) ------------------------------------------------------
+  // -- framing pines: trunks, then pads ------------------------------------
+  const trunkGeo = buildPineTrunks();
+  geos.push(trunkGeo);
+  const trunkMat = baseMat(
+    TRUNK_VERT,
+    TRUNK_FRAG,
+    {
+      uBark: col(),
+      uCrack: col(),
+      uRim: col(),
+      uRimOp: { value: 0 },
+      uMoonDir: { value: skyDir.clone() },
+      uOpacity: { value: 1 },
+      uSideFade: { value: 0 },
+    },
+    THREE.FrontSide,
+    true,
+  );
+  const trunks = new THREE.Mesh(trunkGeo, trunkMat);
+  trunks.frustumCulled = false;
+  trunks.renderOrder = -7.2;
+  group.add(trunks);
+  const padGeo = buildCards(0);
+  geos.push(padGeo);
+  const padMat = baseMat(CARD_VERT, CARD_FRAG, cardUniforms(), THREE.DoubleSide, true);
+  const pads = new THREE.Mesh(padGeo, padMat);
+  pads.frustumCulled = false;
+  pads.renderOrder = -7.1;
+  group.add(pads);
+
+  // -- reeds ---------------------------------------------------------------
+  const reedGeo = buildReeds();
+  geos.push(reedGeo);
+  const reedMat = baseMat(
+    REED_VERT,
+    REED_FRAG,
+    { uTime: { value: 0 }, uStem: col(), uPlume: col(), uOpacity: { value: 1 }, uSideFade: { value: 0 } },
+    THREE.DoubleSide,
+    true,
+  );
+  const reeds = new THREE.Mesh(reedGeo, reedMat);
+  reeds.frustumCulled = false;
+  reeds.renderOrder = -7.0;
+  group.add(reeds);
+
+  // -- cranes --------------------------------------------------------------
   const craneBase = new THREE.PlaneGeometry(2, 2);
   const craneGeo = new THREE.InstancedBufferGeometry();
   craneGeo.index = craneBase.index;
@@ -1311,6 +965,11 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       uProg: { value: -1 },
       uAz0: { value: 0 },
       uAz1: { value: 0 },
+      uAzMul: { value: 1 },
+      uAzAdd: { value: 0 },
+      uHAdd: { value: 0 },
+      uRiseMul: { value: 1 },
+      uHMul: { value: 1 },
       uR: { value: CRANE.R },
       uH0: { value: CRANE.h },
       uH1: { value: CRANE.h },
@@ -1318,7 +977,13 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       uTime: { value: 0 },
       uAlpha: { value: 0 },
       uSize: { value: CRANE.size },
-      uInk: { value: new THREE.Color() },
+      uWhite: col(),
+      uBlack: col(),
+      uLeg: col(),
+      uCap: col(),
+      uBill: col(),
+      uLine: col(),
+      uLineOp: { value: 0.5 },
     },
     THREE.DoubleSide,
   );
@@ -1330,25 +995,25 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
 
   // -- murmuration (Dusk) --------------------------------------------------
   const murmGeo = new THREE.BufferGeometry();
-  const seeds = new Float32Array(MURM.count * 3);
-  const seed4 = new Float32Array(MURM.count * 4);
-  for (let i = 0; i < MURM.count; i++) {
-    const sd = murmurationSeed(i);
-    seeds.set(sd.p, i * 3);
-    seed4.set([sd.g, sd.u, sd.j, sd.s], i * 4);
+  const sheetPos = new Float32Array(SHEET.count * 3);
+  const sheetSeed = new Float32Array(SHEET.count * 3);
+  for (let i = 0; i < SHEET.count; i++) {
+    const sd = murmSheetSeed(i);
+    sheetPos.set([sd.a, sd.b, sd.w], i * 3);
+    sheetSeed.set([sd.s, sd.j, sd.fringe], i * 3);
   }
-  murmGeo.setAttribute("position", new THREE.BufferAttribute(seeds, 3));
-  murmGeo.setAttribute("aSeed", new THREE.BufferAttribute(seed4, 4));
+  murmGeo.setAttribute("position", new THREE.BufferAttribute(sheetPos, 3));
+  murmGeo.setAttribute("aSeed", new THREE.BufferAttribute(sheetSeed, 3));
   geos.push(murmGeo);
   const murmMat = baseMat(
-    MURM_VERT,
-    MURM_FRAG,
-    { uTime: { value: 0 }, uAlpha: { value: 0 }, uPx: { value: 1 }, uInk: { value: new THREE.Color() } },
+    MURM_SHEET_VERT,
+    MURM_SHEET_FRAG,
+    { uTime: { value: 0 }, uAlpha: { value: 0 }, uPx: { value: 1 }, uInk: col() },
     THREE.FrontSide,
   );
   const murm = new THREE.Points(murmGeo, murmMat);
   murm.frustumCulled = false;
-  murm.renderOrder = -9.2;
+  murm.renderOrder = -9.1;
   murm.visible = false;
   murm.onBeforeRender = (renderer) => {
     murmMat.uniforms.uPx.value = renderer.getPixelRatio();
@@ -1362,6 +1027,11 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
   const sched: CraneState = { index: 0, start: CRANE.first, progress: -1, visible: false };
   const path: CranePath = { az0: 0, az1: 0, R: CRANE.R, h0: CRANE.h, h1: CRANE.h, count: 3 };
   let pathIndex = -1;
+  let craneRMul = 1;
+
+  const hex = (u: THREE.IUniform, h: number): void => {
+    (u.value as THREE.Color).setHex(h);
+  };
 
   function paint(pal: LandPalette, dusk: boolean): void {
     const fieldPal = dusk ? HANGA.dusk : HANGA.washi;
@@ -1371,34 +1041,78 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     fieldU.uHWarm.value.copy(srgb01(fieldPal.warm));
     fieldU.uDusk.value = dusk ? 1 : 0;
     ringMats.forEach((m, i) => {
-      (m.uniforms.uColor.value as THREE.Color).copy(linColor(pal.rings[i]));
-      (m.uniforms.uCrest.value as THREE.Color).copy(linColor(pal.crest));
+      hex(m.uniforms.uColor, pal.rings[i]);
+      hex(m.uniforms.uCrest, pal.crest);
       m.uniforms.uCrestOp.value = pal.crestOp[i];
     });
-    const pu = peakMat.uniforms;
-    (pu.uPeak.value as THREE.Color).setHex(pal.peak);
-    (pu.uPeakTop.value as THREE.Color).setHex(pal.peakTop);
-    (pu.uCap.value as THREE.Color).setHex(pal.cap);
+    for (const m of mistMats) {
+      hex(m.uniforms.uLine, pal.mistLine);
+      m.uniforms.uLineOp.value = pal.mistLineOp;
+    }
+    const pu = fujiMat.uniforms;
+    hex(pu.uPeak, pal.peak);
+    hex(pu.uPeakTop, pal.peakTop);
+    hex(pu.uPeakBase, pal.peakBase);
+    hex(pu.uCap, pal.cap);
     pu.uCapOp.value = pal.capOp;
-    (pu.uLine.value as THREE.Color).setHex(pal.peakLine);
+    hex(pu.uGlow, pal.glow);
+    pu.uGlowOp.value = pal.glowOp;
+    hex(pu.uGully, pal.gully);
+    pu.uGullyOp.value = pal.gullyOp;
+    hex(pu.uLine, pal.peakLine);
     pu.uLineOp.value = pal.peakLineOp;
-    (pu.uFalls.value as THREE.Color).setHex(pal.falls);
+    hex(pu.uFalls, pal.falls);
     pu.uFallsOp.value = pal.fallsOp;
     const fu = floorMat.uniforms;
-    (fu.uFloor.value as THREE.Color).setHex(pal.floor);
+    hex(fu.uFloor, pal.floor);
     fu.uOpacity.value = pal.floorOp;
-    (fu.uWave.value as THREE.Color).setHex(pal.wave);
+    hex(fu.uWave, pal.wave);
     fu.uWaveOp.value = pal.waveOp;
+    hex(fu.uGlint, pal.glint);
+    fu.uGlintOp.value = pal.glintOp;
     const su = skyMat.uniforms;
-    (su.uDisc0.value as THREE.Color).setHex(pal.disc0);
-    (su.uDisc1.value as THREE.Color).setHex(pal.disc1);
-    (su.uHalo0.value as THREE.Color).setHex(pal.halo0);
-    (su.uHalo1.value as THREE.Color).setHex(pal.halo1);
+    hex(su.uDisc0, pal.disc0);
+    hex(su.uDisc1, pal.disc1);
+    hex(su.uHalo0, pal.halo0);
+    hex(su.uHalo1, pal.halo1);
     su.uHaloOp.value = pal.haloOp;
     su.uSize.value = SKY_BODY.r * pal.haloScale;
     su.uDiscR.value = pal.discScale / pal.haloScale;
-    (craneMat.uniforms.uInk.value as THREE.Color).setHex(pal.bird);
-    (murmMat.uniforms.uInk.value as THREE.Color).setHex(pal.bird);
+    const cu = craneMat.uniforms;
+    hex(cu.uWhite, pal.craneWhite);
+    hex(cu.uBlack, pal.craneBlack);
+    hex(cu.uLeg, pal.craneLeg);
+    hex(cu.uCap, pal.craneCap);
+    hex(cu.uBill, pal.craneBill);
+    hex(cu.uLine, pal.craneLine);
+    cu.uLineOp.value = pal.craneLineOp;
+    const sky = dusk ? CRANE_SKY.dusk : CRANE_SKY.washi;
+    cu.uAzMul.value = sky.mul;
+    cu.uAzAdd.value = sky.add;
+    cu.uHAdd.value = sky.hAdd;
+    cu.uRiseMul.value = sky.riseMul;
+    cu.uHMul.value = sky.hMul;
+    craneRMul = sky.rMul;
+    hex(murmMat.uniforms.uInk, pal.bird);
+    const tu = trunkMat.uniforms;
+    hex(tu.uBark, pal.bark);
+    hex(tu.uCrack, pal.crack);
+    hex(tu.uRim, pal.rim);
+    tu.uRimOp.value = pal.rimOp;
+    const au = padMat.uniforms;
+    hex(au.uPad, pal.pad);
+    hex(au.uPadDark, pal.padDark);
+    hex(au.uLine, pal.pineLine);
+    au.uLineOp.value = pal.pineLineOp;
+    hex(au.uRim, pal.rim);
+    au.uRimOp.value = pal.rimOp;
+    const fpu = farMat.uniforms;
+    hex(fpu.uPad, pal.farPine);
+    fpu.uOpacity.value = pal.farPineOp;
+    const ru = reedMat.uniforms;
+    hex(ru.uStem, pal.reed);
+    hex(ru.uPlume, pal.plume);
+    ru.uOpacity.value = pal.reedOp;
   }
 
   const handle: LandscapeHandle = {
@@ -1413,8 +1127,8 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       }
       if (next !== style) paint(next === 4 ? LAND.dusk : LAND.washi, next === 4);
       style = next;
+      pathIndex = -1;
       if (next === 3) murm.visible = false;
-      else cranes.visible = false;
     },
     update(timeSec, opts) {
       if (!group.visible) return;
@@ -1426,43 +1140,50 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
       const rm = opts.reducedMotion;
       const fixed = handle.debugTime;
       const t = fixed ?? timeSec;
-      // Ambient water, mist, and waterfall: a fixed phase under reduced motion.
+      // Ambient water, mist, waterfall, and reeds: a fixed phase under reduced motion.
       const tAmb = fixed ?? (rm ? FROZEN_T : timeSec);
       for (let i = 0; i < mistMeshes.length; i++) {
         mistMeshes[i].rotation.y = MIST_RINGS[i].rate * TAU * tAmb;
       }
       floorMat.uniforms.uTime.value = tAmb;
-      peakMat.uniforms.uTime.value = tAmb;
-      // The Ascent is taller: drop the landscape a little so its low isolines clear.
+      fujiMat.uniforms.uTime.value = tAmb;
+      reedMat.uniforms.uTime.value = tAmb;
+      // The Ascent is taller: drop the landscape a little so its low isolines
+      // clear, and fade the left framing pine and the reeds off the depth scale.
       const pose = Math.min(1, Math.max(0, opts.pose ?? 0));
       group.position.y = center.y - ASCENT_DROP * pose;
+      const sideFade = ASCENT_SIDE_FADE * smooth01(pose);
+      trunkMat.uniforms.uSideFade.value = sideFade;
+      padMat.uniforms.uSideFade.value = sideFade;
+      reedMat.uniforms.uSideFade.value = sideFade;
+      moonWorld.copy(moonLocal).add(group.position);
       // Birds: hidden under reduced motion, faded out by quiet.
       // (A debug clock shows the birds even under reduced motion, for stills.)
       const birdA = rm && fixed === null ? 0 : 1 - smooth01(quiet);
-      if (style === 3) {
-        craneScheduleInto(t, sched, sched);
-        const show = birdA > 0.002 && sched.visible;
-        cranes.visible = show;
-        if (show) {
-          if (sched.index !== pathIndex) {
-            cranePathInto(sched.index, path);
-            pathIndex = sched.index;
-            const u = craneMat.uniforms;
-            u.uAz0.value = path.az0;
-            u.uAz1.value = path.az1;
-            u.uR.value = path.R;
-            u.uH0.value = path.h0;
-            u.uH1.value = path.h1;
-            u.uCount.value = path.count;
-          }
-          craneMat.uniforms.uProg.value = sched.progress;
-          craneMat.uniforms.uTime.value = t;
-          craneMat.uniforms.uAlpha.value = birdA * LAND.washi.birdOp;
+      const pal = style === 4 ? LAND.dusk : LAND.washi;
+      craneScheduleInto(t, sched, sched);
+      const show = birdA > 0.002 && sched.visible;
+      cranes.visible = show;
+      if (show) {
+        if (sched.index !== pathIndex) {
+          cranePathInto(sched.index, path);
+          pathIndex = sched.index;
+          const u = craneMat.uniforms;
+          u.uAz0.value = path.az0;
+          u.uAz1.value = path.az1;
+          u.uR.value = path.R * craneRMul;
+          u.uH0.value = path.h0;
+          u.uH1.value = path.h1;
+          u.uCount.value = path.count;
         }
-      } else if (style === 4) {
+        craneMat.uniforms.uProg.value = sched.progress;
+        craneMat.uniforms.uTime.value = t;
+        craneMat.uniforms.uAlpha.value = birdA * pal.craneOp;
+      }
+      if (style === 4) {
         murm.visible = birdA > 0.002;
         murmMat.uniforms.uTime.value = t;
-        murmMat.uniforms.uAlpha.value = birdA * LAND.dusk.birdOp;
+        murmMat.uniforms.uAlpha.value = birdA * pal.birdOp;
       }
     },
     dispose() {

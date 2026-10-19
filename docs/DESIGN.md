@@ -632,33 +632,88 @@ white for an edgeless standard.
 
 `src/scene/landscape.ts` raises a Hiroshige landscape around the map in the two
 woodblock styles only. It is invisible, with no draw calls, in every other
-style. It follows the approved previews (`scripts/hanga-landscape-previews.mjs`)
-with the "more landscape" pass: ridge amplitudes x1.6 and raised ring tops, so
-the far crests reach about the map's vertical center at the home view, and a
-peak 1.5x larger.
+style. It started from the approved previews
+(`scripts/hanga-landscape-previews.mjs`) with the "more landscape" pass, and was
+rebuilt (2026-10) from a study of open-access prints and photographs: Hiroshige
+and Hokusai from the Met, the Cleveland Museum of Art, and the Rijksmuseum,
+crane and starling photographs from Wikimedia Commons, and the STARFLAG
+measurements of starling flocks. The parts live in `src/scene/landscape/`:
+`core.ts` (noise, rings, easing, the home views), `crane.ts`,
+`murmuration.ts`, `fuji.ts`, and `flora.ts`. `landscape.ts` re-exports all of
+them, so importers keep one path.
 
 - Four concentric ridge rings (r 1500 / 2050 / 2550 / 3050). The silhouette is
   computed per fragment from seamless periodic value noise over azimuth, with
-  an anti-aliased crest, a darker crest bokashi band, and a fade to the field at
-  the base. The walls draw their inside faces only, so a camera dollied out past
-  a ring sees its far half and never a wall in front of the map.
-- One volcanic cone (lathe geometry) at a fixed azimuth just beyond the far
-  ring: pale cap with soft snow tongues, a hairline contour on the upper
-  outline, and one thin waterfall line with a slow downward swell.
-- Suyari-gasumi mist bands between the rings, printed in the exact field color
-  behind them, turning once every 25 to 35 minutes.
-- A faint water floor at y -760 with fine wave lines near the far shore.
-- Washi: a low red-orange sun and one flight of cranes (3 to 5, a loose V,
-  wingbeat 2.5 s, a 40 s crossing, then 50 to 90 s of empty sky). Dusk: a pale
-  moon and one murmuration (880 specks in one draw, moved in the vertex shader)
-  beside the moon and the peak's flank.
+  an anti-aliased crest and a fade to the field at the base. The crest bokashi
+  is dry-brushed: solid ink at the crest, a ragged lower edge, and horizontal
+  hairs where the brush ran dry (`crestInk`). On Washi the far two rings print
+  paler, so the layers read as print distance layers. The walls draw their
+  inside faces only, so a camera dollied out past a ring sees its far half and
+  never a wall in front of the map.
+- Fuji at the old peak's azimuth and distance: a lathe mesh with a near-flat
+  summit and three low crater bumps, wide shoulders, and a concave flank (40 deg
+  at the summit, under 25 deg at the fade). A ragged snow line with narrow snow
+  tongues down the gullies and faint gully lines below them, a flat bokashi
+  body that pales toward the base, a hairline contour on the upper outline, one
+  thin waterfall line, and an alpenglow on the summit at Dusk.
+- Suyari-gasumi bands at three depths between the rings: a flat bottom, a flat
+  top, two lobes at each end stepping out and down, and a thin darker
+  underline. They print in the exact field color behind them and turn once
+  every 25 to 35 minutes.
+- Water: a flat bokashi field at y -760 with eight rows of short tapered crest
+  strokes in Hiroshige's convention (small arcs that bow toward the far shore,
+  pointed at both ends, offset from row to row), receding toward the far
+  shore and drifting about one cell a minute. At Dusk the strokes on the line
+  from the camera toward the moon print pale and closer together: the moon
+  path.
+- Two framing pines outside the map's radius, at the near left (low, its pads
+  under the search rail and clear of Fuji and the sun) and the near right
+  (tall): plated ink trunks with a key line, and needle clusters as flat fan
+  pads (camera-facing cards with a level flat underside, an irregular scalloped
+  crown, and fans of needles in ink; seen from above they turn into round
+  clumps). Washi prints them soft and snowless in pine green. Dusk prints them
+  in silhouette with a faint pale rim on the side facing the moon. Small
+  distant pines print as ink marks on ring 3's crest.
+- A reed bank at the near shore, left foreground at the home view: instanced
+  strap leaves and stems with drooping panicles that face the camera. They
+  sway very slowly (periods 11 and 17 s) and hold still under reduced motion.
+  At the Ascent the left pine and the reeds fade, because the depth scale owns
+  that edge of the screen.
+- The sky body: a low red-orange sun on Washi, a pale moon on Dusk.
+- Cranes on both styles: one flight of red-crowned cranes (3 to 5 in a loose
+  V, a 40 s crossing, then 50 to 90 s of empty sky). The anatomy follows the
+  study: long broad wings, a separate black block on the inner trailing edge
+  (secondaries and tertials) with white primaries beyond the wrist, a white
+  tail under the black tertial plume, a black neck held straight, a red cap
+  above the eye, a fine bill, and the legs trailing together past the tail
+  with a heel joint. Each bird is at its own phase of one slow stroke (2.5 s).
+  Each wing is a trapezoid whose chord stays parallel to the body at every
+  flap angle: only the span foreshortens, by the sine of the flap angle seen
+  from below. The hand lags the arm and swings further, so the downstroke
+  bows. The strokes are signed-distance shapes anti-aliased with `fwidth`,
+  about 20 to 23 px from wingtip to wingtip at the home view. Both fly the open
+  sky right of the title block. Washi prints white
+  plumage, which reads on the Prussian band. Dusk prints pale moonlit plumage
+  and flies higher, at one height, above the flock.
+- Dusk: one murmuration as a thin folded sheet of 2000 birds in one draw,
+  moved in the vertex shader. Each bird is a small chevron aligned to the
+  sheet's local flow. The sheet is uniform inside and twice as dense or more
+  in its border strip, with a sparse straggler fringe, a head that curls back
+  into a dense fold, and a thinning tail. It twists along its length, so where
+  it turns edge-on it prints as a dark band. Its shape turns over across 29 to
+  53 s.
 
 Legibility is a test (`tests/landscape.test.ts`): Washi gold and teal keep
-2.5:1 or more on every ring body and crest band. The Washi ridges and peak use
-the preview sheet's colors (the designer chose the stronger ridges), with the
-crest ink capped on the two near rings to hold that gate. Motion keeps the project rules: every period is
-several seconds or longer, a story or a focus fades the birds out over 2 s,
-and reduced motion freezes the water, mist, and waterfall and hides the birds.
+2.5:1 or more on every ring body and crest band, and every Dusk pigment keeps
+2.8:1 on every ring, crest band, and Fuji's body. The tests also hold the
+crane planform (chords parallel, the black block inside the arm), the
+murmuration's placement, interior density cap, and edge ratio, Fuji's concave
+profile, the mist band bounds, and the pines and reeds outside the map's radius
+and clear of the title block and chrome at 1440x900, 1280x720, and 1024x600.
+Motion keeps the project rules: every period is several seconds or longer,
+nothing pulses in brightness, a story or a focus fades the birds out over 2 s,
+and reduced motion freezes the water, mist, waterfall, and reeds and hides the
+birds.
 
 ### Bulguksa (style 5)
 
@@ -775,4 +830,3 @@ landscape stay off at style 5 (`isHangaField`).
 - **Study.** Open-access study only (Commons CC0, PD, and Creative Commons
   photographs and the site plan; Cleveland CC0 paintings; exhibition text for
   Park Dae-sung). Nothing from the study is embedded; everything is procedural.
-
