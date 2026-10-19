@@ -49,6 +49,12 @@ import {
   floraSamples,
   farPines,
   reedBlade,
+  groundAt,
+  bankProfile,
+  BANKS,
+  MID_PINES,
+  MID_PINE_SITES,
+  FLOOR_Y,
   projectHome,
   hexToLinear,
   crestLinear,
@@ -210,17 +216,20 @@ describe("crane schedule", () => {
         }
       }
     }
-    // Dusk, at the home view: the lowest crane flies above the flock's highest
-    // bird, and the highest crane stays on screen.
-    const seeds = Array.from({ length: SHEET.count }, (_, i) => murmSheetSeed(i));
-    let flockTop = Infinity;
+    // Dusk, at the home view: the lowest crane flies above the flock's core
+    // (all but the top 2% of its sheet birds; the stragglers scatter through
+    // the whole sky by design), and the highest crane stays on screen.
+    const seeds = Array.from({ length: SHEET.count }, (_, i) => murmSheetSeed(i)).filter((sd) => !sd.fringe);
+    const ys: number[] = [];
     const b = { az: 0, R: 0, h: 0 };
     for (let t = 0; t < 600; t += 6.7) {
       for (const sd of seeds) {
         murmSheetBird(sd, t, b);
-        flockTop = Math.min(flockTop, 450 - ((b.h + 5) / (918 + b.R * Math.cos(b.az))) * K);
+        ys.push(450 - ((b.h + 5) / (918 + b.R * Math.cos(b.az))) * K);
       }
     }
+    ys.sort((x, y) => x - y);
+    const flockTop = ys[Math.floor(ys.length * 0.02)];
     const D = CRANE_SKY.dusk;
     const lowRise = Math.min(...CRANE_SLOTS.map((s) => s[1])) * D.riseMul - 10;
     const highRise = Math.max(...CRANE_SLOTS.map((s) => s[1])) * D.riseMul + 10;
@@ -390,24 +399,53 @@ describe("murmuration sheet", () => {
     return need;
   }
 
-  it("holds 1500 to 2500 birds as chevrons, with a straggler fringe", () => {
-    expect(SHEET.count).toBeGreaterThanOrEqual(1500);
-    expect(SHEET.count).toBeLessThanOrEqual(2500);
+  it("holds 1100 to 1400 birds as chevrons, a quarter of them stragglers", () => {
+    expect(SHEET.count).toBeGreaterThanOrEqual(1100);
+    expect(SHEET.count).toBeLessThanOrEqual(1400);
     expect(SHEET.px0).toBeGreaterThanOrEqual(2);
     expect(SHEET.px1).toBeLessThanOrEqual(4);
     const fringe = SEEDS.filter((s) => s.fringe === 1).length / SEEDS.length;
-    expect(fringe).toBeGreaterThan(0.02);
-    expect(fringe).toBeLessThan(0.1);
+    expect(fringe).toBeGreaterThan(0.2);
+    expect(fringe).toBeLessThan(0.3);
     for (const s of SEEDS) {
-      if (s.fringe) expect(Math.abs(s.b)).toBeGreaterThan(1);
-      else expect(Math.abs(s.b)).toBeLessThanOrEqual(1);
+      if (s.fringe) {
+        // Well outside the sheet's edge.
+        expect(Math.abs(s.b)).toBeGreaterThan(1.04);
+        expect(Math.abs(s.a)).toBeLessThanOrEqual(SHEET.strayA);
+      } else {
+        expect(Math.abs(s.b)).toBeLessThanOrEqual(1);
+        expect(Math.abs(s.a)).toBeLessThanOrEqual(1);
+      }
     }
-    // A thin sheet: far thinner than it is wide.
-    expect(SHEET.T * 2).toBeLessThan(SHEET.W / 5);
-    // Denser at the head than at the tail.
-    const head = SEEDS.filter((s) => s.a > 0.5).length;
-    const tail = SEEDS.filter((s) => s.a < -0.5).length;
-    expect(head).toBeGreaterThan(tail * 1.3);
+    // Still a sheet: thinner than it is wide, and wider than before.
+    expect(SHEET.T * 2).toBeLessThan(SHEET.W);
+    expect(SHEET.L).toBeGreaterThanOrEqual(1000);
+    expect(SHEET.W).toBeGreaterThanOrEqual(250);
+  });
+
+  it("is uneven inside: a dense core, clumps, and thin gaps", () => {
+    const sheet = SEEDS.filter((s) => !s.fringe);
+    // A 10 x 6 grid over the sheet's (a, b) square.
+    const NA = 10;
+    const NB = 6;
+    const cells = new Array(NA * NB).fill(0);
+    for (const s of sheet) {
+      const i = Math.min(NA - 1, Math.floor(((s.a + 1) / 2) * NA));
+      const j = Math.min(NB - 1, Math.floor(((s.b + 1) / 2) * NB));
+      cells[i * NB + j]++;
+    }
+    const mean = sheet.length / cells.length;
+    const sd = Math.sqrt(cells.reduce((t, c) => t + (c - mean) ** 2, 0) / cells.length);
+    // Far from uniform (a uniform scatter gives sd / mean of about 0.2 here).
+    expect(sd / mean).toBeGreaterThan(0.5);
+    // Thin gaps: some cells hold under a third of the mean.
+    expect(cells.filter((c) => c < mean / 3).length).toBeGreaterThanOrEqual(4);
+    // A dense core: the core region holds at least twice the sheet's mean density.
+    const inCore = (s: (typeof SEEDS)[number]): boolean =>
+      ((s.a - SHEET.coreA) / SHEET.coreRA) ** 2 + (s.b / SHEET.coreRB) ** 2 < 1;
+    const coreArea = Math.PI * SHEET.coreRA * SHEET.coreRB;
+    const coreDensity = sheet.filter(inCore).length / coreArea;
+    expect(coreDensity).toBeGreaterThan((2 * sheet.length) / 4);
   });
 
   it("the center stays beyond the far ring radius", () => {
@@ -425,80 +463,52 @@ describe("murmuration sheet", () => {
     let below = 0;
     let n = 0;
     const HOME_CAMS: [number, number][] = HOME_VIEWS.map((v) => [v.camY, v.camZ]);
+    // The 1280x720 home camera too: the title block ends at x 696 there.
+    const K2 = 360 / Math.tan(25 * DEG);
+    let minX2 = Infinity;
+    let maxY2 = -Infinity;
     for (const t of TIMES) {
       for (const sd of SEEDS) {
         const [x, y] = screen(sd, t);
+        const D2 = 889 + bird.R * Math.cos(bird.az);
+        minX2 = Math.min(minX2, 640 + ((bird.R * Math.sin(bird.az)) / D2) * K2);
+        maxY2 = Math.max(maxY2, 360 - ((bird.h + 10) / D2) * K2);
         minR = Math.min(minR, bird.R);
         minAz = Math.min(minAz, bird.az);
         maxAz = Math.max(maxAz, bird.az);
         minX = Math.min(minX, x);
         maxY = Math.max(maxY, y);
-        if (y >= 60 && y <= 330) inBand++;
+        if (y >= -60 && y <= 400) inBand++;
         if (HOME_CAMS.some(([cy, cz]) => bird.h < ridgeFloor(bird.az, bird.R, cy, cz))) below++;
         n++;
       }
     }
     expect(minR).toBeGreaterThan(far.R);
     // Right of the map's center, clear of the title block (right edge 696 px).
-    expect(minAz).toBeGreaterThan(8 * DEG);
-    expect(maxAz).toBeLessThan(50 * DEG);
+    expect(minAz).toBeGreaterThan(5 * DEG);
+    expect(maxAz).toBeLessThan(60 * DEG);
     expect(minX).toBeGreaterThan(700);
-    // About y 100 to 320, and nowhere near the Style card or pose control.
+    expect(minX2).toBeGreaterThan(700);
+    // Spread over the upper sky, and nowhere near the Style card or pose control.
     expect(inBand / n).toBeGreaterThan(0.98);
-    expect(maxY).toBeLessThan(700);
+    expect(maxY).toBeLessThan(560);
+    expect(maxY2).toBeLessThan(470);
+    // It spans much of the sky: at least 30 deg of azimuth.
+    expect(maxAz - minAz).toBeGreaterThan(30 * DEG);
     expect(below / n).toBeLessThan(0.02);
   });
 
-  it("caps the interior on a 60 px disc and keeps the edge at least twice as dense", () => {
+  it("never gathers more than 15% of the flock in one 60 px disc", () => {
     const xs = new Float64Array(SEEDS.length);
     const ys = new Float64Array(SEEDS.length);
-    const inA = (s: (typeof SEEDS)[number]): boolean => Math.abs(s.a) < 0.6;
-    const interior = SEEDS.map((s) => !s.fringe && Math.abs(s.b) < 0.6 && inA(s));
-    const edge = SEEDS.map((s) => !s.fringe && Math.abs(s.b) >= SHEET.edgeIn && inA(s));
-    // Screen area of a region of the sheet (|a| < 0.6, b0 <= |b| < b1), from a
-    // fine grid of projected cells.
-    const c = { az: 0, R: 0, h: 0 };
-    const lp: [number, number, number] = [0, 0, 0];
-    function proj(a: number, b: number, t: number): [number, number] {
-      murmSheetCenterInto(t, c);
-      murmSheetLocalInto(a, b, 0, 0, t, lp);
-      const az = c.az + lp[0] / c.R;
-      const R = c.R + lp[2];
-      const D = 918 + R * Math.cos(az);
-      return [720 + ((R * Math.sin(az)) / D) * K, 450 - ((c.h + lp[1] + 5) / D) * K];
-    }
-    function area(b0: number, b1: number, t: number): number {
-      let sum = 0;
-      const NA = 24;
-      const NB = 6;
-      for (const sg of [-1, 1]) {
-        for (let i = 0; i < NA; i++) {
-          for (let j = 0; j < NB; j++) {
-            const a0 = -0.6 + (1.2 * i) / NA;
-            const a1 = a0 + 1.2 / NA;
-            const u0 = sg * (b0 + ((b1 - b0) * j) / NB);
-            const u1 = sg * (b0 + ((b1 - b0) * (j + 1)) / NB);
-            const p = [proj(a0, u0, t), proj(a1, u0, t), proj(a1, u1, t), proj(a0, u1, t)];
-            let s2 = 0;
-            for (let k = 0; k < 4; k++) s2 += p[k][0] * p[(k + 1) % 4][1] - p[(k + 1) % 4][0] * p[k][1];
-            sum += Math.abs(s2) / 2;
-          }
-        }
-      }
-      return sum;
-    }
     let worst = 0;
-    let ratioMin = Infinity;
-    const nInterior = interior.filter(Boolean).length;
-    const nEdge = edge.filter(Boolean).length;
     for (let t = 0; t < 400; t += 23.1) {
       SEEDS.forEach((sd, i) => {
         const [x, y] = screen(sd, t);
         xs[i] = x;
         ys[i] = y;
       });
-      for (let i = 0; i < SEEDS.length; i++) {
-        if (!interior[i]) continue;
+      for (let i = 0; i < SEEDS.length; i += 3) {
         let disc = 0;
         for (let j = 0; j < SEEDS.length; j++) {
           const dx = xs[j] - xs[i];
@@ -507,13 +517,10 @@ describe("murmuration sheet", () => {
         }
         worst = Math.max(worst, disc / SEEDS.length);
       }
-      // Birds per square px on screen: the border strip against the interior.
-      const ratio = nEdge / area(SHEET.edgeIn, 1, t) / (nInterior / area(0, 0.6, t));
-      ratioMin = Math.min(ratioMin, ratio);
     }
-    // The sheet is compact on screen, so one 60 px disc may hold up to 42% of it.
-    expect(worst).toBeLessThanOrEqual(0.42);
-    expect(ratioMin).toBeGreaterThanOrEqual(2);
+    expect(worst).toBeLessThanOrEqual(0.15);
+    // Yet it reads as one flock: some disc holds 4% or more.
+    expect(worst).toBeGreaterThan(0.04);
   });
 
   it("moves slowly and turns over no faster than once per 20 s", () => {
@@ -698,11 +705,83 @@ describe("pines and reeds", () => {
   };
   const S = floraSamples();
 
-  it("stand outside the map's radius and inside the near ring", () => {
+  it("stand outside the map's radius and inside the second ring", () => {
     for (const s of S) {
       const r = Math.hypot(s.x, s.z);
       expect(r).toBeGreaterThan(MAP_RADIUS + 80);
-      expect(r).toBeLessThan(RINGS[0].R - 100);
+      expect(r).toBeLessThan(RINGS[1].R - 100);
+    }
+  });
+
+  it("grow out of the ground: every pine and every reed is rooted on a bank or the first ridge", () => {
+    for (const p of PINES) {
+      const g = groundAt(p.x, p.z);
+      const onBank = Math.abs(p.base - g) < 1 && g > FLOOR_Y + 10;
+      const r = Math.hypot(p.x, p.z);
+      const th = Math.atan2(p.x, -p.z);
+      const onRidge = Math.abs(r - RINGS[0].R) < 20 && Math.abs(p.base - (ridgeHeight(RINGS[0], th) - 14)) < 1;
+      expect(onBank || onRidge, `pine at ${p.x}, ${p.z}`).toBe(true);
+    }
+    for (let i = 0; i < REEDS.count; i++) {
+      const b = reedBlade(i);
+      const g = groundAt(b.x, b.z);
+      // On the reed bank's top, above the water, and rooted into it.
+      expect(g).toBeGreaterThan(FLOOR_Y + 100);
+      expect(b.y).toBeLessThan(g);
+      expect(g - b.y).toBeLessThan(8);
+    }
+    // Banks rise from the water: the profile meets the floor at the waterline.
+    for (const bk of BANKS) {
+      expect(bankProfile(bk, 1)).toBe(FLOOR_Y);
+      expect(bankProfile(bk, 0)).toBe(bk.top);
+      expect(bk.top).toBeGreaterThan(FLOOR_Y);
+      expect(bk.top - FLOOR_Y).toBeLessThan(200);
+      // The whole bank lies on the water, inside the near ring.
+      for (let i = 0; i < 64; i++) {
+        const a = (i / 64) * TAU;
+        const lu = bk.rx * Math.cos(a);
+        const lv = bk.rz * Math.sin(a);
+        const x = bk.x + lu * Math.cos(bk.rot) - lv * Math.sin(bk.rot);
+        const z = bk.z + lu * Math.sin(bk.rot) + lv * Math.cos(bk.rot);
+        expect(Math.hypot(x, z)).toBeLessThan(RINGS[0].R - 2);
+      }
+      let prev = Infinity;
+      for (let u = 0; u <= 1; u += 0.02) {
+        const y = bankProfile(bk, u);
+        expect(y).toBeLessThanOrEqual(prev + 1e-9);
+        prev = y;
+      }
+    }
+  });
+
+  it("adds four to six middle-ground pines at a range of sizes, clear of the map body at home", () => {
+    expect(MID_PINES.length).toBeGreaterThanOrEqual(4);
+    expect(MID_PINES.length).toBeLessThanOrEqual(6);
+    const sizes = MID_PINE_SITES.map((st) => st.s);
+    expect(Math.max(...sizes) / Math.min(...sizes)).toBeGreaterThan(2);
+    for (const v of HOME_VIEWS) {
+      // The map body's screen rect: its bounds at mid depth.
+      const m = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const x of [-481, 482]) {
+        for (const y of [-216, 216]) {
+          const c = projectHome(v, x, y, 0)!;
+          m[0] = Math.min(m[0], c[0]);
+          m[1] = Math.min(m[1], c[1]);
+          m[2] = Math.max(m[2], c[0]);
+          m[3] = Math.max(m[3], c[1]);
+        }
+      }
+      const k = v.h / 2 / Math.tan(25 * DEG);
+      for (const s of S) {
+        if (s.group !== "mid") continue;
+        const c = projectHome(v, s.x, s.y, s.z);
+        if (!c) continue;
+        const D = v.camZ - s.z;
+        const hw = (s.hw / D) * k;
+        const hh = (s.hh / D) * k;
+        const hit = c[0] + hw > m[0] && c[0] - hw < m[2] && c[1] + hh > m[1] && c[1] - hh < m[3];
+        expect(hit, `mid ${s.kind} at ${v.w}x${v.h}`).toBe(false);
+      }
     }
   });
 
@@ -741,7 +820,8 @@ describe("pines and reeds", () => {
     }
   });
 
-  it("pine bases dissolve and pads sit above the trunk's fade", () => {
+  it("pine bases fade softly and pads sit above the trunk's soft base", () => {
+    expect(FLORA_FADE).toBeLessThanOrEqual(30);
     for (const p of PINES) {
       for (const [, dy] of p.pads) expect(dy).toBeGreaterThan(FLORA_FADE);
       expect(p.trunk[0]).toEqual([0, 0, 0]);
