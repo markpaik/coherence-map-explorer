@@ -288,20 +288,22 @@ describe("Hanga hand-made texture", () => {
     expect(T.FLECK_RATE).toBeLessThan(0.005);
   });
 
-  it("keeps the paper overlay inside its luminance budget, fibres above the mottle", () => {
+  it("keeps the paper overlay barely noticeable, fibres above the mottle", () => {
     const T = HANGA_TEXTURE;
     const washi = T.PAPER_MOTTLE_WASHI + T.PAPER_FIBRE_WASHI + T.PAPER_LAID_WASHI;
     const dusk = T.PAPER_MOTTLE_DUSK + T.PAPER_FIBRE_DUSK + T.PAPER_LAID_DUSK;
-    expect(T.PAPER_MOTTLE_WASHI).toBeGreaterThanOrEqual(0.1);
-    expect(T.PAPER_FIBRE_WASHI).toBeLessThanOrEqual(0.14);
-    expect(T.PAPER_MOTTLE_DUSK).toBeGreaterThanOrEqual(0.07);
-    expect(T.PAPER_FIBRE_DUSK).toBeLessThanOrEqual(0.1);
+    // Round 3: the sheet is felt, not seen (Mark, 2026-10-19). Each term is
+    // well under its round-2 value, yet still present.
+    expect(T.PAPER_MOTTLE_WASHI).toBeGreaterThan(0);
+    expect(T.PAPER_FIBRE_WASHI).toBeLessThanOrEqual(0.05);
+    expect(T.PAPER_MOTTLE_DUSK).toBeGreaterThan(0);
+    expect(T.PAPER_FIBRE_DUSK).toBeLessThanOrEqual(0.035);
     expect(T.PAPER_FIBRE_WASHI).toBeGreaterThan(T.PAPER_MOTTLE_WASHI);
     expect(T.PAPER_FIBRE_DUSK).toBeGreaterThan(T.PAPER_MOTTLE_DUSK);
     expect(T.PAPER_LAID_DUSK).toBe(0); // laid lines are a Washi feature
-    // Worst-case total swing stays a texture, not a veil.
-    expect(washi).toBeLessThan(0.3);
-    expect(dusk).toBeLessThan(0.2);
+    // Worst-case total swing stays a whisper, never a veil.
+    expect(washi).toBeLessThan(0.1);
+    expect(dusk).toBeLessThan(0.07);
   });
 
   it("generates the texture constants into both edge shaders", () => {

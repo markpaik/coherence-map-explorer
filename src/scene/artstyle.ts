@@ -278,12 +278,14 @@ export const HANGA_TEXTURE = {
    * print. Peak-to-peak luminance modulation per term (sRGB), per field: the
    * mottle (4 octaves of value noise), the long fibre streaks, and the faint
    * laid lines (Washi only). Feature sizes are in CSS px (scaled by DPR).
+   * Round 3 (2026-10-19): Mark found the fixed streak pattern too present,
+   * so every term is about a third of round 2: the sheet is felt, not seen.
    */
-  PAPER_MOTTLE_WASHI: 0.1,
-  PAPER_FIBRE_WASHI: 0.13,
-  PAPER_LAID_WASHI: 0.025,
-  PAPER_MOTTLE_DUSK: 0.07,
-  PAPER_FIBRE_DUSK: 0.09,
+  PAPER_MOTTLE_WASHI: 0.035,
+  PAPER_FIBRE_WASHI: 0.045,
+  PAPER_LAID_WASHI: 0.008,
+  PAPER_MOTTLE_DUSK: 0.025,
+  PAPER_FIBRE_DUSK: 0.03,
   PAPER_LAID_DUSK: 0,
   PAPER_MOTTLE_PX: 150,
   PAPER_FIBRE_LEN_PX: 70,
@@ -297,8 +299,8 @@ export const HANGA_TEXTURE = {
  * change. Peak-to-peak sRGB luminance swing per term; lengths in CSS px.
  */
 export const HANJI_PAPER = {
-  MOTTLE: 0.045,
-  FIBRE: 0.12,
+  MOTTLE: 0.02,
+  FIBRE: 0.045,
   LAID: 0,
   FIBRE_LEN_PX: 180,
   /** Fibre thickness across the strand, CSS px (Washi uses 1.5). */
