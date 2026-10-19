@@ -846,7 +846,8 @@ landscape stay off at style 5 (`isHangaField`).
 - **Motion.** Quiet (a story or a focus) fades the birds over 2 s. Reduced
   motion freezes the snow and hides the birds. Nothing pulses in brightness.
 - **Cost.** At the 1440x900 home view Bulguksa draws 109 calls and 312,687
-  triangles (Washi: 101 and 269,177); the world alone is 20 draws.
+  triangles (QA on 4dda79a measured 106 and 311,611; Washi after the world
+  upgrade: 104 and 283,543); the world alone is 20 draws.
 - **Study.** Open-access study only (Commons CC0, PD, and Creative Commons
   photographs and the site plan; Cleveland CC0 paintings; exhibition text for
   Park Dae-sung). Nothing from the study is embedded; everything is procedural.
