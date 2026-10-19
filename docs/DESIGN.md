@@ -823,7 +823,17 @@ landscape stay off at style 5 (`isHangaField`).
   needles. Two framing pines stand at the left and right edges of the home
   view; smaller pines stand outside the map's footprint and behind the camera.
   A pine inside about 22 degrees of the view axis ghosts out, so an orbit never
-  walls the map off behind a crown. Two draw calls.
+  walls the map off behind a crown. Four draw calls.
+- **Depth.** The map's discs and strokes do not write depth, so whatever
+  must hide them writes it first. Pads and trunks write depth: each has a
+  depth-only pass (no color) that alpha-tests at half coverage, so the
+  depth edge is crisp, the soft brush fringe stays color only, and a pine
+  nearer the camera hides the nodes and strokes behind it. A pine ghosting
+  out (under half opacity) lets the map show through, as its color does.
+  The pads still composite far to near. The snow floor is single-sided
+  (front face up): from below it is not drawn, so the massifs and the sky
+  stay in view at every orbit angle. The Washi and Dusk pines and reeds
+  (landscape.ts) already write depth and are unchanged.
 - **Cranes.** One flight of 4 to 6 red-crowned cranes on the Hanga schedule
   (`craneScheduleInto`: a 40 s crossing, then 50 to 90 s of empty sky) across
   the right half of the sky, clear of the title block. Wings spread below and
@@ -845,9 +855,9 @@ landscape stay off at style 5 (`isHangaField`).
   azimuth, so it moves with orbit like ink on the sheet.
 - **Motion.** Quiet (a story or a focus) fades the birds over 2 s. Reduced
   motion freezes the snow and hides the birds. Nothing pulses in brightness.
-- **Cost.** At the 1440x900 home view Bulguksa draws 109 calls and 312,687
-  triangles (QA on 4dda79a measured 106 and 311,611; Washi after the world
-  upgrade: 104 and 283,543); the world alone is 20 draws.
+- **Cost.** At the 1440x900 home view Bulguksa draws 111 calls and 331,553
+  triangles with the pine depth passes (before them: 109 and 312,687; QA on 4dda79a measured 106 and 311,611; Washi after the world
+  upgrade: 104 and 283,543); the world alone is 22 draws.
 - **Study.** Open-access study only (Commons CC0, PD, and Creative Commons
   photographs and the site plan; Cleveland CC0 paintings; exhibition text for
   Park Dae-sung). Nothing from the study is embedded; everything is procedural.
