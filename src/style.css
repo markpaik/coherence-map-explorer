@@ -388,6 +388,11 @@ body.tour-cramped .nav-hints {
 .nav-hints span {
   color: var(--ink-2);
 }
+/* No room left under the title block (chromelayout.ts, stack cramp): the
+   gestures step aside rather than lie over the title's lines. */
+.nav-hints.hints-cramped {
+  visibility: hidden;
+}
 .nav-hints.nav-hints-dim {
   opacity: 0.45;
 }
@@ -601,6 +606,11 @@ body.browsing .transit-key {
   color: var(--ink-2);
 }
 .style-credit[hidden] {
+  display: none;
+}
+/* No room left under the title block (chromelayout.ts, stack cramp): the
+   card keeps its radios and drops the credit line. */
+.style-toggle.style-credit-cramped .style-credit {
   display: none;
 }
 

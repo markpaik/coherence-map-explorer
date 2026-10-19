@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 import {
   besideLeft,
+  stackCramp,
   depthSpan,
   dockTopRight,
   hOverlap,
@@ -77,6 +78,41 @@ describe("liftClear: a bottom-band surface rises just clear of what sits under i
     const above = box(0, 690, 100, 720);
     const lift = liftClear(low, [above], 10);
     expect(shiftBox(low, 0, -lift).b).toBeLessThanOrEqual(680);
+  });
+});
+
+describe("stack cramp (F1): no room under the title, the credit and the hints step aside", () => {
+  // 1024 x 600 with 4.NF.B.3 focused (the side panel takes 480px): the title's
+  // line boxes as the census measured them, before the fix.
+  const title = [
+    box(31, 18, 518, 139), // headline
+    box(31, 145, 518, 170), // tagline
+    box(31, 186, 518, 222), // subline
+    box(31, 238, 518, 256), // statline
+    box(31, 262, 407, 288), // provline
+    box(31, 292, 407, 331), // licline
+  ];
+
+  it("a style card with its credit (74px) meets the license line: drop the credit", () => {
+    expect(stackCramp(title, box(186, 314, 518, 388), null).dropCredit).toBe(true);
+  });
+
+  it("the same card without the credit (52px) clears the title", () => {
+    expect(stackCramp(title, box(186, 336, 518, 388), null).dropCredit).toBe(false);
+  });
+
+  it("nav hints lifted into the license line step aside", () => {
+    expect(stackCramp(title, null, box(271, 315, 518, 330)).dropHints).toBe(true);
+    expect(stackCramp(title, null, box(251, 285, 518, 308)).dropHints).toBe(true);
+  });
+
+  it("at 1440 x 900 nothing in the stack meets the title, so nothing steps aside", () => {
+    const wide = [box(36, 27, 662, 100), box(36, 105, 662, 130), box(36, 143, 662, 170), box(36, 180, 662, 198), box(36, 204, 410, 230), box(36, 234, 410, 272)];
+    expect(stackCramp(wide, box(970, 750, 1220, 838), box(1144, 720, 1412, 742))).toEqual({ dropCredit: false, dropHints: false });
+  });
+
+  it("no title (hidden on a phone, stepped aside in a story): nothing to meet", () => {
+    expect(stackCramp([], box(0, 0, 100, 100), box(0, 0, 100, 100))).toEqual({ dropCredit: false, dropHints: false });
   });
 });
 
