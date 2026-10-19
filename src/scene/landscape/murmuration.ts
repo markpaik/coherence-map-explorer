@@ -23,7 +23,7 @@ export const SHEET = {
   azSwing: 2 * DEG,
   R: 3880,
   RSwing: 40,
-  h: 930,
+  h: 1150,
   hSwing: 20,
   pAz1: 97,
   pAz2: 41,
