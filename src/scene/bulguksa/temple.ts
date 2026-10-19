@@ -14,9 +14,12 @@
 //
 // Four draw calls: one merged fill mesh (paper tones baked per vertex, shaded
 // by a single light, with a per-vertex wet-wash amount the shader mottles),
-// and three line weights: HEAVY (the roofs: eaves, hips, ridges), MEDIUM
-// (walls, terraces, stairs, boulders), and HAIRLINE (the ruled ashlar grid,
-// posts, railings, step nosings).
+// and three line weights: HEAVY (the roofs, the lower terrace, the arches),
+// MEDIUM (walls, upper terraces, stairs), and HAIRLINE (broken ashlar, posts,
+// railings, step nosings). Every line is brushed (see brush()): long runs
+// break into strokes with small gaps, each stroke carries its own ink tone
+// (wet near, dry and paler far), and the rear of the complex pales a little
+// toward the paper (aerial perspective).
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -44,7 +47,7 @@ function washOf(hex: number): number {
 const linColor = (hex: number): THREE.Color => new THREE.Color().setHex(hex);
 
 /** Bake a flat color and the single-light shade into a non-indexed geometry. */
-function paint(geo: THREE.BufferGeometry, hex: number, shade = 0.12): THREE.BufferGeometry {
+function paint(geo: THREE.BufferGeometry, hex: number, shade = 0.12, topDark = 0): THREE.BufferGeometry {
   const g = geo.index ? geo.toNonIndexed() : geo;
   g.deleteAttribute("uv");
   g.computeVertexNormals();
@@ -54,13 +57,19 @@ function paint(geo: THREE.BufferGeometry, hex: number, shade = 0.12): THREE.Buff
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
   const d = new THREE.Vector3();
+  let yMax = -Infinity;
+  for (let i = 0; i < pos.count; i++) yMax = Math.max(yMax, pos.getY(i));
   for (let i = 0; i < pos.count; i += 3) {
     a.fromBufferAttribute(pos, i);
     b.fromBufferAttribute(pos, i + 1);
     d.fromBufferAttribute(pos, i + 2);
     const n = b.sub(a).cross(d.sub(a)).normalize();
     const k = 1 - shade + shade * Math.max(0, n.dot(LIGHT));
-    for (let j = 0; j < 3; j++) col.set([c.r * k, c.g * k, c.b * k], (i + j) * 3);
+    for (let j = 0; j < 3; j++) {
+      // A wall pools darker under its eave: its top vertices carry more ink.
+      const kk = pos.getY(i + j) > yMax - 1e-3 ? k * (1 - topDark) : k;
+      col.set([c.r * kk, c.g * kk, c.b * kk], (i + j) * 3);
+    }
   }
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
   g.setAttribute("aWash", new THREE.BufferAttribute(new Float32Array(pos.count).fill(washOf(hex)), 1));
@@ -72,9 +81,9 @@ function add(
   B: Builder,
   geo: THREE.BufferGeometry,
   hex: number,
-  opts: { edges?: boolean; shade?: number; angle?: number; heavy?: boolean } = {},
+  opts: { edges?: boolean; shade?: number; angle?: number; heavy?: boolean; topDark?: number } = {},
 ): void {
-  const g = paint(geo, hex, opts.shade ?? 0.12);
+  const g = paint(geo, hex, opts.shade ?? 0.12, opts.topDark ?? (hex === INK.wall ? 0.3 : 0));
   B.fills.push(g);
   if (opts.edges !== false) {
     const e = new THREE.EdgesGeometry(g, opts.angle ?? 24);
@@ -82,10 +91,10 @@ function add(
   }
 }
 
-function box(B: Builder, cx: number, y0: number, cz: number, w: number, h: number, d: number, hex: number, edges = true): void {
+function box(B: Builder, cx: number, y0: number, cz: number, w: number, h: number, d: number, hex: number, edges = true, heavy = false): void {
   const g = new THREE.BoxGeometry(w, h, d);
   g.translate(cx, y0 + h / 2, cz);
-  add(B, g, hex, { edges });
+  add(B, g, hex, { edges, heavy });
 }
 
 const line = (B: Builder, a: readonly number[], b: readonly number[]): void => {
@@ -379,6 +388,24 @@ function corridor(B: Builder, x0: number, x1: number, z0: number, z1: number, y0
   }
 }
 
+/** The pagodas' print scale against the halls. */
+export const PAGODA_SCALE = 1.6;
+
+/** Build a part at the origin, then scale it by k and place it at (cx, y0, cz). */
+function scaled(B: Builder, build: (b: Builder) => void, cx: number, y0: number, cz: number, k: number): void {
+  const B2: Builder = { fills: [], edges: [], heavy: [], lines: [] };
+  build(B2);
+  const m = new THREE.Matrix4().makeTranslation(cx, y0, cz).multiply(new THREE.Matrix4().makeScale(k, k, k));
+  for (const f of B2.fills) B.fills.push(f.applyMatrix4(m));
+  for (const e of B2.edges) B.edges.push(e.applyMatrix4(m));
+  for (const e of B2.heavy) B.heavy.push(e.applyMatrix4(m));
+  const v = new THREE.Vector3();
+  for (let i = 0; i < B2.lines.length; i += 3) {
+    v.set(B2.lines[i], B2.lines[i + 1], B2.lines[i + 2]).applyMatrix4(m);
+    B.lines.push(v.x, v.y, v.z);
+  }
+}
+
 /** Beomyeongnu's stone pillar: stacked blocks that step in and out. */
 function stackedPillar(B: Builder, cx: number, cz: number, y0: number, y1: number): void {
   const blocks = [2.6, 1.7, 2.2, 1.3, 1.9, 1.5, 2.4, 3.0];
@@ -386,13 +413,64 @@ function stackedPillar(B: Builder, cx: number, cz: number, y0: number, y1: numbe
   blocks.forEach((s, i) => box(B, cx, y0 + i * h, cz, s, h, s, INK.stone));
 }
 
+/** Brushed line segments: endpoint positions and per-endpoint ink tones (0..1). */
+export interface Brushed {
+  pos: Float32Array;
+  tone: Float32Array;
+}
+
 export interface TempleBuild {
   fill: THREE.BufferGeometry;
-  /** Segment endpoint positions (x, y, z pairs) for the heavy and medium weights. */
-  heavy: Float32Array;
-  medium: Float32Array;
-  /** The ruled hairlines. */
-  hair: THREE.BufferGeometry;
+  heavy: Brushed;
+  medium: Brushed;
+  hair: Brushed;
+}
+
+/** The longest unbroken stroke, in plan units (the front is 100 wide and
+ *  spans about 1.15 frames, so 24 units is under a third of the frame). */
+export const STROKE_MAX = 24;
+
+/**
+ * Brush a set of ruled segments: each run longer than a short stroke breaks
+ * into strokes of 4 to STROKE_MAX units with small gaps (wider and more often
+ * where the brush runs dry), each stroke gets its own ink tone, and the rear
+ * of the complex (plan z below -20) pales toward the paper.
+ */
+export function brush(src: ArrayLike<number>, seed: number, dry: number, maxLen = STROKE_MAX, minLen = 6): Brushed {
+  const pos: number[] = [];
+  const tone: number[] = [];
+  let k = 0;
+  const far = (z: number): number => Math.min(1, Math.max(0, (-z - 20) / 20));
+  for (let i = 0; i + 5 < src.length; i += 6) {
+    const ax = src[i], ay = src[i + 1], az = src[i + 2];
+    const bx = src[i + 3], by = src[i + 4], bz = src[i + 5];
+    const len = Math.hypot(bx - ax, by - ay, bz - az);
+    if (len < 1e-6) continue;
+    let t = 0;
+    while (t < len) {
+      const h1 = lhash(seed, k);
+      const h2 = lhash(seed + 1, k);
+      const h3 = lhash(seed + 2, k);
+      k++;
+      const piece = len <= minLen ? len : Math.min(len - t, minLen + (maxLen - minLen) * h1);
+      const t1 = t + piece;
+      const u0 = t / len;
+      const u1 = t1 / len;
+      const zm = az + (bz - az) * (0.5 * (u0 + u1));
+      const f = far(zm);
+      // Wet strokes print darkest; dry ones and far ones pale.
+      const ink = (1 - dry * 0.5 * h2) * (1 - 0.35 * f);
+      // A dry break skips the stroke's tail now and then (more often far).
+      const skipTail = h3 < dry * (0.25 + 0.4 * f) && piece > 3;
+      const e1 = skipTail ? u0 + (u1 - u0) * 0.6 : u1;
+      pos.push(ax + (bx - ax) * u0, ay + (by - ay) * u0, az + (bz - az) * u0);
+      pos.push(ax + (bx - ax) * e1, ay + (by - ay) * e1, az + (bz - az) * e1);
+      tone.push(ink, ink * (0.85 + 0.15 * h1));
+      const gap = len <= minLen ? 0 : 0.3 + (0.3 + dry) * h2 * (0.6 + f);
+      t = t1 + gap;
+    }
+  }
+  return { pos: new Float32Array(pos), tone: new Float32Array(tone) };
 }
 
 /** Build the whole complex in plan units. */
@@ -401,7 +479,7 @@ export function buildTemple(): TempleBuild {
   const T1 = 3.6; // lower terrace height
   const T2 = 6.0; // upper terrace top
   // -- the stone terrace: lower tier (boulders, ashlar), upper tier set back ----
-  box(B, 0, 0, -21, 100, T1, 42, INK.stone);
+  box(B, 0, 0, -21, 100, T1, 42, INK.stone, true, true);
   box(B, 2, T1, -24.5, 96, T2 - T1, 35, INK.stone);
   // Ground snow on top of the terraces (the court floors are untouched paper).
   box(B, 2, T2, -24.5, 95.8, 0.06, 34.8, INK.paper, false);
@@ -444,7 +522,7 @@ export function buildTemple(): TempleBuild {
     const a = new THREE.CircleGeometry(1.15, 10, 0, Math.PI);
     a.rotateY(s * Math.PI / 2);
     a.translate(JX + s * 1.82, 0, 4.4);
-    add(B, a, INK.soffit, { shade: 0 });
+    add(B, a, INK.fascia, { shade: 0, heavy: true });
   }
   // Corridors around the court.
   const cx0 = -4;
@@ -466,8 +544,9 @@ export function buildTemple(): TempleBuild {
   box(B, JX, T2, -25, 19, 1.0, 11, INK.stone);
   hall(B, JX, T2 + 1.0, -25, 15, 7.6, 3.6, { over: 1.9, h1: 2.2, h2: 1.4, lift: 0.7, kind: "paljak" }, 5);
   // Seokgatap (west) and Dabotap (east), in front of the hall; a lantern on the axis.
-  seokgatap(B, JX - 9, T2, -15);
-  dabotap(B, JX + 9, T2, -15);
+  // Painter's licence: the two pagodas print 1.6x, so they read as subjects.
+  scaled(B, (b) => seokgatap(b, 0, 0, 0), JX - 9.5, T2, -15, PAGODA_SCALE);
+  scaled(B, (b) => dabotap(b, 0, 0, 0), JX + 9.5, T2, -15, PAGODA_SCALE);
   box(B, JX, T2, -17.5, 0.5, 1.1, 0.5, INK.stone);
   box(B, JX, T2 + 1.1, -17.5, 0.9, 0.5, 0.9, INK.paper);
   // Museoljeon behind (the court's back), long and low.
@@ -491,10 +570,9 @@ export function buildTemple(): TempleBuild {
     g.dispose();
     return out;
   };
-  const heavy = flat(B.heavy);
-  const medium = flat(B.edges);
-  const hair = new THREE.BufferGeometry();
-  hair.setAttribute("position", new THREE.Float32BufferAttribute(B.lines, 3));
+  const heavy = brush(flat(B.heavy), 4101, 0.15, STROKE_MAX, 12);
+  const medium = brush(flat(B.edges), 4201, 0.4, 18, 7);
+  const hair = brush(B.lines, 4301, 0.9, 9, 3);
   for (const g of B.fills) g.dispose();
   for (const g of B.edges) g.dispose();
   for (const g of B.heavy) g.dispose();

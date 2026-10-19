@@ -37,8 +37,10 @@ import {
   MASSIFS,
   PINES,
   SNOW,
+  SLOPE_FRONT,
   TEMPLE,
   TEMPLE_LINE,
+  pathX,
   bcraneCount,
   bcraneDir,
   floorY,
@@ -281,43 +283,79 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
   const floorMat = shader(FLOOR_VERT, FLOOR_FRAG, { uPaper: { value: lin(INK.paper) }, uShade: { value: lin(INK.shade) } }, THREE.DoubleSide);
   place(new THREE.Mesh(floorGeo, floorMat), -7.4);
 
-  // -- ink marks along the far edge of the slope -----------------------------------
+  // -- ink marks along the far edge of the slope, and in front of the terrace ---
   const markBase = new THREE.PlaneGeometry(1, 1);
-  const markGeo = new THREE.InstancedBufferGeometry();
-  markGeo.index = markBase.index;
-  markGeo.setAttribute("position", markBase.getAttribute("position"));
-  const NM = 150;
-  const mk = new Float32Array(NM * 4);
-  const my = new Float32Array(NM);
-  for (let i = 0; i < NM; i++) {
-    const a = lhash(1401, i) * Math.PI * 2;
-    const r = 1250 + 420 * Math.sqrt(lhash(1402, i));
-    const x = r * Math.sin(a);
-    const z = -r * Math.cos(a);
-    mk.set([x, z, 22 + 46 * lhash(1403, i), lhash(1404, i)], i * 4);
-    my[i] = floorY(r) - 2;
-  }
-  markGeo.setAttribute("aMark", new THREE.InstancedBufferAttribute(mk, 4));
-  markGeo.setAttribute("aY", new THREE.InstancedBufferAttribute(my, 1));
-  markGeo.instanceCount = NM;
-  geos.push(markBase, markGeo);
+  geos.push(markBase);
   const markMat = shader(
     MARK_VERT,
     MARK_FRAG,
     { uSumi: { value: lin(INK.sumi) }, uPaper: { value: lin(INK.paper) }, uOpacity: { value: 0.72 } },
     THREE.DoubleSide,
   );
-  place(new THREE.Mesh(markGeo, markMat), -7.2);
+  const markSet = (spots: { x: number; z: number; h: number; seed: number }[]): THREE.Mesh => {
+    const markGeo = new THREE.InstancedBufferGeometry();
+    markGeo.index = markBase.index;
+    markGeo.setAttribute("position", markBase.getAttribute("position"));
+    const mk = new Float32Array(spots.length * 4);
+    const my = new Float32Array(spots.length);
+    spots.forEach((p, i) => {
+      mk.set([p.x, p.z, p.h, p.seed], i * 4);
+      my[i] = floorY(Math.hypot(p.x, p.z)) - 2;
+    });
+    markGeo.setAttribute("aMark", new THREE.InstancedBufferAttribute(mk, 4));
+    markGeo.setAttribute("aY", new THREE.InstancedBufferAttribute(my, 1));
+    markGeo.instanceCount = spots.length;
+    geos.push(markGeo);
+    return new THREE.Mesh(markGeo, markMat);
+  };
+  const far: { x: number; z: number; h: number; seed: number }[] = [];
+  for (let i = 0; i < 150; i++) {
+    const a = lhash(1401, i) * Math.PI * 2;
+    const r = 1250 + 420 * Math.sqrt(lhash(1402, i));
+    far.push({ x: r * Math.sin(a), z: -r * Math.cos(a), h: 22 + 46 * lhash(1403, i), seed: lhash(1404, i) });
+  }
+  place(markSet(far), -7.2);
+  // The snowfield in front of the terrace: small pines and reeds, clear of the path.
+  const near: { x: number; z: number; h: number; seed: number }[] = [];
+  for (let i = 0; near.length < SLOPE_FRONT.count && i < 400; i++) {
+    const x = SLOPE_FRONT.x0 + (SLOPE_FRONT.x1 - SLOPE_FRONT.x0) * lhash(1411, i);
+    const z = SLOPE_FRONT.z0 + (SLOPE_FRONT.z1 - SLOPE_FRONT.z0) * lhash(1412, i);
+    if (Math.abs(x - pathX(z)) < 34) continue;
+    near.push({ x, z, h: 9 + 16 * lhash(1413, i), seed: lhash(1414, i) });
+  }
+  place(markSet(near), -7.1);
+  // The path from the stair foot toward the viewer: two broken grey tracks.
+  const pathPts: number[] = [];
+  for (const side of [-1, 1]) {
+    let k = 0;
+    for (let z = SLOPE_FRONT.z0; z < SLOPE_FRONT.z1; ) {
+      const len = 6 + 10 * lhash(1421 + side, k);
+      const z1 = Math.min(SLOPE_FRONT.z1, z + len);
+      const w = 7 + 0.03 * (z - SLOPE_FRONT.z0);
+      if (lhash(1423 + side, k) < 0.8) {
+        pathPts.push(pathX(z) + side * w, floorY(Math.hypot(pathX(z), z)) + 0.4, z);
+        pathPts.push(pathX(z1) + side * w, floorY(Math.hypot(pathX(z1), z1)) + 0.4, z1);
+      }
+      z = z1 + 2 + 5 * lhash(1425 + side, k);
+      k++;
+    }
+  }
+  const pathGeo = new THREE.BufferGeometry();
+  pathGeo.setAttribute("position", new THREE.Float32BufferAttribute(pathPts, 3));
+  geos.push(pathGeo);
+  const pathMat = new THREE.LineBasicMaterial({ color: lin(INK.soffit), transparent: true, opacity: 0.5, depthWrite: false });
+  mats.push(pathMat);
+  place(new THREE.LineSegments(pathGeo, pathMat), -7.1);
 
   // -- temple -------------------------------------------------------------------
   const temple = buildTemple();
-  geos.push(temple.fill, temple.hair);
+  geos.push(temple.fill);
   const templeGroup = new THREE.Group();
   templeGroup.position.set(TEMPLE.x, TEMPLE.y, TEMPLE.z);
   templeGroup.scale.set(TEMPLE.scale, TEMPLE.scale * TEMPLE.yScale, TEMPLE.scale * TEMPLE.zScale);
   group.add(templeGroup);
   // Paper fills with a mottled wet-ink wash on the walls, soffits, and boulders.
-  const fillMat = shader(TEMPLE_VERT, TEMPLE_FRAG, {}, THREE.FrontSide, {
+  const fillMat = shader(TEMPLE_VERT, TEMPLE_FRAG, { uPaper: { value: lin(INK.paper) } }, THREE.FrontSide, {
     transparent: false,
     depthWrite: true,
     polygonOffset: true,
@@ -326,21 +364,40 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
   });
   // Ink line in three weights. The heavy and medium lines are measured in
   // world units, so the near edges print heavier than the far ones.
+  // Each stroke carries its own ink tone (temple.ts brush()), as a color
+  // between the paper and the sumi.
+  const sumiL = lin(INK.sumi);
+  const paperL = lin(INK.paper);
+  const toneColors = (tone: Float32Array): Float32Array => {
+    const c = new Float32Array(tone.length * 3);
+    for (let i = 0; i < tone.length; i++) {
+      const t = tone[i];
+      c[i * 3] = paperL.r + (sumiL.r - paperL.r) * t;
+      c[i * 3 + 1] = paperL.g + (sumiL.g - paperL.g) * t;
+      c[i * 3 + 2] = paperL.b + (sumiL.b - paperL.b) * t;
+    }
+    return c;
+  };
   const lineMats: LineMaterial[] = [];
-  const weighted = (pos: Float32Array, width: number, opacity: number): LineSegments2 => {
+  const weighted = (b: { pos: Float32Array; tone: Float32Array }, width: number, opacity: number): LineSegments2 => {
     const g = new LineSegmentsGeometry();
-    g.setPositions(pos);
+    g.setPositions(b.pos);
+    g.setColors(toneColors(b.tone));
     geos.push(g as unknown as THREE.BufferGeometry);
-    const m = new LineMaterial({ color: INK.sumi, linewidth: width, worldUnits: true, transparent: true, opacity, depthWrite: false });
+    const m = new LineMaterial({ color: 0xffffff, vertexColors: true, linewidth: width, worldUnits: true, transparent: true, opacity, depthWrite: false });
     lineMats.push(m);
     mats.push(m);
     return new LineSegments2(g, m);
   };
   const heavyLines = weighted(temple.heavy, TEMPLE_LINE.heavy, 0.92);
   const mediumLines = weighted(temple.medium, TEMPLE_LINE.medium, 0.8);
-  const hairMat = new THREE.LineBasicMaterial({ color: lin(INK.sumi), transparent: true, opacity: TEMPLE_LINE.hairOpacity, depthWrite: false });
+  const hairGeo = new THREE.BufferGeometry();
+  hairGeo.setAttribute("position", new THREE.BufferAttribute(temple.hair.pos, 3));
+  hairGeo.setAttribute("color", new THREE.BufferAttribute(toneColors(temple.hair.tone), 3));
+  geos.push(hairGeo);
+  const hairMat = new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: TEMPLE_LINE.hairOpacity, depthWrite: false });
   mats.push(hairMat);
-  const hairLines = new THREE.LineSegments(temple.hair, hairMat);
+  const hairLines = new THREE.LineSegments(hairGeo, hairMat);
   const templeFill = new THREE.Mesh(temple.fill, fillMat);
   // The boulder base: one ink-wash strip in front of the lowest course.
   const boulderGeo = new THREE.PlaneGeometry(100, 2.6, 1, 1);

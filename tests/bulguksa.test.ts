@@ -48,6 +48,7 @@ import {
   snowOffset,
   templeFrameShare,
 } from "../src/scene/bulguksa/params";
+import { STROKE_MAX, buildTemple } from "../src/scene/bulguksa/temple";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p: string): string => readFileSync(resolve(ROOT, p), "utf8");
@@ -203,18 +204,19 @@ describe("temple", () => {
     TEMPLE.y + py * TEMPLE.scale * TEMPLE.yScale,
     TEMPLE.z + pz * TEMPLE.scale * TEMPLE.zScale,
   ];
-  // Chrome measured in the live app (etch label band, Style card, filter rail).
-  const CHROME = {
-    1440: { etchBottom: 712, styleLeft: 886, railTop: 844 },
-    1280: { etchBottom: 572, styleLeft: 726, railTop: 664 },
-  } as const;
-  it("spans about 0.6 of the frame width at the home view", () => {
-    expect(templeFrameShare(1440 / 900)).toBeGreaterThan(0.57);
-    expect(templeFrameShare(1440 / 900)).toBeLessThan(0.63);
+  // The lowest grade etch label's bottom edge, measured in the live app.
+  const ETCH_BOTTOM = [712, 572, 468] as const;
+  it("spans about 1.1 to 1.2 of the frame width at the home view", () => {
+    expect(templeFrameShare(1440 / 900)).toBeGreaterThan(1.1);
+    expect(templeFrameShare(1440 / 900)).toBeLessThan(1.2);
   });
-  it("prints its ridge at least 24 px under the lowest etch label at 1440x900", () => {
-    const v = VIEWS[0];
-    expect(project(T(22, 15.1, -25), v)[1]).toBeGreaterThanOrEqual(CHROME[1440].etchBottom + 24);
+  it("puts Daeungjeon on the frame's centre line at the home view", () => {
+    expect(Math.abs(project(T(22, 15.1, -25), VIEWS[0])[0] - 720)).toBeLessThan(10);
+  });
+  it("prints the main hall's ridge at least 24 px under the lowest etch label at every viewport", () => {
+    VIEWS.forEach((v, i) => {
+      expect(project(T(22, 15.1, -25), v)[1]).toBeGreaterThanOrEqual(ETCH_BOTTOM[i] + 24);
+    });
   });
   it("stays below the map: its highest roof prints under the lowest standard", () => {
     const core: GraphCore = JSON.parse(read("public/data/graph-core.json"));
@@ -227,13 +229,38 @@ describe("temple", () => {
     for (const n of core.nodes) lowest = Math.max(lowest, project([n.pos[0], n.pos[1] - cy, n.pos[2] - cz], v)[1]);
     expect(project(T(22, 15.1, -25), v)[1]).toBeGreaterThan(lowest);
   });
-  it("keeps the main hall left of the Style card at 1440x900 and 1280x720", () => {
-    for (const [i, w] of [[0, 1440], [1, 1280]] as const) {
-      expect(project(T(22 + 11.4, 10, -21), VIEWS[i])[0]).toBeLessThan(CHROME[w].styleLeft);
+  it("keeps every part of the complex (pagoda finials, rear halls) 20 px or more under the etch labels", () => {
+    const pos = buildTemple().fill.getAttribute("position");
+    VIEWS.forEach((v, i) => {
+      let top = Infinity;
+      for (let k = 0; k < pos.count; k++) top = Math.min(top, project(T(pos.getX(k), pos.getY(k), pos.getZ(k)), v)[1]);
+      expect(top).toBeGreaterThanOrEqual(ETCH_BOTTOM[i] + 20);
+    });
+  });
+  it("breaks every ruled line into strokes no longer than a third of the frame", () => {
+    const t = buildTemple();
+    // The front spans 100 plan units over about 1.15 frames.
+    const third = 100 / templeFrameShare(1440 / 900) / 3;
+    for (const b of [t.heavy, t.medium, t.hair]) {
+      for (let i = 0; i < b.pos.length; i += 6) {
+        const len = Math.hypot(b.pos[i + 3] - b.pos[i], b.pos[i + 4] - b.pos[i + 1], b.pos[i + 5] - b.pos[i + 2]);
+        expect(len).toBeLessThanOrEqual(Math.min(third, STROKE_MAX) + 1e-6);
+      }
     }
   });
-  it("prints the terrace foot above the filter rail at 1440x900", () => {
-    expect(project(T(0, 0, 0), VIEWS[0])[1]).toBeLessThan(CHROME[1440].railTop);
+  it("pales its rear strokes toward the paper (aerial perspective)", () => {
+    const t = buildTemple();
+    const mean = (pred: (z: number) => boolean): number => {
+      let sum = 0;
+      let n = 0;
+      for (let i = 0; i < t.medium.pos.length; i += 3) {
+        if (!pred(t.medium.pos[i + 2])) continue;
+        sum += t.medium.tone[i / 3];
+        n++;
+      }
+      return sum / n;
+    };
+    expect(mean((z) => z < -34)).toBeLessThan(mean((z) => z > -8) - 0.1);
   });
   it("has its terrace foot at the snow slope", () => {
     expect(Math.abs(floorY(TEMPLE.z) - TEMPLE.y)).toBeLessThan(2);

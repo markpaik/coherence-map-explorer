@@ -203,28 +203,31 @@ export function homeSkyPx(az: number, el: number, R: number, w: number, h: numbe
 export const TEMPLE = {
   /** Width of the front terrace in plan units. */
   width: 100,
-  /** World units per plan unit (across). */
-  scale: 5.53,
+  /** World units per plan unit (across): the front spans about 1.15 frames. */
+  scale: 9.23,
   /**
    * The raised viewpoint of the ink tradition: heights and depths print
-   * compressed against the width (0.5 and 0.45 of it), so the whole complex
+   * compressed against the width (0.4 and 0.32 of it), so the whole complex
    * reads from slightly above and its roofs print below the grade labels.
    */
-  yScale: 0.5,
-  zScale: 0.45,
-  /**
-   * The plan's x = 0 (the terrace's centre) in world x: shifted left so the
-   * main hall and the stair bridges sit left of the Style card.
-   */
-  x: -130,
+  yScale: 0.4,
+  zScale: 0.32,
+  /** The plan's x = 0 (the terrace's centre) in world x: Daeungjeon's axis
+   *  (plan x 22) on the frame's centre line. */
+  x: -203,
   /** Front face of the terrace (world z) and its ground (world y). */
-  z: 300,
+  z: 380,
   y: -255,
 } as const;
 
+/** The snowfield in front of the terrace (world x and z): ink marks and a path. */
+export const SLOPE_FRONT = { x0: -560, x1: 470, z0: 404, z1: 640, count: 34 } as const;
+/** The path's centre line: from the stair foot (Daeungjeon's axis) toward the viewer. */
+export const pathX = (z: number): number => TEMPLE.x + 22 * TEMPLE.scale + 26 * Math.sin((z - SLOPE_FRONT.z0) / 90);
+
 /** Temple ink line: heavy (roofs) and medium (walls, terraces, stairs) widths
  *  in world units, so near edges print heavier; the ruled hairlines' opacity. */
-export const TEMPLE_LINE = { heavy: 1.35, medium: 0.7, hairOpacity: 0.32 } as const;
+export const TEMPLE_LINE = { heavy: 1.8, medium: 0.85, hairOpacity: 0.36 } as const;
 
 /** The share of the frame width the temple front spans at the home view. */
 export function templeFrameShare(aspect: number): number {

@@ -784,6 +784,7 @@ export const TEMPLE_VERT = /* glsl */ `
   }
 `;
 export const TEMPLE_FRAG = /* glsl */ `
+  uniform vec3 uPaper;
   varying vec3 vCol;
   varying float vWash;
   varying vec3 vP;
@@ -796,6 +797,8 @@ export const TEMPLE_FRAG = /* glsl */ `
       // Wet wash: darker blooms with a pale core, never brighter than the tone.
       col *= 1.0 - vWash * (0.08 + 0.26 * smoothstep(0.35, 0.85, n));
     }
+    // Aerial perspective: the rear halls (plan z below -20) pale a touch.
+    col = mix(col, uPaper, 0.28 * smoothstep(-20.0, -40.0, vP.z));
     gl_FragColor = vec4(col, 1.0);
   }
 `;
