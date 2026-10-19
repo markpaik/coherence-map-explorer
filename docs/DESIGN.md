@@ -751,47 +751,58 @@ landscape stay off at style 5 (`isHangaField`).
   ink (#4a4339) is 5.3:1. Paper ink on a dark band was rejected because the
   dark band would have to fall below L 0.09 to carry it, and the sumi birds and
   inscription in the band would then vanish. No box, scrim, mist, or halo.
-- **Massifs (round 2).** Four concentric walls (R 1750 to 3300) painted as
-  monumental ink masses: a wet sumi wash over the rock (#5a5650 to #2a2824,
-  mottled by three octaves of noise, darker on the lee face, pooled darker at
-  the snow's edge), jun strokes as dark tapered marks along the slope (cells of
-  40 by 12 units, one direction per patch so each stroke stays straight,
-  gathered in clumps), and a dark tide line where the wash dried at the base.
-  Snow is reserved paper: a stepped, ragged cap that follows the silhouette,
-  shelves under each inner fold with a grey lee wash, and the low hills in
-  front of and behind the map are snow from crest to base. The rock shows
-  only where the envelope passes SNOW_ALL_ENV 0.45 (fully from 0.7) and
-  reaches down from the crest as the massif rises, so snow and rock meet on a
-  ragged slant. Far walls lift toward the paper (mist). The crest stays below
-  52% of the frame height inside the map's central 40% of width, and no rock
-  lies behind the body of the map (5th to 95th percentile of its standards) at
-  1440x900, 1280x720, or 1024x600 (tests). Only the snow tones enter the
-  pigment gate; the rock is dark by design and never sits behind the map at
-  the home view.
+- **Massifs (round 3).** Four concentric walls (R 1750 to 3300, ring tops
+  -10, 65, 150, 260) painted as monumental ink masses: a wet sumi wash over
+  the rock (#5a5650 to #2a2824, mottled by three octaves of noise, darker on
+  the lee face, pooled darker at the snow's edge), jun strokes, and a dark
+  tide line where the wash dried at the base. Snow is reserved paper: a
+  stepped, ragged cap that follows the silhouette, with shelves under each
+  inner fold and a grey lee wash. The far crests reach the map's upper third
+  at the home view (the median crest of the far ring prints between y 300 and
+  440 at 1440x900, a test), and each far crest prints above the nearer one.
+  Jun strokes are brush marks: each patch of 110 by 80 units holds one slope
+  direction, and in it groups of 3 to 7 strokes (cells of 90 by 52, some
+  left empty) lie 6.5 units apart, each tapered at both ends on a sine,
+  slightly bowed along the slope, with a dry-brush break in the middle of the
+  strokes longer than 30 units.
+  Rock may lie behind the map, but there a mist pales it toward the paper:
+  0.8 of the way inside the map's body at the home view (the frame's centre
+  76% of width, fading out by 88%, and below the map's top edge, fading over
+  160 units above it). The title block's corner is misted the same way in
+  screen space (left of 50 to 62% of the width, above the band bottom), so
+  the chrome text keeps its band. Above the map and at the sides the ink is
+  full strength. The gate (a test): over the map body's 5th to 95th
+  percentile box at 1440x900, 1280x720, and 1024x600, the darkest mark a face
+  can carry (sumi) paled by the mist gives every pigment at least 3:1. The
+  worst case is data at 3.27:1 (number 3.41, geometry 3.59, algebra 5.35).
 - **Snow slope.** A gentle dome of paper under the map with faint wind drifts
   toward the rim, three wandering grey hairlines that draw the slope's shape,
   and ink marks (small pines, reed tufts, rocks) along its far edge.
-- **Temple (round 2).** Low-poly geometry in plan units (front terrace 100
+- **Temple (round 3).** Low-poly geometry in plan units (front terrace 100
   wide), drawn as an ink drawing in three weights: HEAVY roof lines (eaves,
-  hips, ridges; 1.35 world units), MEDIUM wall, terrace, stair, and boulder
-  lines (0.7 world units; widths in world units, so near edges print heavier),
-  and HAIRLINE ruled lines (the ashlar grid, posts, railings, nosings; 1 px at
-  0.32 opacity). Fills are paper tones shaded by one light; walls (#d9d4ca),
-  soffits, and stone carry a mottled wet-ink wash, and the boulder base is a
-  wet ink wash (#8e897f). The terrace has its boulder base and ashlar grid;
-  Cheongungyo (16 steps) and Baegungyo (18) climb to Jahamun, with the arch
-  under the lower flight; Yeonhwagyo (10) and Chilbogyo (8) climb to Anyangmun;
-  Beomyeongnu is raised on its stacked stone pillar; corridors enclose the
-  court; Daeungjeon is raised on its platform with Seokgatap (plain, three
-  stories) to the west and Dabotap (stair base, pillars, octagonal balcony,
-  lotus tier) to the east; Museoljeon closes the back; Geungnakjeon sits in the
-  west court. Every roof is snow: lifted corners, ridge heaps, hip-end heaps, a
-  dark row of tile ends under each eave lip, a soffit in shadow, and a faint
-  muted dancheong band. Scale 7.6 world units per plan unit (1.5x round 1),
-  heights at 0.7 and depths at 0.65 of it (the raised viewpoint), front face at
-  z 300 and ground y -252: the front spans about 82% of the frame width at the
-  home view, the main hall's ridge prints below the lowest standard and the
-  search row, and the terrace foot above the filter rail (a test). Four draw
+  hips, ridges; 1.35 world units), MEDIUM wall, terrace, and stair lines (0.7
+  world units; widths in world units, so near edges print heavier), and
+  HAIRLINE ruled lines (a few broken courses of ashlar, posts, railings,
+  nosings; 1 px at 0.32 opacity). Fills are paper tones shaded by one light;
+  walls (#d9d4ca), soffits, and stone carry a mottled wet-ink wash. The
+  boulder base is a strip of rounded ink-wash stones drawn as an SDF of
+  overlapping ovals, each with a wet dark edge and a paper highlight, with no
+  facets. Cheongungyo (16 steps) and Baegungyo (18) climb to Jahamun, with the
+  arch under the lower flight; Yeonhwagyo (10) and Chilbogyo (8) climb to
+  Anyangmun; Beomyeongnu is raised on its stacked stone pillar; corridors
+  enclose the court; Daeungjeon is raised on its platform with Seokgatap
+  (plain, three stories) to the west and Dabotap (stair base, pillars,
+  octagonal balcony, lotus tier) to the east; Museoljeon closes the back;
+  Geungnakjeon sits in the west court. Every roof is snow: lifted corners,
+  deep ridge and hip-end heaps, a deep eave lip with a dark row of tile ends,
+  a soffit in shadow, and a faint muted dancheong band. Scale 5.53 world units
+  per plan unit, heights at 0.5 and depths at 0.45 of it (the raised
+  viewpoint), centre x -130, front face at z 300, ground y -255: the front
+  spans about 60% of the frame width at the home view. At 1440x900 the main
+  hall's ridge prints at y 745 (33 px under the lowest etch label, 712), the
+  hall spans x 617 to 799 (left of the Style card, 886), and the terrace foot
+  prints at y 840 (above the filter rail, 844). At 1280x720 the hall ends at
+  x 706 (left of the Style card, 726). Tests hold each of these. Five draw
   calls.
 - **Pines (round 2).** Painted, not modeled. Trunks and limbs are smooth
   tapered tubes inked in the fragment shader: a wet-ink edge from the facing
@@ -825,8 +836,8 @@ landscape stay off at style 5 (`isHangaField`).
   azimuth, so it moves with orbit like ink on the sheet.
 - **Motion.** Quiet (a story or a focus) fades the birds over 2 s. Reduced
   motion freezes the snow and hides the birds. Nothing pulses in brightness.
-- **Cost.** At the 1440x900 home view Bulguksa draws 106 calls and 318,805
-  triangles (Washi: 101 and 269,177); the world alone is 17 draws.
+- **Cost.** At the 1440x900 home view Bulguksa draws 107 calls and 311,623
+  triangles (Washi: 101 and 269,177); the world alone is 18 draws.
 - **Study.** Open-access study only (Commons CC0, PD, and Creative Commons
   photographs and the site plan; Cleveland CC0 paintings; exhibition text for
   Park Dae-sung). Nothing from the study is embedded; everything is procedural.
