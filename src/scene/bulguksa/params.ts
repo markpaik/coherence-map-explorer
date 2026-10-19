@@ -95,8 +95,8 @@ export const MASSIFS: readonly MassifSpec[] = [
  * bottom, so at the home view the map prints over snow, never over rock.
  * The rock shows from SNOW_ALL_ENV and fully from SNOW_ROCK_ENV.
  */
-export const SNOW_ALL_ENV = 0.34;
-export const SNOW_ROCK_ENV = 0.6;
+export const SNOW_ALL_ENV = 0.45;
+export const SNOW_ROCK_ENV = 0.7;
 export function massifSnowAll(theta: number): number {
   const e = massifEnvelope(theta);
   const t = Math.min(1, Math.max(0, (e - SNOW_ALL_ENV) / (SNOW_ROCK_ENV - SNOW_ALL_ENV)));

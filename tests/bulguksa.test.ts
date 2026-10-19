@@ -39,6 +39,7 @@ import {
   floorY,
   massifCrest,
   massifFillTones,
+  massifSnowAll,
   median,
   murmEdge,
   murmPosition,
@@ -146,6 +147,31 @@ describe("massifs keep the map's center region clear at the home view", () => {
       }
     }
   });
+  it("show only snow (no rock) behind the map at the home view", () => {
+    const core: GraphCore = JSON.parse(read("public/data/graph-core.json"));
+    const ys = core.nodes.map((n) => n.pos[1]);
+    const zs = core.nodes.map((n) => n.pos[2]);
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+    for (const v of VIEWS) {
+      const pts = core.nodes.map((n) => project([n.pos[0], n.pos[1] - cy, n.pos[2] - cz], v));
+      // The map's body: the 5th to 95th percentile of its standards on screen.
+      const xs = pts.map((p) => p[0]).sort((a, b) => a - b);
+      const yv = pts.map((p) => p[1]).sort((a, b) => a - b);
+      const q = (arr: number[], f: number): number => arr[Math.floor(arr.length * f)];
+      const x0 = q(xs, 0.05);
+      const x1 = q(xs, 0.95);
+      const y1 = q(yv, 0.95);
+      for (let az = -90; az <= 90; az += 0.5) {
+        const th = az * DEG;
+        for (const m of MASSIFS) {
+          const [x, y] = project([m.R * Math.sin(th), massifCrest(m, th), -m.R * Math.cos(th)], v);
+          // A massif face whose crest prints inside the map's box must be all snow.
+          if (x > x0 && x < x1 && y < y1) expect(massifSnowAll(th), `${v[0]} az ${az} R ${m.R}`).toBeGreaterThan(0.995);
+        }
+      }
+    }
+  });
   it("rise as monumental masses at the sides", () => {
     const side = Math.max(...MASSIFS.map((m) => massifCrest(m, 70 * DEG)));
     const front = Math.max(...MASSIFS.map((m) => massifCrest(m, 0)));
@@ -157,11 +183,11 @@ describe("massifs keep the map's center region clear at the home view", () => {
 });
 
 describe("temple", () => {
-  it("spans about 55% of the frame width at the home view", () => {
-    expect(templeFrameShare(1440 / 900)).toBeGreaterThan(0.52);
-    expect(templeFrameShare(1440 / 900)).toBeLessThan(0.58);
+  it("spans about 1.5x the first round's 55% of the frame width at the home view", () => {
+    expect(templeFrameShare(1440 / 900)).toBeGreaterThan(0.78);
+    expect(templeFrameShare(1440 / 900)).toBeLessThan(0.86);
   });
-  it("stays below the map: its highest roof prints under the lowest grade label", () => {
+  it("stays below the map: its highest roof prints under the lowest standard, in the gap above the filter rail", () => {
     const core: GraphCore = JSON.parse(read("public/data/graph-core.json"));
     const ys = core.nodes.map((n) => n.pos[1]);
     const zs = core.nodes.map((n) => n.pos[2]);
@@ -172,9 +198,11 @@ describe("temple", () => {
     for (const n of core.nodes) lowest = Math.max(lowest, project([n.pos[0], n.pos[1] - cy, n.pos[2] - cz], v)[1]);
     // Daeungjeon's ridge: 15.1 plan units up, 25 plan units back from the front face.
     const ridge = project([0, TEMPLE.y + 15.1 * TEMPLE.scale * TEMPLE.yScale, TEMPLE.z - 25 * TEMPLE.scale * TEMPLE.zScale], v);
-    expect(ridge[1]).toBeGreaterThan(lowest + 40);
-    // And its terrace foot is still on screen, above the bottom chrome.
-    expect(project([0, TEMPLE.y, TEMPLE.z], v)[1]).toBeLessThan(860);
+    expect(ridge[1]).toBeGreaterThan(lowest);
+    // The main hall prints below the search row (bottom 648 px at 1440x900)
+    // and the terrace foot above the filter rail (top 845 px).
+    expect(ridge[1]).toBeGreaterThan(648);
+    expect(project([0, TEMPLE.y, TEMPLE.z], v)[1]).toBeLessThan(845);
   });
   it("has its terrace foot at the snow slope", () => {
     expect(Math.abs(floorY(TEMPLE.z) - TEMPLE.y)).toBeLessThan(2);
@@ -184,9 +212,9 @@ describe("temple", () => {
 describe("murmuration", () => {
   const SAMPLE = Array.from({ length: 400 }, (_, i) => i * 5);
   const TIMES = Array.from({ length: 40 }, (_, i) => i * 31.7);
-  it("is one draw of 1500 to 2500 starlings with a thin straggler fringe", () => {
-    expect(BMURM.count).toBeGreaterThanOrEqual(1500);
-    expect(BMURM.count).toBeLessThanOrEqual(2500);
+  it("is one draw of about 1200 starlings with a thin straggler fringe", () => {
+    expect(BMURM.count).toBeGreaterThanOrEqual(1000);
+    expect(BMURM.count).toBeLessThanOrEqual(1500);
     let fringe = 0;
     for (let i = 0; i < BMURM.count; i++) fringe += murmSeed(i)[3];
     expect(fringe / BMURM.count).toBeGreaterThan(0.02);
