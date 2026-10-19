@@ -56,27 +56,34 @@ export interface BankSpec {
   top: number;
 }
 /** Share of the half-axes that stays flat before the bank rolls down. */
-export const BANK_FLAT = 0.35;
-/** The dark strip at the waterline: its height above the water. */
-export const BANK_STRIP = 14;
+export const BANK_FLAT = 0.45;
+/** The dark strip at the waterline: the outer share of the bank's half-axes. */
+export const BANK_STRIP = 0.12;
 
 /** The water's height under the landscape (core.ts FLOOR_Y). */
 const WATER_Y = FLOOR_Y;
 
 /** The reed bank's mound: on the far shore, left of the map at home. */
-const REED_BANK: BankSpec = { x: -976, z: -976, rx: 210, rz: 100, rot: -45 * DEG, top: -590 };
+const REED_BANK: BankSpec = { x: -960, z: -960, rx: 240, rz: 105, rot: -45 * DEG, top: -680 };
 
 export const BANKS: readonly BankSpec[] = [
   REED_BANK,
   // Under the two framing pines.
-  { x: -1090, z: -380, rx: 120, rz: 90, rot: 20 * DEG, top: -740 },
-  { x: 1090, z: -330, rx: 120, rz: 90, rot: -20 * DEG, top: -740 },
+  { x: -1090, z: -380, rx: 175, rz: 120, rot: 20 * DEG, top: -700 },
+  { x: 1090, z: -330, rx: 175, rz: 120, rot: -20 * DEG, top: -700 },
   // The middle-ground groups (MID_PINES).
-  { x: -1170, z: 430, rx: 180, rz: 100, rot: -30 * DEG, top: -700 },
-  { x: 1080, z: 560, rx: 170, rz: 95, rot: 35 * DEG, top: -705 },
+  { x: -1170, z: 430, rx: 180, rz: 100, rot: -30 * DEG, top: -725 },
+  { x: 1080, z: 560, rx: 170, rz: 95, rot: 35 * DEG, top: -728 },
 ];
 
-/** Elliptical radius (0 at the center, 1 at the waterline) of (x, z). */
+/** The bank's irregular outline: the waterline radius at angle a (radians,
+ *  in the bank's own frame) as a share of the ellipse, so no bank prints as a
+ *  perfect ellipse. */
+export function bankLobe(b: BankSpec, a: number): number {
+  const p = (b.x * 0.013 + b.z * 0.007) % TAU;
+  return 1 + 0.15 * Math.sin(3 * a + p) + 0.07 * Math.sin(5 * a + 2 * p);
+}
+/** Radius (0 at the center, 1 at the waterline) of (x, z) on a bank. */
 export function bankU(b: BankSpec, x: number, z: number): number {
   const dx = x - b.x;
   const dz = z - b.z;
@@ -84,7 +91,7 @@ export function bankU(b: BankSpec, x: number, z: number): number {
   const s = Math.sin(b.rot);
   const u = (dx * c + dz * s) / b.rx;
   const v = (-dx * s + dz * c) / b.rz;
-  return Math.hypot(u, v);
+  return Math.hypot(u, v) / bankLobe(b, Math.atan2(v, u));
 }
 /** Height of the bank's profile at elliptical radius u (u >= 1: the water). */
 export function bankProfile(b: BankSpec, u: number): number {
@@ -506,8 +513,9 @@ export function buildBanks(): THREE.BufferGeometry {
       const u = i / NR;
       for (let j = 0; j <= NS; j++) {
         const a = (j / NS) * TAU;
-        const lu = u * b.rx * Math.cos(a);
-        const lv = u * b.rz * Math.sin(a);
+        const lobe = bankLobe(b, a);
+        const lu = u * lobe * b.rx * Math.cos(a);
+        const lv = u * lobe * b.rz * Math.sin(a);
         const x = b.x + lu * c - lv * sn;
         const z = b.z + lu * sn + lv * c;
         const y = bankProfile(b, Math.min(u, 0.9999));
@@ -785,11 +793,11 @@ export const BANK_FRAG = /* glsl */ `
     // Flat bokashi: the top a shade lighter, the body, then the dark strip of
     // bank at the waterline (a hard print edge, anti-aliased).
     vec3 col = mix(uBank, uBankTop, smoothstep(0.2, 0.9, 1.0 - vBank.y));
-    float fh = max(fwidth(h), 1e-3);
-    float strip = clamp((${f(BANK_STRIP)} - h) / fh + 0.5, 0.0, 1.0);
-    col = mix(col, uStrip, strip);
-    // The bank's very foot melts into the water over a few units.
-    float a = smoothstep(0.0, 3.0, h + 1.0) * uOpacity;
+    // The dark strip of bank at the waterline, printed as a bokashi that
+    // deepens toward the water, then the foot melts into the water itself.
+    float strip = smoothstep(${f(1 - 2.2 * BANK_STRIP)}, ${f(1 - 0.3 * BANK_STRIP)}, vBank.y);
+    col = mix(col, uStrip, strip * 0.85);
+    float a = (1.0 - smoothstep(0.965, 1.0, vBank.y)) * uOpacity;
     if (a < 0.01) discard;
     gl_FragColor = vec4(col, a);
   }

@@ -51,6 +51,7 @@ import {
   reedBlade,
   groundAt,
   bankProfile,
+  bankLobe,
   BANKS,
   MID_PINES,
   MID_PINE_SITES,
@@ -726,7 +727,7 @@ describe("pines and reeds", () => {
       const b = reedBlade(i);
       const g = groundAt(b.x, b.z);
       // On the reed bank's top, above the water, and rooted into it.
-      expect(g).toBeGreaterThan(FLOOR_Y + 100);
+      expect(g).toBeGreaterThan(FLOOR_Y + 50);
       expect(b.y).toBeLessThan(g);
       expect(g - b.y).toBeLessThan(8);
     }
@@ -739,8 +740,8 @@ describe("pines and reeds", () => {
       // The whole bank lies on the water, inside the near ring.
       for (let i = 0; i < 64; i++) {
         const a = (i / 64) * TAU;
-        const lu = bk.rx * Math.cos(a);
-        const lv = bk.rz * Math.sin(a);
+        const lu = bk.rx * bankLobe(bk, a) * Math.cos(a);
+        const lv = bk.rz * bankLobe(bk, a) * Math.sin(a);
         const x = bk.x + lu * Math.cos(bk.rot) - lv * Math.sin(bk.rot);
         const z = bk.z + lu * Math.sin(bk.rot) + lv * Math.cos(bk.rot);
         expect(Math.hypot(x, z)).toBeLessThan(RINGS[0].R - 2);
@@ -811,7 +812,11 @@ describe("pines and reeds", () => {
         const hh = (s.hh / D) * k;
         const box = [c[0] - hw, c[1] - hh, c[0] + hw, c[1] + hh];
         if (box[2] < 0 || box[0] > v.w || box[3] < 0 || box[1] > v.h) continue;
-        for (const R of CHROME[v.w]) {
+        // The reeds and the pine on their bank grow at the bottom edge, so at
+        // 1024x600 their roots may pass behind the filter rail (the last CHROME
+        // rect). The framing pines keep clear of it too.
+        const rects = s.group === "frame" ? CHROME[v.w] : CHROME[v.w].slice(0, -1);
+        for (const R of rects) {
           const m = 6;
           const hit = box[2] > R[0] - m && box[0] < R[2] + m && box[3] > R[1] - m && box[1] < R[3] + m;
           expect(hit, `${s.kind} at ${v.w}x${v.h} hits [${R}]`).toBe(false);
