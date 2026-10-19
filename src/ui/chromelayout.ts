@@ -143,6 +143,24 @@ export function besideLeft(
   return box;
 }
 
+/**
+ * The stack-cramp rule (F1). A short window with the side panel open (1024 x
+ * 600 with a standard focused) leaves the bottom-right stack too little room
+ * under the title block: the style card and the nav hints rise into the
+ * title's lines. Two things step aside, smallest loss first: the style card
+ * drops its credit line when the card meets the title, and the nav hints
+ * (mouse gestures, help only) hide when they meet it. `title` holds the
+ * title's line boxes (their element rects, as the census measures them).
+ */
+export function stackCramp(
+  title: readonly Box[],
+  styleCard: Box | null,
+  hints: Box | null,
+): { dropCredit: boolean; dropHints: boolean } {
+  const meets = (b: Box | null): boolean => !!b && title.some((t) => overlaps(b, t));
+  return { dropCredit: meets(styleCard), dropHints: meets(hints) };
+}
+
 /** Comfortable and minimum heights for the Ascent depth scale's column. */
 export const DEPTH_ROOM = 160;
 export const DEPTH_MIN = 120;
@@ -594,33 +612,53 @@ export function installChromeLayout(): () => void {
     // The style card: beside the pose control, left of it, when the region has
     // the width; otherwise one row above it (its CSS default), rising further
     // only when what is below it grows.
+    // The title's line boxes where they stand now, for the stack-cramp rule.
+    const titleLines: Box[] = [];
+    if (title && titleLaid && !title.classList.contains("title-cramped"))
+      for (const child of title.children)
+        if (getComputedStyle(child).display !== "none") titleLines.push(rectBox(child.getBoundingClientRect()));
     const styleCard = q(".style-toggle");
-    if (shown(styleCard)) {
-      const def = shiftBox(restingBox(styleCard), cur("--style-dx"), cur("--lift-style"));
+    styleCard?.classList.remove("style-credit-cramped");
+    const placeStyle = (card: HTMLElement): Box => {
+      const def = shiftBox(restingBox(card), cur("--style-dx"), cur("--lift-style"));
       const keepOff = tInk ? [...floor, tInk] : floor;
       const side = poseBox ? besideLeft(poseBox, def.r - def.l, def.b - def.t, GAP_STACK, region.l, keepOff) : null;
       if (side) {
         setVar("--style-dx", def.r - side.r);
         setVar("--lift-style", def.b - side.b);
-        floor.push(side);
-      } else {
-        const lift = liftClear(def, floor, GAP_STACK);
-        setVar("--style-dx", 0);
-        setVar("--lift-style", lift);
-        floor.push(shiftBox(def, 0, -lift));
+        return side;
       }
+      const lift = liftClear(def, floor, GAP_STACK);
+      setVar("--style-dx", 0);
+      setVar("--lift-style", lift);
+      return shiftBox(def, 0, -lift);
+    };
+    if (shown(styleCard)) {
+      let placed = placeStyle(styleCard);
+      // Stack cramp: no room under the title for the credit line.
+      if (stackCramp(titleLines, placed, null).dropCredit && styleCard.querySelector(".style-credit:not([hidden])")) {
+        styleCard.classList.add("style-credit-cramped");
+        placed = placeStyle(styleCard);
+      }
+      floor.push(placed);
     }
 
     // The nav hints, then the tour card. A short window with the panel open can
     // leave the tour card no room under the title; the hints (mouse gestures the
     // tour's backdrop blocks anyway) then step aside for the tour's duration.
     const hints = q("#nav-hints");
+    hints?.classList.remove("hints-cramped");
     const tourCramped = body.classList.contains("tour-cramped");
     let hintsBox: Box | null = null;
     if (shown(hints) || (tourCramped && touring && laidOut(hints))) {
       const h = lifted(hints!, "--lift-hints", GAP_STACK, floor);
       setVar("--lift-hints", h.lift);
       hintsBox = h.box;
+      // Stack cramp: the hints would rise into the title's lines.
+      if (stackCramp(titleLines, null, hintsBox).dropHints) {
+        hints!.classList.add("hints-cramped");
+        hintsBox = null;
+      }
     }
     const tourCard = q(".tour-card");
     if (touring && present(tourCard, true)) {
