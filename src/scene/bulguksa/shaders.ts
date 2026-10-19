@@ -676,6 +676,14 @@ export const WOOD_FRAG = /* glsl */ `
   ${NOISE_GLSL}
   void main() {
     if (vA < 0.01) discard;
+  #ifdef DEPTH_ONLY
+    // The depth pass: a trunk occludes the map only while it prints solid.
+    // While it fades out of the view's centre (vA under 0.5) the map shows
+    // through it, as it does through the faded color.
+    if (vA < 0.5) discard;
+    gl_FragColor = vec4(0.0);
+    return;
+  #endif
     float ndv = abs(dot(normalize(vN), normalize(vV)));
     // A wet-ink edge: the wash pools at the silhouette and pales at the core.
     vec3 col = mix(uSumi, uBark, smoothstep(0.08, 0.7, ndv));
@@ -763,6 +771,11 @@ export const PAD_FRAG = /* glsl */ `
     col = mix(col, uPaper, snow);
     float a = max(needles, snow) * vA;
     if (a < 0.01) discard;
+  #ifdef DEPTH_ONLY
+    // The depth pass: only the solid part of the pad occludes (alpha test),
+    // so the depth edge is crisp and the soft brush fringe stays color only.
+    if (a < 0.5) discard;
+  #endif
     gl_FragColor = vec4(col, a);
   }
 `;

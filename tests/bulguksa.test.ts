@@ -438,3 +438,19 @@ describe("style 0 never reaches a Bulguksa branch (source guards)", () => {
     expect(read("src/scene/landscape.ts")).toContain("const on = next === 3 || next === 4;");
   });
 });
+
+describe("depth (source guards)", () => {
+  const src = read("src/scene/bulguksa/index.ts");
+  const sh = read("src/scene/bulguksa/shaders.ts");
+  it("pine pads and trunks write depth in an alpha-tested pass, so a nearer pine hides the map", () => {
+    expect(src.match(/defines: \{ DEPTH_ONLY: "" \}/g)?.length).toBe(2);
+    expect(src.match(/colorWrite: false,\n\s+depthWrite: true,/g)?.length).toBe(2);
+    expect(sh.match(/#ifdef DEPTH_ONLY/g)?.length).toBe(2);
+    expect(sh).toContain("if (a < 0.5) discard;");
+    expect(sh).toContain("if (vA < 0.5) discard;");
+  });
+  it("the snow floor is single-sided, so a camera under it still sees the massifs and the sky", () => {
+    expect(src).toContain("uShade: { value: lin(INK.shade) } }, THREE.FrontSide);");
+    expect(src).toContain("fi.push(a, b, c, a, c, d);");
+  });
+});

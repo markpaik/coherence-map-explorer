@@ -444,12 +444,20 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
     WOOD_FRAG,
     { uFwd: pineFwd, uBark: { value: lin(INK.bark) }, uSumi: { value: lin(INK.sumi) }, uPaper: { value: lin(INK.paper) } },
     THREE.FrontSide,
-    { depthWrite: true },
   );
-  const wood = place(new THREE.Mesh(pines.wood, woodMat), -5.8);
-  wood.onBeforeRender = (_r, _s, camera) => {
+  // Trunks and limbs write depth in a pass of their own before the color, so
+  // a trunk nearer the camera than a node or stroke hides it (the color pass
+  // then draws on that depth with LessEqual and no double blend).
+  const woodDepthMat = shader(WOOD_VERT, WOOD_FRAG, woodMat.uniforms, THREE.FrontSide, {
+    defines: { DEPTH_ONLY: "" },
+    colorWrite: false,
+    depthWrite: true,
+  });
+  const woodDepth = place(new THREE.Mesh(pines.wood, woodDepthMat), -5.85);
+  woodDepth.onBeforeRender = (_r, _s, camera) => {
     camera.getWorldDirection(pineFwd.value);
   };
+  place(new THREE.Mesh(pines.wood, woodMat), -5.8);
   const padBase = new THREE.PlaneGeometry(2, 2);
   const padGeo = new THREE.InstancedBufferGeometry();
   padGeo.index = padBase.index;
@@ -484,6 +492,15 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
     THREE.DoubleSide,
   );
   place(new THREE.Mesh(padGeo, padMat), -5.6);
+  // The pads draw far to near without depth writes (soft cards over each
+  // other), then write their solid part to depth in a second pass, so a pad
+  // nearer the camera than a node or stroke hides it.
+  const padDepthMat = shader(PAD_VERT, PAD_FRAG, padMat.uniforms, THREE.DoubleSide, {
+    defines: { DEPTH_ONLY: "" },
+    colorWrite: false,
+    depthWrite: true,
+  });
+  place(new THREE.Mesh(padGeo, padDepthMat), -5.55);
   void PINES;
 
   // -- cranes ----------------------------------------------------------------------
