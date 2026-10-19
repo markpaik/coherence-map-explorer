@@ -38,6 +38,7 @@ import {
   PINES,
   SNOW,
   TEMPLE,
+  TEMPLE_LINE,
   bcraneCount,
   bcraneDir,
   floorY,
@@ -61,8 +62,13 @@ import {
   SKY_VERT,
   SNOW_FRAG,
   SNOW_VERT,
+  TEMPLE_FRAG,
+  TEMPLE_VERT,
 } from "./shaders";
 import { buildTemple } from "./temple";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { buildPines } from "./pines";
 
 export interface BulguksaUpdateOpts {
@@ -300,28 +306,53 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
 
   // -- temple -------------------------------------------------------------------
   const temple = buildTemple();
-  geos.push(temple.fill, temple.lines);
+  geos.push(temple.fill, temple.hair);
   const templeGroup = new THREE.Group();
   templeGroup.position.set(0, TEMPLE.y, TEMPLE.z);
   templeGroup.scale.set(TEMPLE.scale, TEMPLE.scale * TEMPLE.yScale, TEMPLE.scale * TEMPLE.zScale);
   group.add(templeGroup);
-  const fillMat = new THREE.MeshBasicMaterial({
-    vertexColors: true,
+  // Paper fills with a mottled wet-ink wash on the walls, soffits, and boulders.
+  const fillMat = shader(TEMPLE_VERT, TEMPLE_FRAG, {}, THREE.FrontSide, {
+    transparent: false,
+    depthWrite: true,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
   });
-  const lineMat = new THREE.LineBasicMaterial({ color: lin(INK.sumi), transparent: true, opacity: 0.78, depthWrite: false });
-  mats.push(fillMat, lineMat);
+  // Ink line in three weights. The heavy and medium lines are measured in
+  // world units, so the near edges print heavier than the far ones.
+  const lineMats: LineMaterial[] = [];
+  const weighted = (pos: Float32Array, width: number, opacity: number): LineSegments2 => {
+    const g = new LineSegmentsGeometry();
+    g.setPositions(pos);
+    geos.push(g as unknown as THREE.BufferGeometry);
+    const m = new LineMaterial({ color: INK.sumi, linewidth: width, worldUnits: true, transparent: true, opacity, depthWrite: false });
+    lineMats.push(m);
+    mats.push(m);
+    return new LineSegments2(g, m);
+  };
+  const heavyLines = weighted(temple.heavy, TEMPLE_LINE.heavy, 0.92);
+  const mediumLines = weighted(temple.medium, TEMPLE_LINE.medium, 0.8);
+  const hairMat = new THREE.LineBasicMaterial({ color: lin(INK.sumi), transparent: true, opacity: TEMPLE_LINE.hairOpacity, depthWrite: false });
+  mats.push(hairMat);
+  const hairLines = new THREE.LineSegments(temple.hair, hairMat);
   const templeFill = new THREE.Mesh(temple.fill, fillMat);
-  const templeLines = new THREE.LineSegments(temple.lines, lineMat);
-  for (const o of [templeFill, templeLines]) {
+  for (const o of [templeFill, hairLines, mediumLines, heavyLines]) {
     o.frustumCulled = false;
     templeGroup.add(o);
     objs.push(o);
   }
   templeFill.renderOrder = -6;
-  templeLines.renderOrder = -5.9;
+  hairLines.renderOrder = -5.95;
+  mediumLines.renderOrder = -5.92;
+  heavyLines.renderOrder = -5.9;
+  const resScratch = new THREE.Vector2();
+  heavyLines.onBeforeRender = (renderer) => {
+    const t = renderer.getRenderTarget();
+    if (t) resScratch.set(t.width, t.height);
+    else renderer.getDrawingBufferSize(resScratch);
+    for (const m of lineMats) m.resolution.copy(resScratch);
+  };
 
   // -- pines ---------------------------------------------------------------------
   const pines = buildPines();

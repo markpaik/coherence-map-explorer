@@ -185,6 +185,10 @@ export const TEMPLE = {
   y: -252,
 } as const;
 
+/** Temple ink line: heavy (roofs) and medium (walls, terraces, stairs) widths
+ *  in world units, so near edges print heavier; the ruled hairlines' opacity. */
+export const TEMPLE_LINE = { heavy: 1.35, medium: 0.7, hairOpacity: 0.32 } as const;
+
 /** The share of the frame width the temple front spans at the home view. */
 export function templeFrameShare(aspect: number): number {
   const half = (TEMPLE.width * TEMPLE.scale) / 2;

@@ -634,3 +634,36 @@ export const PINE_FRAG = /* glsl */ `
     #endif
   }
 `;
+
+// ---------------------------------------------------------------------------
+// Temple fills: paper tones baked per vertex; aWash mottles a wet ink wash
+// over the walls, soffits, and boulders, keyed to the plan position.
+export const TEMPLE_VERT = /* glsl */ `
+  attribute vec3 color;
+  attribute float aWash;
+  varying vec3 vCol;
+  varying float vWash;
+  varying vec3 vP;
+  void main() {
+    vCol = color;
+    vWash = aWash;
+    vP = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+export const TEMPLE_FRAG = /* glsl */ `
+  varying vec3 vCol;
+  varying float vWash;
+  varying vec3 vP;
+  ${NOISE_GLSL}
+  void main() {
+    vec3 col = vCol;
+    if (vWash > 0.0) {
+      vec2 q = vec2(vP.x + vP.z * 0.7, vP.y * 1.6);
+      float n = vn(q * 0.35) * 0.55 + vn(q * 1.1 + 7.0) * 0.3 + vn(q * 3.3 + 3.0) * 0.15;
+      // Wet wash: darker blooms with a pale core, never brighter than the tone.
+      col *= 1.0 - vWash * (0.08 + 0.26 * smoothstep(0.35, 0.85, n));
+    }
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;

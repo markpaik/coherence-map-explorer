@@ -12,9 +12,11 @@
 // Museoljeon behind. The west court is entered through Anyangmun at the head
 // of Yeonhwagyo and Chilbogyo (10 and 8 steps), with Geungnakjeon inside.
 //
-// Two draw calls: one merged fill mesh (flat paper tones baked per vertex,
-// shaded by a single light) and one merged line mesh (EdgesGeometry of every
-// part plus the ruled lines: the ashlar grid, posts, railings).
+// Four draw calls: one merged fill mesh (paper tones baked per vertex, shaded
+// by a single light, with a per-vertex wet-wash amount the shader mottles),
+// and three line weights: HEAVY (the roofs: eaves, hips, ridges), MEDIUM
+// (walls, terraces, stairs, boulders), and HAIRLINE (the ruled ashlar grid,
+// posts, railings, step nosings).
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -27,7 +29,16 @@ const LIGHT = new THREE.Vector3(-0.45, 0.8, 0.4).normalize();
 interface Builder {
   fills: THREE.BufferGeometry[];
   edges: THREE.BufferGeometry[];
+  heavy: THREE.BufferGeometry[];
   lines: number[];
+}
+
+/** Wet-wash amount by tone: walls, soffits, and boulders carry a mottled ink wash. */
+function washOf(hex: number): number {
+  if (hex === INK.boulder) return 1;
+  if (hex === INK.wall || hex === INK.soffit) return 0.6;
+  if (hex === INK.stone) return 0.3;
+  return 0;
 }
 
 const linColor = (hex: number): THREE.Color => new THREE.Color().setHex(hex);
@@ -52,16 +63,22 @@ function paint(geo: THREE.BufferGeometry, hex: number, shade = 0.12): THREE.Buff
     for (let j = 0; j < 3; j++) col.set([c.r * k, c.g * k, c.b * k], (i + j) * 3);
   }
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  g.setAttribute("aWash", new THREE.BufferAttribute(new Float32Array(pos.count).fill(washOf(hex)), 1));
   g.deleteAttribute("normal");
   return g;
 }
 
-function add(B: Builder, geo: THREE.BufferGeometry, hex: number, opts: { edges?: boolean; shade?: number; angle?: number } = {}): void {
+function add(
+  B: Builder,
+  geo: THREE.BufferGeometry,
+  hex: number,
+  opts: { edges?: boolean; shade?: number; angle?: number; heavy?: boolean } = {},
+): void {
   const g = paint(geo, hex, opts.shade ?? 0.12);
   B.fills.push(g);
   if (opts.edges !== false) {
     const e = new THREE.EdgesGeometry(g, opts.angle ?? 24);
-    B.edges.push(e);
+    (opts.heavy ? B.heavy : B.edges).push(e);
   }
 }
 
@@ -163,8 +180,8 @@ function roof(B: Builder, cx: number, y: number, cz: number, w: number, d: numbe
       back.push(new THREE.Vector3(x, y + up, cz - ez));
       ridge.push(new THREE.Vector3(x, y + o.h1 + up * 0.5, cz));
     }
-    add(B, loft(front, ridge, false), INK.paper, { angle: 20 });
-    add(B, loft(ridge, back, false), INK.paper, { angle: 20 });
+    add(B, loft(front, ridge, false), INK.paper, { angle: 20, heavy: true });
+    add(B, loft(ridge, back, false), INK.paper, { angle: 20, heavy: true });
     for (const [s, i] of [
       [-1, 0],
       [1, N],
@@ -197,13 +214,13 @@ function roof(B: Builder, cx: number, y: number, cz: number, w: number, d: numbe
   const bx = Math.max(ex - inset, 0.4);
   const bz = ez - inset;
   const brk = ring(cx, cz, bx, bz, y + o.h1, seg, 0, 0);
-  add(B, loft(eave, brk, true), INK.paper, { angle: 18 });
+  add(B, loft(eave, brk, true), INK.paper, { angle: 18, heavy: true });
   const top = y + o.h1;
   if (o.kind === "paljak") {
     const ry = top + o.h2;
     // Upper slopes front and back, up to the ridge.
-    add(B, tris([cx - bx, top, cz + bz, cx + bx, top, cz + bz, cx + bx, ry, cz, cx - bx, top, cz + bz, cx + bx, ry, cz, cx - bx, ry, cz]), INK.paper, { angle: 18 });
-    add(B, tris([cx + bx, top, cz - bz, cx - bx, top, cz - bz, cx - bx, ry, cz, cx + bx, top, cz - bz, cx - bx, ry, cz, cx + bx, ry, cz]), INK.paper, { angle: 18 });
+    add(B, tris([cx - bx, top, cz + bz, cx + bx, top, cz + bz, cx + bx, ry, cz, cx - bx, top, cz + bz, cx + bx, ry, cz, cx - bx, ry, cz]), INK.paper, { angle: 18, heavy: true });
+    add(B, tris([cx + bx, top, cz - bz, cx - bx, top, cz - bz, cx - bx, ry, cz, cx + bx, top, cz - bz, cx - bx, ry, cz, cx + bx, ry, cz]), INK.paper, { angle: 18, heavy: true });
     // The small gable triangles, in wall tone.
     for (const s of [-1, 1]) {
       add(B, tris([cx + s * bx, top, cz - bz, cx + s * bx, top, cz + bz, cx + s * bx, ry, cz]), INK.wall);
@@ -219,7 +236,7 @@ function roof(B: Builder, cx: number, y: number, cz: number, w: number, d: numbe
       cx + bx, top, cz + bz, cx + bx, top, cz - bz, cx, ry, cz,
       cx + bx, top, cz - bz, cx - bx, top, cz - bz, cx, ry, cz,
       cx - bx, top, cz - bz, cx - bx, top, cz + bz, cx, ry, cz,
-    ]), INK.paper, { angle: 18 });
+    ]), INK.paper, { angle: 18, heavy: true });
   }
   // Tile ends under the lip: a dark band hung under the eave ring.
   const lip = eave.map((p) => new THREE.Vector3(p.x, p.y - 0.28, p.z));
@@ -342,7 +359,7 @@ function corridor(B: Builder, x0: number, x1: number, z0: number, z1: number, y0
   const len = alongX ? Math.abs(x1 - x0) : Math.abs(z1 - z0);
   const cx = (x0 + x1) / 2;
   const cz = (z0 + z1) / 2;
-  const B2: Builder = { fills: [], edges: [], lines: [] };
+  const B2: Builder = { fills: [], edges: [], heavy: [], lines: [] };
   // Built along x, then turned for a corridor along z.
   box(B2, 0, 0, 0, len, 2.2, 2.2, INK.wall);
   for (let i = 0; i <= Math.round(len / 2.2); i++) {
@@ -354,6 +371,7 @@ function corridor(B: Builder, x0: number, x1: number, z0: number, z1: number, y0
   m.premultiply(new THREE.Matrix4().makeTranslation(cx, y0, cz));
   for (const f of B2.fills) B.fills.push(f.applyMatrix4(m));
   for (const e of B2.edges) B.edges.push(e.applyMatrix4(m));
+  for (const e of B2.heavy) B.heavy.push(e.applyMatrix4(m));
   const v = new THREE.Vector3();
   for (let i = 0; i < B2.lines.length; i += 3) {
     v.set(B2.lines[i], B2.lines[i + 1], B2.lines[i + 2]).applyMatrix4(m);
@@ -370,12 +388,16 @@ function stackedPillar(B: Builder, cx: number, cz: number, y0: number, y1: numbe
 
 export interface TempleBuild {
   fill: THREE.BufferGeometry;
-  lines: THREE.BufferGeometry;
+  /** Segment endpoint positions (x, y, z pairs) for the heavy and medium weights. */
+  heavy: Float32Array;
+  medium: Float32Array;
+  /** The ruled hairlines. */
+  hair: THREE.BufferGeometry;
 }
 
 /** Build the whole complex in plan units. */
 export function buildTemple(): TempleBuild {
-  const B: Builder = { fills: [], edges: [], lines: [] };
+  const B: Builder = { fills: [], edges: [], heavy: [], lines: [] };
   const T1 = 3.6; // lower terrace height
   const T2 = 6.0; // upper terrace top
   // -- the stone terrace: lower tier (boulders, ashlar), upper tier set back ----
@@ -393,7 +415,7 @@ export function buildTemple(): TempleBuild {
     g.rotateX(lhash(304, i) * 0.6);
     g.scale(1.25, 0.75, 0.6);
     g.translate(x, r * 0.62, 0.15);
-    add(B, g, INK.stone, { shade: 0.2, angle: 30 });
+    add(B, g, INK.boulder, { shade: 0.25, angle: 30 });
   }
   // Ashlar grid on the lower face (above the boulders) and the upper face.
   for (const y of [1.6, 2.4, 3.1]) line(B, [-50, y, 0.02], [50, y, 0.02]);
@@ -464,13 +486,18 @@ export function buildTemple(): TempleBuild {
   hall(B, AX, T2 + 0.8, -24, 10.5, 5.6, 3.0, { over: 1.5, h1: 1.8, h2: 1.1, lift: 0.55, kind: "paljak" }, 3);
 
   const fill = mergeGeometries(B.fills, false)!;
-  const lineGeo = mergeGeometries(B.edges, false)!;
-  const extra = new THREE.BufferGeometry();
-  extra.setAttribute("position", new THREE.Float32BufferAttribute(B.lines, 3));
-  const lines = mergeGeometries([lineGeo, extra], false)!;
+  const flat = (gs: THREE.BufferGeometry[]): Float32Array => {
+    const g = mergeGeometries(gs, false)!;
+    const out = new Float32Array(g.getAttribute("position").array);
+    g.dispose();
+    return out;
+  };
+  const heavy = flat(B.heavy);
+  const medium = flat(B.edges);
+  const hair = new THREE.BufferGeometry();
+  hair.setAttribute("position", new THREE.Float32BufferAttribute(B.lines, 3));
   for (const g of B.fills) g.dispose();
   for (const g of B.edges) g.dispose();
-  extra.dispose();
-  lineGeo.dispose();
-  return { fill, lines };
+  for (const g of B.heavy) g.dispose();
+  return { fill, heavy, medium, hair };
 }
