@@ -273,14 +273,17 @@ export function createBulguksa(center: THREE.Vector3): BulguksaHandle {
       const b = r * segs + ((s + 1) % segs);
       const c = (r + 1) * segs + ((s + 1) % segs);
       const d = (r + 1) * segs + s;
-      fi.push(a, c, b, a, d, c);
+      // Counterclockwise seen from above, so the front face looks up.
+      fi.push(a, b, c, a, c, d);
     }
   }
   const floorGeo = new THREE.BufferGeometry();
   floorGeo.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3));
   floorGeo.setIndex(fi);
   geos.push(floorGeo);
-  const floorMat = shader(FLOOR_VERT, FLOOR_FRAG, { uPaper: { value: lin(INK.paper) }, uShade: { value: lin(INK.shade) } }, THREE.DoubleSide);
+  // Single-sided: from below the snow (an orbit under the temple) the floor is
+  // not drawn, so the massifs and the sky stay in view.
+  const floorMat = shader(FLOOR_VERT, FLOOR_FRAG, { uPaper: { value: lin(INK.paper) }, uShade: { value: lin(INK.shade) } }, THREE.FrontSide);
   place(new THREE.Mesh(floorGeo, floorMat), -7.4);
 
   // -- ink marks along the far edge of the slope, and in front of the terrace ---
