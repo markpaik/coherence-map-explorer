@@ -685,62 +685,82 @@ landscape stay off at style 5 (`isHangaField`).
   struggle breath unchanged (4.5 s); lit and damaged discs differ by 45 or more
   of 255 in median luminance (a test).
 - **Field and sky.** Hanji #f2efe8. The paper pass prints a hanji sheet
-  (HANJI_PAPER: long fibres, little mottle, no laid lines). The sky shell is a
-  grey wash darkest just above the ridge line (oehun, #b9b3a8) and lighter
-  above (#e4e0d8), so the snow on the peaks reads as bare paper. The title band
-  is screen-fixed (`uBandBottom`, shared with Washi and Dusk) in a pale ink wash
-  #c4beb3, and the title prints in SUMI: #1c1a17 on the band is 9.4:1 and the
-  lightest line ink (#4a4339) is 5.3:1. Paper ink on a dark band was rejected
-  because the dark band would have to fall below L 0.09 to carry it, and the
-  sumi birds and inscription in the band would then vanish. No box, scrim,
-  mist, or halo.
-- **Massifs.** Four concentric walls (R 1750 to 3300). The crest is the Hanga
-  ridge noise, sharpened, times an envelope that is low in front of and behind
-  the map and tall at the sides, so no crest prints above 52% of the frame
-  height inside the map's central 40% of width at the home view (a test, three
-  viewports). Snow on the upper faces is reserved paper. Inner fold lines carry
-  shade washes and a dark tide line where the wash dried. Jun strokes (pressed
-  head, dry tail) gather in patches on the steep faces, moss dots sit under the
-  near crests, and the crest contour is a dry hairline, heavier near. Far walls
-  are paler. Line marks are hairlines, so only the fills enter the contrast
-  gate.
+  (HANJI_PAPER: long fibres, little mottle, no laid lines). The sky is the
+  oehun method: a grey ink wash darkest along the ridge line and lifting over
+  about 15% of the frame height above it, so the snow crests read as reserved
+  paper. It is deep (#7d786f) behind the tall massifs at the sides and lighter
+  (#b3ada3) behind the low snow hills in front of the map, so the pigments keep
+  their contrast; above the band it is #e4e0d8. The title band is screen-fixed
+  (`uBandBottom`, shared with Washi and Dusk) in a pale ink wash #c4beb3, and
+  the title prints in SUMI: #1c1a17 on the band is 9.4:1 and the lightest line
+  ink (#4a4339) is 5.3:1. Paper ink on a dark band was rejected because the
+  dark band would have to fall below L 0.09 to carry it, and the sumi birds and
+  inscription in the band would then vanish. No box, scrim, mist, or halo.
+- **Massifs (round 2).** Four concentric walls (R 1750 to 3300) painted as
+  monumental ink masses: a wet sumi wash over the rock (#5a5650 to #2a2824,
+  mottled by three octaves of noise, darker on the lee face, pooled darker at
+  the snow's edge), jun strokes as dark tapered marks along the slope (cells of
+  40 by 12 units, one direction per patch so each stroke stays straight,
+  gathered in clumps), and a dark tide line where the wash dried at the base.
+  Snow is reserved paper: a stepped, ragged cap that follows the silhouette,
+  shelves under each inner fold with a grey lee wash, and the low hills in
+  front of and behind the map are snow from crest to base. The rock shows
+  only where the envelope passes SNOW_ALL_ENV 0.45 (fully from 0.7) and
+  reaches down from the crest as the massif rises, so snow and rock meet on a
+  ragged slant. Far walls lift toward the paper (mist). The crest stays below
+  52% of the frame height inside the map's central 40% of width, and no rock
+  lies behind the body of the map (5th to 95th percentile of its standards) at
+  1440x900, 1280x720, or 1024x600 (tests). Only the snow tones enter the
+  pigment gate; the rock is dark by design and never sits behind the map at
+  the home view.
 - **Snow slope.** A gentle dome of paper under the map with faint wind drifts
-  toward the rim, and ink marks (small pines, reed tufts, rocks) along its far
-  edge.
-- **Temple.** Low-poly geometry in plan units (front terrace 100 wide), drawn
-  in ink line (EdgesGeometry plus ruled ashlar, posts, railings, step nosings)
-  on paper fills shaded by one light. The terrace has its boulder base and
-  ashlar grid; Cheongungyo (16 steps) and Baegungyo (18) climb to Jahamun, with
-  the arch under the lower flight; Yeonhwagyo (10) and Chilbogyo (8) climb to
-  Anyangmun; Beomyeongnu is raised on its stacked stone pillar; corridors enclose
-  the court; Daeungjeon is raised on its platform with Seokgatap (plain, three
+  toward the rim, three wandering grey hairlines that draw the slope's shape,
+  and ink marks (small pines, reed tufts, rocks) along its far edge.
+- **Temple (round 2).** Low-poly geometry in plan units (front terrace 100
+  wide), drawn as an ink drawing in three weights: HEAVY roof lines (eaves,
+  hips, ridges; 1.35 world units), MEDIUM wall, terrace, stair, and boulder
+  lines (0.7 world units; widths in world units, so near edges print heavier),
+  and HAIRLINE ruled lines (the ashlar grid, posts, railings, nosings; 1 px at
+  0.32 opacity). Fills are paper tones shaded by one light; walls (#d9d4ca),
+  soffits, and stone carry a mottled wet-ink wash, and the boulder base is a
+  wet ink wash (#8e897f). The terrace has its boulder base and ashlar grid;
+  Cheongungyo (16 steps) and Baegungyo (18) climb to Jahamun, with the arch
+  under the lower flight; Yeonhwagyo (10) and Chilbogyo (8) climb to Anyangmun;
+  Beomyeongnu is raised on its stacked stone pillar; corridors enclose the
+  court; Daeungjeon is raised on its platform with Seokgatap (plain, three
   stories) to the west and Dabotap (stair base, pillars, octagonal balcony,
   lotus tier) to the east; Museoljeon closes the back; Geungnakjeon sits in the
-  west court. Every roof is snow: hipped-and-gabled roofs with lifted corners,
-  ridge heaps, hip-end heaps, a dark row of tile ends under the eave lip, a
-  soffit in shadow, and a faint muted dancheong band. The raised viewpoint of
-  the ink tradition is literal: heights print at 0.7 and depths at 0.65 of the
-  width scale, so the complex spans about 55% of the frame width at the home
-  view and its highest ridge prints under the map's lowest standard (a test).
-  Two draw calls.
-- **Pines.** Korean red pines with leaning S trunks, ink-ruled bark plates,
-  limbs, ragged needle pads (dark ink masses), and a snow pillow on each pad
-  with a soft grey wash where it meets the needles. Two framing pines stand at
-  the left and right edges of the home view, low enough that their crowns sit
-  near eye level; smaller pines stand outside the map's footprint and behind the
-  camera for the orbit. A pine inside about 22 degrees of the view axis ghosts
-  out, so an orbit never walls the map off behind a crown.
+  west court. Every roof is snow: lifted corners, ridge heaps, hip-end heaps, a
+  dark row of tile ends under each eave lip, a soffit in shadow, and a faint
+  muted dancheong band. Scale 7.6 world units per plan unit (1.5x round 1),
+  heights at 0.7 and depths at 0.65 of it (the raised viewpoint), front face at
+  z 300 and ground y -252: the front spans about 82% of the frame width at the
+  home view, the main hall's ridge prints below the lowest standard and the
+  search row, and the terrace foot above the filter rail (a test). Four draw
+  calls.
+- **Pines (round 2).** Painted, not modeled. Trunks and limbs are smooth
+  tapered tubes inked in the fragment shader: a wet-ink edge from the facing
+  ratio (no facets), a paler core, and plated bark as short thin dark dashes
+  across the trunk in staggered rows. The needle pads are camera-facing cards
+  drawn as needle fans: an ellipse whose rim swells in clusters and is cut
+  into radiating teeth, fine needle streaks, a snow pillow of reserved paper
+  on top with a ragged lower edge, and a soft grey wash where snow meets
+  needles. Two framing pines stand at the left and right edges of the home
+  view; smaller pines stand outside the map's footprint and behind the camera.
+  A pine inside about 22 degrees of the view axis ghosts out, so an orbit never
+  walls the map off behind a crown. Two draw calls.
 - **Cranes.** One flight of 4 to 6 red-crowned cranes on the Hanga schedule
   (`craneScheduleInto`: a 40 s crossing, then 50 to 90 s of empty sky) across
   the right half of the sky, clear of the title block. Wings spread below and
   above the body line in one slow stroke (3.4 s), each bird at its own phase;
   white primaries, black secondaries and tertials on the arm's trailing half,
   black neck, red crown, legs past the tail. About 18 to 21 px across at the
-  home view.
-- **Murmuration.** 2000 starlings in one draw call, moved in the vertex
+  home view. The V is loose: slots up to 0.072 of the path behind the leader
+  and up to 205 units above or below.
+- **Murmuration.** 1200 starlings in one draw call, moved in the vertex
   shader: a thin sheet leaning about 75 degrees from face-on, folded through its
-  thickness, with a sharp edge, uniform interior density, and a 5% straggler
-  fringe. Periods 29 to 61 s. Chevrons at 2x. It stays clear of the title block
+  thickness, with a sharp edge, a uniform and sparse interior (0.55 alpha), and
+  a 5% straggler fringe (0.78 alpha). Periods 29 to 61 s. Chevrons at 2x. It stays clear of the title block
   and the map at 1440x900, 1280x720, and 1024x600 (a test).
 - **Falling snow.** 900 flakes in a box around the camera target, one draw
   call, never under 1.6 CSS px and faded at the box faces, so nothing pops or
@@ -750,8 +770,8 @@ landscape stay off at style 5 (`isHangaField`).
   azimuth, so it moves with orbit like ink on the sheet.
 - **Motion.** Quiet (a story or a focus) fades the birds over 2 s. Reduced
   motion freezes the snow and hides the birds. Nothing pulses in brightness.
-- **Cost.** At the 1440x900 home view Bulguksa draws 104 calls and 322,529
-  triangles (Washi: 101 and 269,177); the world alone is 15 draws.
+- **Cost.** At the 1440x900 home view Bulguksa draws 106 calls and 318,805
+  triangles (Washi: 101 and 269,177); the world alone is 17 draws.
 - **Study.** Open-access study only (Commons CC0, PD, and Creative Commons
   photographs and the site plan; Cleveland CC0 paintings; exhibition text for
   Park Dae-sung). Nothing from the study is embedded; everything is procedural.
