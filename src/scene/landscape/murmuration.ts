@@ -1,49 +1,51 @@
-// Murmuration (Dusk): one flock of starlings as a thin folded sheet, after the
-// STARFLAG measurements (Ballerini, Cavagna and others): a sheet far thinner
-// than it is wide, uniform inside, denser and sharp at its border, with a
-// sparse fringe of stragglers. The head curls back into a dense fold and the
+// Murmuration (Dusk): one flock of starlings as a folded sheet, after the
+// STARFLAG measurements (Ballerini, Cavagna and others) and Mark's review
+// (2026-10-19: "spans more of the sky", fewer birds, randomly scattered). The
+// sheet is wide and loose: a dense core, clumps and thin gaps from
+// low-frequency noise on each bird's seed, and a quarter of the birds scattered
+// as stragglers well outside its edge. The head curls back into a fold and the
 // tail thins. The sheet twists along its length, so wherever it turns edge-on
-// it prints as a dark band, as in the photographs.
+// it prints as a darker band, as in the photographs.
 //
 // Every bird is one point of one draw call, moved in the vertex shader (no CPU
 // simulation) and drawn as a small chevron aligned to the sheet's local flow,
 // so individuals resolve at 2x. The shape turns over across 29 to 53 s: no
 // period is under 20 s. The functions below mirror the GLSL one for one.
 
-import { DEG, TAU, f, lhash } from "./core";
+import { DEG, TAU, f, lhash, pnoise } from "./core";
 
 export const SHEET = {
-  count: 2000,
-  /** Center: open sky above and right of the map (the moon is at -40 deg), at
-   *  the home view about y 120 to 300 of 1440x900, clear of the title block
-   *  and of the bottom-right chrome. */
+  count: 1250,
+  /** Center: open sky above and right of the map (the moon is at -40 deg).
+   *  At the home view the flock spans about x 800 to 1400 and y 60 to 380 of
+   *  1440x900, clear of the title block and of the bottom-right chrome. */
   az: 31 * DEG,
   azSwing: 2 * DEG,
-  R: 3560,
-  RSwing: 60,
-  h: 950,
+  R: 3880,
+  RSwing: 40,
+  h: 930,
   hSwing: 20,
   pAz1: 97,
   pAz2: 41,
   pR: 73,
   pH: 59,
   /** Half-length (along the azimuth), half-width, half-thickness. */
-  L: 560,
-  W: 125,
-  T: 12,
+  L: 1050,
+  W: 290,
+  T: 48,
   /** The tail is this share of the full width; the head is full width. */
   tailW: 0.42,
   /** Centerline bend (up, radial) and the head's curl (back, up). */
-  bendY: 25,
-  bendZ: 60,
+  bendY: 50,
+  bendZ: 80,
   curlX: 0.34,
-  curlY: 40,
+  curlY: 90,
   /** Twist along the length: a base angle and a rate per unit length. */
   twist0: 0.5,
   twistRate: 1.3,
-  twistSwing: 0.7,
+  twistSwing: 0.45,
   /** Whole-sheet yaw and pitch (radians). */
-  yaw: 0.32,
+  yaw: 0.18,
   pitch: 0.08,
   /** Periods (seconds), all 20 s or longer. */
   pTwist0: 29,
@@ -52,19 +54,31 @@ export const SHEET = {
   pBendZ: 47,
   pYaw: 53,
   pPitch: 31,
-  /** Birds: share in the border strip, the strip's inner edge (|b|), and the
-   *  share of stragglers outside the edge. */
-  edgeFrac: 0.35,
-  edgeIn: 0.86,
-  fringeFrac: 0.05,
+  /** Share of stragglers, scattered well outside the sheet: |a| up to
+   *  strayA, |b| from 1.05 to 1.05 + strayB. */
+  fringeFrac: 0.25,
+  strayA: 1.3,
+  strayB: 0.7,
+  /** The sheet's uneven density: a dense core (center and radii in a, b),
+   *  clumps and thin gaps from low-frequency noise on the seed, and the
+   *  number of rejection tries per bird. */
+  coreA: 0.3,
+  coreRA: 0.42,
+  coreRB: 0.4,
+  tries: 24,
   /** Per-bird jitter (world units) and its period range (seconds). */
-  jit: 9,
+  jit: 26,
   jitP0: 20,
   jitP1: 40,
   /** Chevron size range in CSS px (by seed). */
   px0: 2.4,
   px1: 3.6,
 } as const;
+
+const sstep = (a: number, b: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 /** One bird's seeds: the place on the sheet (a along, b across, w through) and
  *  its size and jitter phase; fringe marks a straggler. */
@@ -76,23 +90,38 @@ export interface SheetSeed {
   j: number;
   fringe: number;
 }
+/** Relative bird density at (a, b) on the sheet, in [0, 1]: a dense core,
+ *  clumps, and thin gaps (low-frequency noise, so the gaps are broad). */
+export function murmSheetDensity(a: number, b: number): number {
+  const S = SHEET;
+  const core = Math.exp(-(((a - S.coreA) / S.coreRA) ** 2) - (b / S.coreRB) ** 2);
+  const n = 0.6 * pnoise((a + 1) * 0.25 + 0.13 * b, 5, 71) + 0.4 * pnoise((b + 1) * 0.25 + 0.21 * a, 4, 72);
+  const clump = sstep(0.5, 0.72, n);
+  const gap = 0.2 + 0.8 * sstep(0.28, 0.46, n);
+  return Math.min(1, (0.03 + 1.0 * core + 0.18 * clump) * gap);
+}
 export function murmSheetSeed(i: number): SheetSeed {
-  const g = lhash(801, i);
-  const ub = lhash(803, i);
   const sign = lhash(808, i) < 0.5 ? -1 : 1;
+  let a: number;
   let b: number;
   let fringe = 0;
-  if (g < SHEET.fringeFrac) {
+  if (lhash(801, i) < SHEET.fringeFrac) {
+    // A straggler: scattered well outside the sheet's edge, anywhere along it.
     fringe = 1;
-    b = sign * (1.04 + 0.5 * ub);
-  } else if (lhash(807, i) < SHEET.edgeFrac) {
-    b = sign * (SHEET.edgeIn + (1 - SHEET.edgeIn) * ub);
+    a = (2 * lhash(802, i) - 1) * SHEET.strayA;
+    b = sign * (1.05 + SHEET.strayB * Math.pow(lhash(803, i), 0.8));
   } else {
-    b = sign * SHEET.edgeIn * ub;
+    // Rejection sampling against the uneven density.
+    a = 0;
+    b = 0;
+    for (let k = 0; k < SHEET.tries; k++) {
+      a = 2 * lhash(810 + k * 3, i) - 1;
+      b = 2 * lhash(811 + k * 3, i) - 1;
+      if (lhash(812 + k * 3, i) < murmSheetDensity(a, b)) break;
+    }
   }
   return {
-    // Denser toward the head (a = +1).
-    a: 2 * Math.pow(lhash(802, i), 0.7) - 1,
+    a,
     b,
     w: 2 * lhash(804, i) - 1,
     s: lhash(805, i),
@@ -109,10 +138,6 @@ export function murmSheetCenterInto(t: number, out: { az: number; R: number; h: 
   return out;
 }
 
-const sstep = (a: number, b: number, x: number): number => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 /** A point of the sheet at time t, in world units along (tangent, up, radial
  *  out), before the per-bird jitter. Writes into out. */
