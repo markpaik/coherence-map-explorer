@@ -53,6 +53,9 @@ import {
 import { MURM_SHEET_FRAG, MURM_SHEET_VERT, SHEET, murmSheetSeed } from "./landscape/murmuration";
 import { FUJI, FUJI_FRAG, FUJI_TONGUES, FUJI_VERT, buildFujiGeometry } from "./landscape/fuji";
 import {
+  BANK_FRAG,
+  BANK_VERT,
+  buildBanks,
   CARD_FRAG,
   CARD_VERT,
   REED_FRAG,
@@ -218,6 +221,10 @@ export interface LandPalette {
   rimOp: number;
   farPine: number;
   farPineOp: number;
+  /** Banks: body, top, and the dark strip at the waterline. */
+  bank: number;
+  bankTop: number;
+  bankStrip: number;
   /** Reeds: stems and leaves, panicles. */
   reed: number;
   plume: number;
@@ -281,6 +288,9 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     rimOp: 0,
     farPine: 0x51667a,
     farPineOp: 0.8,
+    bank: 0x7d8b6e,
+    bankTop: 0x96a283,
+    bankStrip: 0x3a4535,
     reed: 0x5f7556,
     plume: 0x8d7352,
     reedOp: 0.92,
@@ -339,6 +349,9 @@ export const LAND: { washi: LandPalette; dusk: LandPalette } = {
     rimOp: 0.3,
     farPine: 0x15213b,
     farPineOp: 0.85,
+    bank: 0x16223a,
+    bankTop: 0x1d2a44,
+    bankStrip: 0x0a1222,
     reed: 0x111b2f,
     plume: 0x1f2b45,
     reedOp: 0.95,
@@ -901,7 +914,22 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
   floor.onBeforeRender = feedFwd;
   group.add(floor);
 
-  // -- framing pines: trunks, then pads ------------------------------------
+  // -- banks: the ground every pine and the reeds grow from ----------------
+  const bankGeo = buildBanks();
+  geos.push(bankGeo);
+  const bankMat = baseMat(
+    BANK_VERT,
+    BANK_FRAG,
+    { uBank: col(), uBankTop: col(), uStrip: col(), uOpacity: { value: 1 } },
+    THREE.FrontSide,
+    true,
+  );
+  const banks = new THREE.Mesh(bankGeo, bankMat);
+  banks.frustumCulled = false;
+  banks.renderOrder = -7.3;
+  group.add(banks);
+
+  // -- pines: trunks, then pads ---------------------------------------------
   const trunkGeo = buildPineTrunks();
   geos.push(trunkGeo);
   const trunkMat = baseMat(
@@ -1109,6 +1137,10 @@ export function createLandscape(center: THREE.Vector3): LandscapeHandle {
     const fpu = farMat.uniforms;
     hex(fpu.uPad, pal.farPine);
     fpu.uOpacity.value = pal.farPineOp;
+    const bu = bankMat.uniforms;
+    hex(bu.uBank, pal.bank);
+    hex(bu.uBankTop, pal.bankTop);
+    hex(bu.uStrip, pal.bankStrip);
     const ru = reedMat.uniforms;
     hex(ru.uStem, pal.reed);
     hex(ru.uPlume, pal.plume);

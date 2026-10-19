@@ -12,7 +12,7 @@
 // The reeds sway very slowly and hold still under reduced motion.
 
 import * as THREE from "three";
-import { DEG, RINGS, TAU, f, lhash, ridgeHeight } from "./core";
+import { DEG, FLOOR_Y, RINGS, TAU, f, lhash, ridgeHeight } from "./core";
 
 // ---------------------------------------------------------------------------
 // Placement (world units, relative to the landscape center).
@@ -30,86 +30,217 @@ export interface PineSpec {
   branches: readonly [number, number, number, number][];
   /** Pads: center offset from the root, width, height. */
   pads: readonly [number, number, number, number, number][];
-  /** -1 left of the map at the home view, +1 right. */
+  /** -1 left of the map at the home view (it fades at the Ascent), +1 right,
+   *  0 elsewhere. */
   side: number;
 }
 
-/** Height over which a trunk or reed base dissolves into the field. */
-export const FLORA_FADE = 150;
+/** The soft base of a trunk or a reed: the height over which it fades into
+ *  the bank it grows from. */
+export const FLORA_FADE = 24;
 
-export const PINES: readonly PineSpec[] = [
-  {
-    // Near left: a low pine leaning in from beyond the left edge, its pads
-    // under the search rail and clear of Fuji and the sun.
-    x: -1090,
-    z: -380,
-    base: -640,
-    r0: 15,
-    trunk: [
-      [0, 0, 0],
-      [8, 110, 6],
-      [40, 220, 10],
-      [104, 300, 4],
-      [174, 356, 0],
-      [232, 390, -4],
-    ],
-    branches: [
-      [3, 90, 26, -10],
-      [4, 70, 14, 18],
-      [2, 80, 74, 6],
-    ],
-    pads: [
-      [262, 406, -2, 150, 44],
-      [214, 430, 10, 120, 38],
-      [278, 372, 26, 120, 36],
-      [176, 386, -12, 110, 38],
-      [86, 332, 10, 100, 36],
-      [140, 302, -6, 90, 32],
-    ],
-    side: -1,
-  },
-  {
-    // Near right: taller, leaning in from beyond the right edge.
-    x: 1090,
-    z: -330,
-    base: -500,
-    r0: 18,
-    trunk: [
-      [0, 0, 0],
-      [-10, 150, 4],
-      [8, 320, -6],
-      [-40, 470, 0],
-      [-110, 590, 6],
-      [-150, 690, 0],
-    ],
-    branches: [
-      [3, -150, 50, 10],
-      [4, -140, 30, -14],
-      [2, -110, 80, 8],
-      [5, -60, 40, 0],
-    ],
-    pads: [
-      [-200, 530, 10, 170, 50],
-      [-260, 500, -6, 140, 44],
-      [-250, 470, 14, 140, 44],
-      [-160, 660, -10, 150, 48],
-      [-220, 620, 6, 130, 42],
-      [-150, 730, 0, 120, 40],
-      [-90, 590, -8, 110, 40],
-    ],
-    side: 1,
-  },
+// ---------------------------------------------------------------------------
+// Banks: low ink mounds that rise out of the water floor, so every pine and
+// the reed bank grow out of the ground. Each is an ellipse in the xz plane
+// (rx along `rot`, rz across it) with a flat top that rolls down to the
+// waterline, where a dark strip of bank prints (Hiroshige's shore line).
+
+export interface BankSpec {
+  x: number;
+  z: number;
+  /** Half-axes (world units) and the rx axis's angle from +x (radians). */
+  rx: number;
+  rz: number;
+  rot: number;
+  /** Height of the flat top. */
+  top: number;
+}
+/** Share of the half-axes that stays flat before the bank rolls down. */
+export const BANK_FLAT = 0.35;
+/** The dark strip at the waterline: its height above the water. */
+export const BANK_STRIP = 14;
+
+/** The water's height under the landscape (core.ts FLOOR_Y). */
+const WATER_Y = FLOOR_Y;
+
+/** The reed bank's mound: on the far shore, left of the map at home. */
+const REED_BANK: BankSpec = { x: -976, z: -976, rx: 210, rz: 100, rot: -45 * DEG, top: -590 };
+
+export const BANKS: readonly BankSpec[] = [
+  REED_BANK,
+  // Under the two framing pines.
+  { x: -1090, z: -380, rx: 120, rz: 90, rot: 20 * DEG, top: -740 },
+  { x: 1090, z: -330, rx: 120, rz: 90, rot: -20 * DEG, top: -740 },
+  // The middle-ground groups (MID_PINES).
+  { x: -1170, z: 430, rx: 180, rz: 100, rot: -30 * DEG, top: -700 },
+  { x: 1080, z: 560, rx: 170, rz: 95, rot: 35 * DEG, top: -705 },
 ];
 
-/** The reed bank: center, half-length along the shore (x), half-depth (z). */
+/** Elliptical radius (0 at the center, 1 at the waterline) of (x, z). */
+export function bankU(b: BankSpec, x: number, z: number): number {
+  const dx = x - b.x;
+  const dz = z - b.z;
+  const c = Math.cos(b.rot);
+  const s = Math.sin(b.rot);
+  const u = (dx * c + dz * s) / b.rx;
+  const v = (-dx * s + dz * c) / b.rz;
+  return Math.hypot(u, v);
+}
+/** Height of the bank's profile at elliptical radius u (u >= 1: the water). */
+export function bankProfile(b: BankSpec, u: number): number {
+  if (u >= 1) return WATER_Y;
+  const t = u <= BANK_FLAT ? 1 : 0.5 + 0.5 * Math.cos((Math.PI * (u - BANK_FLAT)) / (1 - BANK_FLAT));
+  return WATER_Y + (b.top - WATER_Y) * t;
+}
+/** The ground height at (x, z): the highest bank there, or the water. */
+export function groundAt(x: number, z: number): number {
+  let y = WATER_Y;
+  for (const b of BANKS) y = Math.max(y, bankProfile(b, bankU(b, x, z)));
+  return y;
+}
+
+// ---------------------------------------------------------------------------
+// Pines.
+
+const FRAME_LEFT: PineSpec = {
+  // Near left: a low pine leaning in from beyond the left edge, its pads
+  // under the search rail and clear of Fuji and the sun.
+  x: -1090,
+  z: -380,
+  base: -640,
+  r0: 15,
+  trunk: [
+    [0, 0, 0],
+    [8, 110, 6],
+    [40, 220, 10],
+    [104, 300, 4],
+    [174, 356, 0],
+    [232, 390, -4],
+  ],
+  branches: [
+    [3, 90, 26, -10],
+    [4, 70, 14, 18],
+    [2, 80, 74, 6],
+  ],
+  pads: [
+    [262, 406, -2, 150, 44],
+    [214, 430, 10, 120, 38],
+    [278, 372, 26, 120, 36],
+    [176, 386, -12, 110, 38],
+    [86, 332, 10, 100, 36],
+    [140, 302, -6, 90, 32],
+  ],
+  side: -1,
+};
+const FRAME_RIGHT: PineSpec = {
+  // Near right: taller, leaning in from beyond the right edge.
+  x: 1090,
+  z: -330,
+  base: -500,
+  r0: 18,
+  trunk: [
+    [0, 0, 0],
+    [-10, 150, 4],
+    [8, 320, -6],
+    [-40, 470, 0],
+    [-110, 590, 6],
+    [-150, 690, 0],
+  ],
+  branches: [
+    [3, -150, 50, 10],
+    [4, -140, 30, -14],
+    [2, -110, 80, 8],
+    [5, -60, 40, 0],
+  ],
+  pads: [
+    [-200, 530, 10, 170, 50],
+    [-260, 500, -6, 140, 44],
+    [-250, 470, 14, 140, 44],
+    [-160, 660, -10, 150, 48],
+    [-220, 620, 6, 130, 42],
+    [-150, 730, 0, 120, 40],
+    [-90, 590, -8, 110, 40],
+  ],
+  side: 1,
+};
+
+/** The same tree rooted lower: the crown keeps its place in the world and the
+ *  trunk runs down to the new root. */
+export function rerootPine(p: PineSpec, base: number): PineSpec {
+  const d = p.base - base;
+  return {
+    ...p,
+    base,
+    trunk: p.trunk.map(([x, y, z], i) => (i === 0 ? [x, y, z] : [x, y + d, z])),
+    pads: p.pads.map(([x, y, z, w, h]) => [x, y + d, z, w, h]),
+  };
+}
+/** A smaller copy of a tree, mirrored in x when `mirror` is true, at a root. */
+export function scalePine(p: PineSpec, x: number, z: number, base: number, s: number, mirror: boolean, side = 0): PineSpec {
+  const m = mirror ? -1 : 1;
+  return {
+    x,
+    z,
+    base,
+    r0: p.r0 * Math.max(0.6, s),
+    trunk: p.trunk.map(([dx, dy, dz]) => [dx * s * m + 0, dy * s, dz * s + 0]),
+    branches: p.branches.map(([i, ex, ey, ez]) => [i, ex * s * m, ey * s, ez * s]),
+    pads: p.pads.map(([dx, dy, dz, w, h]) => [dx * s * m, dy * s, dz * s, w * s, h * s]),
+    side,
+  };
+}
+
+/** The two framing pines, rooted on their banks. */
+export const FRAME_PINES: readonly PineSpec[] = [
+  rerootPine(FRAME_LEFT, groundAt(FRAME_LEFT.x, FRAME_LEFT.z)),
+  rerootPine(FRAME_RIGHT, groundAt(FRAME_RIGHT.x, FRAME_RIGHT.z)),
+];
+
+/** The middle ground: groups of smaller pines on the reed bank, on two shore
+ *  banks, and on the first ridge's crest, at a range of sizes. Placed so none
+ *  crosses the title block, the search rail, the Style card, the pose control,
+ *  or the map body at the home view (tests/landscape.test.ts). */
+export interface MidPineSite {
+  x: number;
+  z: number;
+  /** The root height, or null to read it from the banks. */
+  y: number | null;
+  s: number;
+  mirror: boolean;
+  side: number;
+}
+const ridgeSite = (azDeg: number, s: number, mirror: boolean): MidPineSite => {
+  const th = azDeg * DEG;
+  const R = RINGS[0].R - 12;
+  return { x: R * Math.sin(th), z: -R * Math.cos(th), y: ridgeHeight(RINGS[0], th) - 14, s, mirror, side: azDeg < -30 ? -1 : 0 };
+};
+export const MID_PINE_SITES: readonly MidPineSite[] = [
+  // On the reed bank's flat top, behind the reeds.
+  { x: -1018, z: -934, y: null, s: 0.4, mirror: true, side: -1 },
+  // A pair on the first ridge's crest, at the left edge, in front of Fuji's foot.
+  ridgeSite(-58, 0.34, false),
+  ridgeSite(-61.5, 0.24, false),
+  // A shore bank behind the left of the home view (seen on orbit).
+  { x: -1170, z: 430, y: null, s: 0.62, mirror: false, side: 0 },
+  // A shore bank behind the right of the home view (seen on orbit).
+  { x: 1080, z: 560, y: null, s: 0.55, mirror: true, side: 0 },
+  // One on the first ridge's crest, right side, seen on orbit.
+  ridgeSite(98, 0.38, true),
+];
+export const MID_PINES: readonly PineSpec[] = MID_PINE_SITES.map((st, i) =>
+  scalePine(i % 2 === 0 ? FRAME_LEFT : FRAME_RIGHT, st.x, st.z, st.y ?? groundAt(st.x, st.z), st.s, st.mirror, st.side),
+);
+
+export const PINES: readonly PineSpec[] = [...FRAME_PINES, ...MID_PINES];
+
+/** The reed bank's blades: their roots spread over the flat top of its mound. */
 export const REEDS = {
   count: 150,
-  x: -745,
-  z: -210,
-  halfX: 110,
-  halfZ: 45,
-  /** Root height (the bank) and blade heights. */
-  y: -372,
+  /** The bank the reeds grow from (BANKS[0]), and the share of its half-axes
+   *  they cover. */
+  bank: 0,
+  spread: 0.46,
+  /** Blade heights. */
   h0: 60,
   h1: 112,
   /** Share of stems that carry a drooping panicle. */
@@ -131,15 +262,21 @@ export interface ReedBlade {
   seed: number;
 }
 export function reedBlade(i: number): ReedBlade {
+  const b = BANKS[REEDS.bank];
   const u = lhash(601, i) * 2 - 1;
   const v = lhash(602, i) * 2 - 1;
   // Denser and taller toward the bank's middle.
   const mid = 1 - Math.abs(u);
   const kind = lhash(605, i) < REEDS.panicle ? 1 : 0;
+  const lu = u * b.rx * REEDS.spread;
+  const lv = v * b.rz * REEDS.spread * Math.sqrt(Math.max(0, 1 - u * u));
+  const x = b.x + lu * Math.cos(b.rot) - lv * Math.sin(b.rot);
+  const z = b.z + lu * Math.sin(b.rot) + lv * Math.cos(b.rot);
   return {
-    x: REEDS.x + u * REEDS.halfX,
-    y: REEDS.y + lhash(603, i) * 12,
-    z: REEDS.z + v * REEDS.halfZ,
+    x,
+    // Rooted a little into the bank, so no stem floats.
+    y: groundAt(x, z) - 4,
+    z,
     h: (REEDS.h0 + (REEDS.h1 - REEDS.h0) * lhash(604, i)) * (0.75 + 0.25 * mid),
     w: kind === 1 ? 3.2 : 4 + 3 * lhash(606, i),
     // Most blades lean the same way (the wind), a few cross.
@@ -192,28 +329,38 @@ export interface FloraSample {
   hh: number;
   kind: "trunk" | "pad" | "reed";
   side: number;
+  /** The framing pines, the middle-ground pines, or the reeds. */
+  group: "frame" | "mid" | "reed";
 }
-/** Points that bound every visible framing element (trunks above their fade,
- *  pads, reed tips and roots above the fade), for the placement tests. */
+/** Points that bound every visible framing element (trunks above their soft
+ *  base, sampled along each segment, branch ends, pads, reed tips and stems),
+ *  for the placement tests. */
 export function floraSamples(): FloraSample[] {
   const out: FloraSample[] = [];
-  for (const p of PINES) {
-    for (const [dx, dy, dz] of p.trunk) {
-      if (dy < FLORA_FADE * 0.5) continue;
-      out.push({ x: p.x + dx, y: p.base + dy, z: p.z + dz, hw: p.r0, hh: 0, kind: "trunk", side: p.side });
+  PINES.forEach((p, pi) => {
+    const group = pi < FRAME_PINES.length ? "frame" : "mid";
+    for (let k = 1; k < p.trunk.length; k++) {
+      const [ax, ay, az] = p.trunk[k - 1];
+      const [bx, by, bz] = p.trunk[k];
+      for (let j = 0; j <= 6; j++) {
+        const t = j / 6;
+        const dy = ay + (by - ay) * t;
+        if (dy < FLORA_FADE) continue;
+        out.push({ x: p.x + ax + (bx - ax) * t, y: p.base + dy, z: p.z + az + (bz - az) * t, hw: p.r0, hh: 0, kind: "trunk", side: p.side, group });
+      }
     }
     for (const [ti, ex, ey, ez] of p.branches) {
       const [dx, dy, dz] = p.trunk[ti];
-      out.push({ x: p.x + dx + ex, y: p.base + dy + ey, z: p.z + dz + ez, hw: 6, hh: 0, kind: "trunk", side: p.side });
+      out.push({ x: p.x + dx + ex, y: p.base + dy + ey, z: p.z + dz + ez, hw: 6, hh: 0, kind: "trunk", side: p.side, group });
     }
     for (const [dx, dy, dz, w, h] of p.pads) {
-      out.push({ x: p.x + dx, y: p.base + dy, z: p.z + dz, hw: w / 2, hh: h / 2, kind: "pad", side: p.side });
+      out.push({ x: p.x + dx, y: p.base + dy, z: p.z + dz, hw: w / 2, hh: h / 2, kind: "pad", side: p.side, group });
     }
-  }
+  });
   for (let i = 0; i < REEDS.count; i++) {
     const b = reedBlade(i);
-    out.push({ x: b.x, y: b.y + b.h, z: b.z, hw: b.h * 0.35, hh: 4, kind: "reed", side: -1 });
-    out.push({ x: b.x, y: b.y + b.h * 0.3, z: b.z, hw: 4, hh: 4, kind: "reed", side: -1 });
+    out.push({ x: b.x, y: b.y + b.h, z: b.z, hw: b.h * 0.35, hh: 4, kind: "reed", side: -1, group: "reed" });
+    out.push({ x: b.x, y: b.y + b.h * 0.3, z: b.z, hw: 4, hh: 4, kind: "reed", side: -1, group: "reed" });
   }
   return out;
 }
@@ -274,7 +421,7 @@ export function buildPineTrunks(): THREE.BufferGeometry {
   for (const p of PINES) {
     const pts = p.trunk.map(([dx, dy, dz]) => new THREE.Vector3(p.x + dx, p.base + dy, p.z + dz));
     // The trunk starts below the root so its base dissolves.
-    pts.unshift(new THREE.Vector3(p.x, p.base - 60, p.z));
+    pts.unshift(new THREE.Vector3(p.x, p.base - 20, p.z));
     tube(pts, p.r0 * 1.15, p.r0 * 0.4, 40, 9, p.base, p.side, pos, nor, mark, idx);
     for (const [ti, ex, ey, ez] of p.branches) {
       const a = pts[ti + 1];
@@ -343,6 +490,46 @@ export function buildReeds(): THREE.InstancedBufferGeometry {
   return g;
 }
 
+/** Every bank in one indexed geometry: rings of an ellipse, with the height
+ *  from bankProfile. aBank: (height above the water, elliptical radius). */
+export function buildBanks(): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const att: number[] = [];
+  const idx: number[] = [];
+  const NR = 14;
+  const NS = 64;
+  for (const b of BANKS) {
+    const start = pos.length / 3;
+    const c = Math.cos(b.rot);
+    const sn = Math.sin(b.rot);
+    for (let i = 0; i <= NR; i++) {
+      const u = i / NR;
+      for (let j = 0; j <= NS; j++) {
+        const a = (j / NS) * TAU;
+        const lu = u * b.rx * Math.cos(a);
+        const lv = u * b.rz * Math.sin(a);
+        const x = b.x + lu * c - lv * sn;
+        const z = b.z + lu * sn + lv * c;
+        const y = bankProfile(b, Math.min(u, 0.9999));
+        pos.push(x, u >= 1 ? FLOOR_Y : y, z);
+        att.push((u >= 1 ? FLOOR_Y : y) - FLOOR_Y, u);
+      }
+    }
+    for (let i = 0; i < NR; i++) {
+      for (let j = 0; j < NS; j++) {
+        const a = start + i * (NS + 1) + j;
+        const d = a + NS + 1;
+        idx.push(a, a + 1, d, a + 1, d + 1, d);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("aBank", new THREE.Float32BufferAttribute(att, 2));
+  g.setIndex(idx);
+  return g;
+}
+
 // ---------------------------------------------------------------------------
 // GLSL
 
@@ -399,7 +586,7 @@ export const TRUNK_FRAG = /* glsl */ `
     float outline = 1.0 - smoothstep(0.12, 0.32, abs(dot(N, V)));
     col = mix(col, uBark * 0.55, outline * 0.6);
     // The base dissolves into the field.
-    float a = smoothstep(-40.0, ${f(FLORA_FADE)}, vMark.z) * uOpacity * vFade;
+    float a = smoothstep(-12.0, ${f(FLORA_FADE)}, vMark.z) * uOpacity * vFade;
     if (a < 0.01) discard;
     gl_FragColor = vec4(col, a);
   }
@@ -572,7 +759,37 @@ export const REED_FRAG = /* glsl */ `
     // Blades thinner than a pixel keep their line and thin their ink.
     a *= clamp(1.0 / fw, 0.35, 1.0);
     vec3 col = mix(uStem, uPlume, vKind * smoothstep(0.68, 0.76, vUv.y));
-    a *= smoothstep(0.0, 0.3, vUv.y) * uOpacity * vFade;
+    a *= smoothstep(0.0, 0.06, vUv.y) * uOpacity * vFade;
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(col, a);
+  }
+`;
+
+export const BANK_VERT = /* glsl */ `
+  attribute vec2 aBank;
+  varying vec2 vBank;
+  void main() {
+    vBank = aBank;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+export const BANK_FRAG = /* glsl */ `
+  uniform vec3 uBank;
+  uniform vec3 uBankTop;
+  uniform vec3 uStrip;
+  uniform float uOpacity;
+  varying vec2 vBank;
+  float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  void main() {
+    float h = vBank.x;
+    // Flat bokashi: the top a shade lighter, the body, then the dark strip of
+    // bank at the waterline (a hard print edge, anti-aliased).
+    vec3 col = mix(uBank, uBankTop, smoothstep(0.2, 0.9, 1.0 - vBank.y));
+    float fh = max(fwidth(h), 1e-3);
+    float strip = clamp((${f(BANK_STRIP)} - h) / fh + 0.5, 0.0, 1.0);
+    col = mix(col, uStrip, strip);
+    // The bank's very foot melts into the water over a few units.
+    float a = smoothstep(0.0, 3.0, h + 1.0) * uOpacity;
     if (a < 0.01) discard;
     gl_FragColor = vec4(col, a);
   }
