@@ -778,32 +778,41 @@ landscape stay off at style 5 (`isHangaField`).
 - **Snow slope.** A gentle dome of paper under the map with faint wind drifts
   toward the rim, three wandering grey hairlines that draw the slope's shape,
   and ink marks (small pines, reed tufts, rocks) along its far edge.
-- **Temple (round 3).** Low-poly geometry in plan units (front terrace 100
-  wide), drawn as an ink drawing in three weights: HEAVY roof lines (eaves,
-  hips, ridges; 1.35 world units), MEDIUM wall, terrace, and stair lines (0.7
-  world units; widths in world units, so near edges print heavier), and
-  HAIRLINE ruled lines (a few broken courses of ashlar, posts, railings,
-  nosings; 1 px at 0.32 opacity). Fills are paper tones shaded by one light;
-  walls (#d9d4ca), soffits, and stone carry a mottled wet-ink wash. The
-  boulder base is a strip of rounded ink-wash stones drawn as an SDF of
-  overlapping ovals, each with a wet dark edge and a paper highlight, with no
-  facets. Cheongungyo (16 steps) and Baegungyo (18) climb to Jahamun, with the
-  arch under the lower flight; Yeonhwagyo (10) and Chilbogyo (8) climb to
-  Anyangmun; Beomyeongnu is raised on its stacked stone pillar; corridors
-  enclose the court; Daeungjeon is raised on its platform with Seokgatap
-  (plain, three stories) to the west and Dabotap (stair base, pillars,
-  octagonal balcony, lotus tier) to the east; Museoljeon closes the back;
-  Geungnakjeon sits in the west court. Every roof is snow: lifted corners,
-  deep ridge and hip-end heaps, a deep eave lip with a dark row of tile ends,
-  a soffit in shadow, and a faint muted dancheong band. Scale 5.53 world units
-  per plan unit, heights at 0.5 and depths at 0.45 of it (the raised
-  viewpoint), centre x -130, front face at z 300, ground y -255: the front
-  spans about 60% of the frame width at the home view. At 1440x900 the main
-  hall's ridge prints at y 745 (33 px under the lowest etch label, 712), the
-  hall spans x 617 to 799 (left of the Style card, 886), and the terrace foot
-  prints at y 840 (above the filter rail, 844). At 1280x720 the hall ends at
-  x 706 (left of the Style card, 726). Tests hold each of these. Five draw
-  calls.
+- **Temple (round 4).** Low-poly geometry in plan units (front terrace 100
+  wide), painted in ink in three weights: HEAVY wet-ink lines on the roofs,
+  the lower terrace, and the stair arches (1.8 world units), MEDIUM wall,
+  upper terrace, and stair lines (0.85), and HAIRLINE ashlar hints, posts,
+  railings, and nosings (1 px at 0.36 opacity). Widths are in world units,
+  so near edges print heavier. Every ruled line is brushed: runs break into
+  strokes (heavy 12 to 24 plan units, medium 7 to 18, hairline 3 to 9) with
+  small gaps, each stroke has its own ink tone, and the dry ones lose their
+  tails now and then. No stroke is longer than 24 plan units, under a third
+  of the frame (a test). Walls carry a mottled grey wash that pools darker
+  under each eave. Snow is reserved paper with a heap on every ridge and hip
+  end, a dark row of tile ends under each lip, and a soffit in shadow; a
+  faint dancheong band sits under it. The boulder base is the round 3 SDF
+  strip of ink-wash ovals. Aerial perspective: fills and strokes behind plan
+  z -20 pale toward the paper (fills by up to 0.28, stroke ink by up to
+  0.35), so Museoljeon and the far corridor print paler than the front
+  terrace (a test on the stroke tones). Cheongungyo (16 steps) and Baegungyo
+  (18) climb to Jahamun, with the arch under the lower flight in wet ink;
+  Yeonhwagyo (10) and Chilbogyo (8) climb to Anyangmun; Beomyeongnu is raised
+  on its stacked stone pillar; corridors enclose the court; Daeungjeon is
+  raised on its platform with Seokgatap and Dabotap in front of it, printed
+  at 1.6x (painter's licence, so they read as subjects); Museoljeon closes
+  the back; Geungnakjeon sits in the west court. Scale 9.23 world units per
+  plan unit, heights at 0.4 and depths at 0.32 of it, Daeungjeon's axis on
+  the frame's centre line (x -203), front face at z 380, ground y -255: the
+  front spans about 1.15 of the frame width at the home view and runs past
+  both edges. The one placement rule (tests): the main hall's ridge prints
+  44, 39, and 26 px under the lowest grade etch label at 1440x900, 1280x720,
+  and 1024x600, and no part of the complex prints within 20 px of the
+  labels. The search row, the filter rail, and the Style card cross the
+  temple, as a frame crosses a print. Five draw calls.
+- **Snowfield in front of the terrace.** 34 ink marks (small pines and reed
+  tufts, the slope's mark shader) between world z 404 and 640, and a path
+  from the stair foot toward the viewer as two broken grey tracks that widen
+  as they come near.
 - **Pines (round 2).** Painted, not modeled. Trunks and limbs are smooth
   tapered tubes inked in the fragment shader: a wet-ink edge from the facing
   ratio (no facets), a paler core, and plated bark as short thin dark dashes
@@ -836,8 +845,8 @@ landscape stay off at style 5 (`isHangaField`).
   azimuth, so it moves with orbit like ink on the sheet.
 - **Motion.** Quiet (a story or a focus) fades the birds over 2 s. Reduced
   motion freezes the snow and hides the birds. Nothing pulses in brightness.
-- **Cost.** At the 1440x900 home view Bulguksa draws 107 calls and 311,623
-  triangles (Washi: 101 and 269,177); the world alone is 18 draws.
+- **Cost.** At the 1440x900 home view Bulguksa draws 109 calls and 312,687
+  triangles (Washi: 101 and 269,177); the world alone is 20 draws.
 - **Study.** Open-access study only (Commons CC0, PD, and Creative Commons
   photographs and the site plan; Cleveland CC0 paintings; exhibition text for
   Park Dae-sung). Nothing from the study is embedded; everything is procedural.
